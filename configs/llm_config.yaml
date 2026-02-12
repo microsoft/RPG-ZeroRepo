@@ -1,0 +1,15 @@
+# LLM Configuration
+#
+# The model name can be overridden via --model CLI arg.
+
+model: gpt-4o
+provider: openai
+temperature: 0.0
+max_tokens: 16134
+top_p: 1.0
+
+api_key: ""
+# base_url: ""
+# api_version: ""
+# tenant_id: ""
+# token_scope: ""

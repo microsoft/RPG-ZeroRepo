@@ -1,0 +1,21 @@
+# Skeleton Designer Configuration
+
+# Raw Skeleton Agent Configuration
+raw_skeleton:
+  max_steps: 5
+  max_retry: 3
+  max_review_times: 0
+  design_context_window: 10
+  review_context_window: 10
+
+# Group Skeleton Agent Configuration  
+group_skeleton:
+  max_steps: 20
+  max_retry: 3
+  max_review_times: 0
+  design_context_window: 20
+  review_context_window: 10
+
+# General Configuration
+general:
+  log_level: INFO

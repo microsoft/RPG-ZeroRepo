@@ -1,0 +1,95 @@
+{
+  "Assumption System": {
+    "Assumption Declaration": [],
+    "Predicate Inference": [],
+    "Non-Assumption Properties": []
+  },
+  "Input and Symbol Management": {
+    "Parsing and Input": [],
+    "Symbol Management": []
+  },
+  "Symbolic Logic and Substitution": {
+    "Symbolic Boolean Expressions": [
+      "Symbolic inequalities",
+      "Relational expression trees",
+      "Deferred expression logic",
+      "Symbolic substitution"
+    ],
+    "Boolean Use Cases": []
+  },
+  "Expression Simplification and Manipulation": {
+    "Algebraic Simplification": [],
+    "Canonicalization and Rewriting": [],
+    "Pattern Matching and Substitution": [],
+    "Expression Transformation and Expansion": []
+  },
+  "Equation Solving": {
+    "System of Equations": [
+      "Linear system solving",
+      "Support symbolic parameters",
+      "Multiple unknowns support",
+      "Various output formats"
+    ],
+    "Polynomial Equations": [
+    ],
+    "Matrix Equations": [
+    ],
+    "Inequality Solving": [
+    ],
+    "Diophantine Equations": [
+    ],
+    "Numerical Solving": [
+      "Find numeric roots",
+      "Realcomplex solutions",
+      "Requires initial guess",
+      "Arbitrary precision support"
+    ],
+    "Differential Equations": [
+      "Solve ODE systems",
+      "Initialboundary conditions",
+      "Implicit or explicit output",
+      "Multi-function systems"
+    ]
+  },
+  "Mathematical Analysis": {
+    "Calculus": [
+    ],
+    "Transformations": [
+    ],
+    "Series and Limits": [
+    ],
+    "Expression Evaluation": [
+    ]
+  },
+  "Combinatorics and Abstract Algebra": {
+    "Group Theory": [],
+    "Enumerative Tools": []
+  },
+  "Geometry": {
+    "Core Objects": [],
+    "Transformations": []
+  },
+  "Physics Modules": {
+    "Classical Mechanics": [],
+    "Continuum Mechanics": [],
+    "Control Systems": [],
+    "High-Energy Physics": [],
+    "Quantum Mechanics": [],
+    "Units and Dimensionality": []
+  },
+  "Statistics and Probability": {
+    "Random Variables": [],
+    "Symbolic Sampling": []
+  },
+  "Code and Output": {
+    "Code Generation": [
+      "codegen"
+    ],
+    "Printing and Formatting": [
+      "printing"
+    ],
+    "Plotting": [
+      "plotting"
+    ]
+  }
+}

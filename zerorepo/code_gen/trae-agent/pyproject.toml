@@ -1,0 +1,102 @@
+[project]
+name = "trae-agent"
+version = "0.1.0"
+description = "LLM-based agent for general purpose software engineering tasks"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "openai>=1.86.0",
+    "anthropic>=0.54.0,<=0.60.0",
+    "click>=8.0.0",
+    "google-genai>=1.24.0",
+    "jsonpath-ng>=1.7.0",
+    "pydantic>=2.0.0",
+    "python-dotenv>=1.0.0",
+    "rich>=13.0.0",
+    "typing-extensions>=4.0.0",
+    "ollama>=0.5.1",
+    "socksio>=1.0.0",
+    "tree-sitter-languages==1.10.2",
+    "tree-sitter==0.21.3",
+    "ruff>=0.12.4",
+    "mcp==1.12.2",
+    "asyncclick>=8.0.0",
+    "pyyaml>=6.0.2",
+    "textual>=0.50.0",
+    "pyinstaller==6.15.0",
+    "azure-identity>=1.17.0"
+]
+
+[project.optional-dependencies]
+test = [
+    "pytest>=8.0.0",
+    "pytest-asyncio>=0.23.0",
+    "pytest-mock>=3.12.0",
+    "pytest-cov>=4.0.0",
+    "pre-commit>=4.2.0",
+]
+evaluation = [
+    "datasets>=3.6.0",
+    "docker>=7.1.0",
+    "pexpect>=4.9.0",
+    "unidiff>=0.7.5",
+]
+
+[project.scripts]
+trae-cli = "trae_agent.cli:main"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["trae_agent"]
+
+[tool.pytest.ini_options]
+minversion = "6.0"
+addopts = "-ra -q --strict-markers"
+testpaths = [
+    "tests",
+]
+asyncio_mode = "auto"
+markers = [
+    "slow: marks tests as slow (deselect with '-m \"not slow\"')",
+    "integration: marks tests as integration tests",
+    "unit: marks tests as unit tests",
+]
+
+[tool.coverage.run]
+source = ["trae_agent"]
+omit = ["tests/*"]
+
+[tool.coverage.report]
+exclude_lines = [
+    "pragma: no cover",
+    "def __repr__",
+    "if self.debug:",
+    "if settings.DEBUG",
+    "raise AssertionError",
+    "raise NotImplementedError",
+    "if 0:",
+    "if __name__ == .__main__.:",
+    "class .*\\bProtocol\\):",
+    "@(abc\\.)?abstractmethod",
+]
+
+
+[tool.ruff]
+line-length = 100
+
+[tool.ruff.lint]
+select = [
+    "B",
+    "SIM",
+    "C4",
+    "E4", "E9", "E7", "F",
+    "I"
+]
+
+[dependency-groups]
+dev = [
+    "types-pyyaml>=6.0.12.20250516",
+]

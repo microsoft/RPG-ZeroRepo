@@ -1,0 +1,28 @@
+agents:
+    trae_agent:
+        enable_lakeview: false
+        model: trae_agent_model
+        max_steps: 300
+        tools:
+            - bash
+            - str_replace_based_edit_tool
+            - sequentialthinking
+            - task_done
+model_providers:
+    openai:
+        provider: openai
+        api_key: ""
+        # base_url: ""
+        # api_version: ""
+        # tenant_id: ""
+        # token_scope: ""
+models:
+    trae_agent_model:
+        model_provider: openai
+        model: gpt-5-mini-20250807
+        max_completion_tokens: 16134
+        temperature: 0.0
+        top_p: 1
+        top_k: 0
+        max_retries: 10
+        parallel_tool_calls: true

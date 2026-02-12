@@ -1,0 +1,24 @@
+# Configuration for Graph Designer agents
+data_flow:
+  max_steps: 10
+  max_review_times: 0
+  max_retry: 3
+  design_context_window: 30
+  review_context_window: 10
+
+base_classes:
+  max_steps: 10
+  max_review_times: 0
+  max_retry: 3
+  design_context_window: 30
+  review_context_window: 10
+
+interfaces:
+  max_steps: 20
+  max_review_times: 0
+  max_retry: 3
+  design_context_window: 30
+  review_context_window: 10
+
+general:
+  log_level: INFO

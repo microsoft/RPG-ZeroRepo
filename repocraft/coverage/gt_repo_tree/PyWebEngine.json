@@ -1,0 +1,80 @@
+{
+  "Data Modeling and Queries": [
+    "ORM (Models, Fields, Relationships)",
+    "Query System (QuerySets)",
+    "Migrations"
+  ],
+  "Routing and Views": [
+    "Function-Based Views",
+    "Class-Based Views",
+    "Generic Views",
+    "URL Routing & Dispatcher"
+  ],
+  "Templating and Rendering": [
+    "Template Language",
+    "Context System",
+    "Tags and Filters"
+  ],
+  "Form Processing": [
+    "Forms and Validation",
+    "ModelForms",
+    "Formsets",
+    "File Uploads"
+  ],
+  "Authentication and Authorization": [
+    "User Model & Backends",
+    "Permissions & Groups",
+    "Login/Logout"
+  ],
+  "Admin Interface": [
+    "Admin Site",
+    "ModelAdmin Customization",
+    "Inlines and Filters"
+  ],
+  "Request Handling and Middleware": [
+    "Middleware Architecture",
+    "Request/Response Lifecycle",
+    "Session Framework",
+    "Messages Framework"
+  ],
+  "Security and Sessions": [
+    "CSRF Protection",
+    "Session Management",
+    "Cookie Handling"
+  ],
+  "Signals and Extensibility": [
+    "Built-in Signals",
+    "Custom Signals",
+    "AppConfig Hooks"
+  ],
+  "Application Infrastructure": [
+    "App Registry",
+    "ContentTypes Framework",
+    "Lazy Model Resolution"
+  ],
+  "Asynchronous Support": [
+    "Async Views",
+    "ASGI Compatibility",
+    "WebSocket Consumers (Channels)"
+  ],
+  "REST API Support": [
+    "Serializers",
+    "ViewSets & Routers",
+    "Permissions",
+    "Authentication"
+  ],
+  "Geospatial Features": [
+    "Spatial Fields",
+    "GIS Queries"
+  ],
+  "Static and Media Files": [
+    "Static File Serving",
+    "Media File Uploads",
+    "Storage Backends"
+  ],
+  "Internationalization and Localization": [
+    "Translation",
+    "Locale Middleware",
+    "Timezone Support"
+  ]
+}

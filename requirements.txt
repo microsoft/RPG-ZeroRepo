@@ -1,0 +1,99 @@
+# ZeroRepo - Python Dependencies
+
+# Core LLM clients
+openai>=2.14.0
+anthropic>=0.75.0
+google-genai>=1.24.0
+
+# Token counting
+tiktoken>=0.12.0
+
+# Data processing and validation
+pydantic>=2.0.0
+jsonpath-ng>=1.7.0
+pyyaml>=6.0.2
+json5>=0.13.0
+
+# Progress and utilities
+tqdm>=4.67.0
+more-itertools
+click>=8.0.0
+
+# Code analysis and parsing
+tree-sitter==0.21.3
+tree-sitter-languages==1.10.2
+
+# Graph and network
+networkx>=3.0
+
+# Vector database and ML
+numpy
+torch>=2.9.1
+sentence-transformers>=5.2.0
+transformers>=4.57.3
+faiss-cpu>=1.7.0
+scikit-learn>=1.0.0
+
+# Fuzzy string matching
+rapidfuzz>=3.0.0
+
+# Data analysis (used in examples)
+pandas
+
+# HTTP
+requests>=2.28.0
+
+# Container and environment
+docker>=7.1.0
+
+llama-cloud==0.1.4
+llama-index==0.11.22
+llama-index-agent-openai==0.3.4
+llama-index-cli==0.3.1
+llama-index-core==0.11.22
+llama-index-embeddings-azure-openai==0.2.5
+llama-index-embeddings-openai==0.2.5
+llama-index-indices-managed-llama-cloud==0.4.0
+llama-index-legacy==0.9.48.post4
+llama-index-llms-azure-openai==0.2.2
+llama-index-llms-openai==0.2.16
+llama-index-multi-modal-llms-openai==0.2.3
+llama-index-program-openai==0.2.0
+llama-index-question-gen-openai==0.2.0
+llama-index-readers-file==0.2.2
+llama-index-readers-llama-parse==0.3.0
+llama-index-retrievers-bm25==0.4.0
+llama-parse==0.5.13
+
+# JSON serialization
+dataclasses-json>=0.6.0
+
+# Development and testing
+pytest>=8.0.0
+pytest-asyncio>=0.23.0
+pytest-mock>=3.12.0
+pytest-cov>=4.0.0
+ruff>=0.12.4
+
+# CLI and console
+rich>=13.0.0
+textual>=0.50.0
+
+# Authentication and identity
+azure-identity>=1.25.0
+
+# Environment and configuration
+python-dotenv>=1.0.0
+typing-extensions>=4.15.0
+
+# Network and async
+ollama>=0.5.1
+
+# MCP (Model Context Protocol)
+mcp==1.12.2
+
+# Optional evaluation dependencies
+datasets>=3.6.0
+pexpect>=4.9.0
+unidiff>=0.7.5
+pre-commit>=4.2.0

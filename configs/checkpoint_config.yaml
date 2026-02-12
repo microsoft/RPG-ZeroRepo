@@ -1,0 +1,27 @@
+# Checkpoint File Configuration for ZeroRepo
+# This file defines all checkpoint files used throughout the system
+
+checkpoint_files:
+  # Core state files
+  repo_data: "repo_data.json"
+  task_manager_state: "task_manager_state.json"
+  
+  # Design phase files (ImplBuilder)
+  skeleton: "skeleton.json"
+  skeleton_trajectory: "skeleton_traj.json"
+  graph: "graph.json"
+  tasks: "tasks.json"
+  
+  # RPG files - shared across components
+  global_repo_rpg: "global_repo_rpg.json"
+  current_repo_rpg: "cur_repo_rpg.json"
+  
+  # Code generation files (IterativeCodeGenerator)
+  iteration_state: "iteration_state.json"
+  execution_history: "execution_history.json"
+  batch_trajectory: "batch_trajectory.json"
+  
+  # Property level files (PropBuilder)
+  feature_analysis: "feature_analysis.json"
+  refactor_plan: "refactor_plan.json"
+  

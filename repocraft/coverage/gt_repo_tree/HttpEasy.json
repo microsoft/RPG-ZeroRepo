@@ -1,0 +1,61 @@
+{
+  "requests": {
+    "Core Request Features": {
+      "HTTP Method Support": [
+      ],
+      "URL and Query Handling": [
+      ],
+      "Request Body Construction": [
+      ],
+      "Custom Headers": [
+      ]
+    },
+    "Response Handling": {
+      "Response Body Access": [
+      ],
+      "JSON Processing": [
+      ],
+      "Response Metadata": [
+
+      ],
+      "Cookie Handling": [
+      ]
+    },
+    "Session Management": {
+      "Session Persistence": [
+      ],
+      "Session Customization": [
+      ]
+    },
+    "Advanced Configuration": {
+      "Timeouts and Retries": [
+      ],
+      "Redirect Control": [
+      ],
+      "Streaming and Chunking": [
+      ],
+      "Authentication Support": [
+      ],
+      "Event Hooks": [
+      ]
+    },
+    "Security and Transport": {
+      "SSL Verification": [
+      ],
+      "Client Certificates": [
+      ],
+      "Transport Control": [
+      ],
+      "Proxy Support": [
+      ]
+    },
+    "Compliance and Encoding": {
+      "Encoding Handling": [
+      ],
+      "Standards Compliance": [
+      ],
+      "Blocking Behavior": [
+      ]
+    }
+  }
+}

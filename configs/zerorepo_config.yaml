@@ -1,0 +1,72 @@
+# ZeroRepo Main Configuration
+# Complete configuration for the end-to-end ZeroRepo workflow
+
+# ============================================================================
+# LLM Configuration
+# ============================================================================
+llm:
+  model: "gpt-5-mini-20250807"
+  max_tokens: 32268
+  temperature: 0.0
+  reasoning_effort: "medium"
+  provider: "openai"
+  api_key: ""
+  # base_url: ""
+  # api_version: ""
+  # tenant_id: ""
+  # token_scope: ""
+# ============================================================================
+# Property Level Configuration (PropBuilder)
+# ============================================================================
+prop_level:
+  # Feature generation parameters
+  feature_selection:
+    # feature_tree_path, frequency_path, vec_db_path are only required when mode="feature".
+    # In "simple" mode they can be omitted.
+    # feature_tree_path: "./data/seed42-step9001-27000_merged_fea_ori.json"
+    # frequency_path: "./data/seed42-step9001-27000_merged_fea_ori_fre.json"
+    # vec_db_path: "./data/vec_db"
+    mode: "simple"  # "feature" for multi-agent, "simple" for single-agent
+    explore_conditions: [5, 8, 5, 4, 5]
+    select_max_iterations: 2
+    select_context_window: 0
+    temperature: 10
+    overlap_pct: 0
+
+  # Feature refactoring parameters
+  feature_refactoring:
+    refactor_max_iterations: 40
+    refactor_context_window: 0
+
+# ============================================================================
+# Implementation Level Configuration (ImplBuilder)
+# ============================================================================
+impl_level:
+  # File design configuration
+  file_design_cfg_path: "configs/file_design_config.yaml"
+  # Function design configuration  
+  func_design_cfg_path: "configs/func_design_config.yaml"
+
+# ============================================================================
+# Code Generation Configuration (IterativeCodeGenerator)
+# ============================================================================
+code_generation:
+  # Docker configuration
+  docker:
+    enabled: true
+    image: "python-azure-pytest:3.12"
+    container_name: "zerorepo_2"
+    force_rebuild: True
+    workspace: "/tare_workspace"
+
+  # TRAE Agent configuration
+  trae_agent:
+    trae_config: "./configs/trae_config.yaml"
+    max_retries: 3
+    retry_delay: 5  # seconds
+    
+    # Execution parameters
+    max_iterations: 5
+    max_retries_per_workflow: 3
+    workflow_timeout: 1800
+  

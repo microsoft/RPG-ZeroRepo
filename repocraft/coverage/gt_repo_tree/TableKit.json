@@ -1,0 +1,110 @@
+{
+  "Core Data Structures": [],
+  "Indexing and Selection": {
+    "Access Methods": [],
+    "Row and Column Operations": [],
+    "Basic Indexing": [],
+    "Advanced Indexing": [],
+    "Setting Data": [],
+    "Index Objects": [],
+    "Random and Conditional Selection": [],
+    "Duplication Handling": []
+  },
+  "Data Types and Dtypes Support": {
+    "Nullable Integer": [],
+    "Nullable Boolean": [],
+    "Categorical Data": []
+  },
+  "Data Alignment and Arithmetic": {
+    "Label Alignment": [],
+    "Arithmetic Operations": []
+  },
+  "Missing Data Handling": {
+    "Missing Value Types": [],
+    "Detection": [],
+    "Propagation": [],
+    "Insertion": [],
+    "Computation": [],
+    "Filling": [],
+    "Interpolation": []
+  },
+  "IO Tools": {
+    "Text Formats": [
+      "Readwrite CSV",
+      "Readwrite JSON",
+      "HTML table parsing",
+      "Normalize nested JSON"
+    ],
+    "Spreadsheet Formats": [
+      "Excel file support",
+      "ODS file support",
+      "Binary Excel engine",
+      "Calamine engine support"
+    ],
+    "Database Interfaces": [
+      "SQL database support"
+    ]
+  },
+  "Merge, Join, Concatenate and Compare": {
+    "Concat": [],
+    "Merge": [],
+    "Join": [],
+    "Combine First": []
+  },
+  "Reshaping and Pivoting": {
+    "Pivoting": [],
+    "Stacking and Unstacking": [],
+    "Melting and Long Format": [],
+    "Dummy Variables": [],
+    "Exploding Lists": [],
+    "Cross Tabulation": [],
+    "Categorical Binning": [],
+    "Encoding Labels": []
+  },
+  "Text and String Operations": {
+    "String Access and Manipulation": [],
+    "Advanced String Operations": [],
+    "String Indexing": [],
+    "Comparison and Search": [],
+    "Unicode and Normalization": [],
+    "Text Length and Padding": [],
+    "String Validation": []
+  },
+  "GroupBy and Aggregation": {
+    "GroupBy Basics": [],
+    "GroupBy Operations": [],
+    "Aggregation": [],
+    "Transformation": [],
+    "Filtration": [],
+    "Group Enumeration": [],
+    "Advanced Grouping": [],
+    "Performance and Misc": []
+  },
+  "Window Functions": {
+    "Windowing Operation Types": [],
+    "Rolling Window Features": [],
+    "Windowing with GroupBy": [],
+    "Binary Window Functions": [],
+    "Custom Indexers": []
+  },
+  "Time Series Handling": {
+    "Time Zone Handling": [],
+    "Creating TZ-aware Timestamps": [],
+    "Working with TZ-aware Data": []
+  },
+  "MultiIndex and Advanced Indexing": {
+    "MultiIndex": [],
+    "CategoricalIndex": [],
+    "RangeIndex": [],
+    "IntervalIndex": [],
+    "Indexing Behavior": []
+  },
+  "Visualization and Plotting": {
+    "Bar and Area Plots": [],
+    "Histogram and Boxplots": [],
+    "Scatter and Bubble Plots": [],
+    "Specialized Plots": [],
+    "Multivariate Plots": [],
+    "Plot Styling and Layout": []
+  }
+}

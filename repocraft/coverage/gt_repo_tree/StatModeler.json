@@ -1,0 +1,142 @@
+{
+  "Regression and Linear Models": {
+    "Linear Regression (OLS)": {},
+    "Weighted Least Squares (WLS)": {},
+    "Generalized Least Squares (GLS)": {},
+    "Robust Linear Models (RLM)": {},
+    "Quantile Regression": {},
+    "Generalized Linear Models (GLM)": {},
+    "Generalized Estimating Equations (GEE)": {},
+    "Generalized Additive Models (GAM)": {},
+    "ANOVA (Analysis of Variance)": {},
+    "Linear Mixed Effects Models (LME)": {},
+    "Generalized Linear Mixed Effects Models (GLMM)": {},
+    "Regression with Discrete Dependent Variable": {
+      "Logit Model": {},
+      "Probit Model": {},
+      "Poisson Regression": {},
+      "Negative Binomial Regression": {},
+      "Multinomial Logit/Probit": {},
+      "Ordered Logit/Probit": {}
+    }
+  },
+  "Time Series Analysis": {
+    "Classical Time Series Models": {
+      "AR, MA, ARMA": {},
+      "ARIMA, SARIMA": {},
+      "Seasonal Decomposition (STL, classical)": {}
+    },
+    "State Space Models": {
+      "Unobserved Components Model": {},
+      "Structural Time Series Models": {},
+      "Dynamic Factor Models": {},
+      "Dynamic Regression Models": {}
+    },
+    "Vector Autoregressions": {
+      "VAR": {},
+      "VARMAX": {},
+      "VECM": {}
+    },
+    "Time Series Filters": {
+      "Hodrick-Prescott Filter": {},
+      "Baxter-King Filter": {},
+      "Christiano-Fitzgerald Filter": {}
+    },
+    "Time Series Diagnostic Tools": {
+      "ACF and PACF": {},
+      "Ljung-Box Test": {},
+      "Durbin-Watson Test": {},
+      "ADF Test (unit root)": {}
+    }
+  },
+  "Other Models and Methods": {
+    "Survival and Duration Analysis": {
+      "Kaplan-Meier Estimator": {},
+      "Cox Proportional Hazards Model": {}
+    },
+    "Nonparametric Methods": {
+      "Kernel Density Estimation": {},
+      "Lowess Smoothing": {}
+    },
+    "Generalized Method of Moments (GMM)": {},
+    "Multivariate Statistics": {
+      "MANOVA": {},
+      "Canonical Correlation": {},
+      "Discriminant Analysis": {},
+      "Principal Component Analysis (PCA)": {},
+      "Factor Analysis": {}
+    },
+    "Panel and Grouped Data Support": {
+      "Cluster-Robust Covariance": {},
+      "Grouped Models via MixedLM": {},
+      "GEE with Grouping": {}
+    }
+  },
+  "Statistical Tests and Diagnostics": {
+    "Model Diagnostics": {
+      "Influence Measures": {},
+      "Outlier Tests": {},
+      "Leverage & Cook's Distance": {},
+      "Variance Inflation Factor (VIF)": {}
+    },
+    "Specification Tests": {
+      "Ramsey RESET Test": {},
+      "White's Test": {},
+      "Breusch-Pagan Test": {},
+      "Goldfeld–Quandt Test": {}
+    },
+    "Assumption Tests": {
+      "Normality Tests (Jarque-Bera, Omnibus)": {},
+      "Autocorrelation Tests (Durbin-Watson, Ljung-Box)": {},
+      "Homoskedasticity Tests": {}
+    },
+    "Hypothesis Testing": {
+      "t-test, F-test, Wald test": {},
+      "Likelihood Ratio Test": {},
+      "Score (LM) Test": {}
+    }
+  },
+  "Statistics and Tools": {
+    "Descriptive Statistics": {},
+    "Contingency Tables and Chi-squared Tests": {},
+    "Multiple Imputation (MICE)": {},
+    "Treatment Effects Estimation": {
+      "Average Treatment Effect (ATE)": {},
+      "Average Treatment on the Treated (ATT)": {}
+    },
+    "Empirical Likelihood": {},
+    "Distributions": {
+      "Empirical Distributions": {},
+      "Mixture Distributions": {},
+      "Box-Cox and Transformed Distributions": {}
+    },
+    "Formula System (Patsy Interface)": {
+      "Categorical Variables": {},
+      "Interaction Terms": {},
+      "Splines and Polynomial Terms": {},
+      "Automatic Dummy Coding": {}
+    },
+    "Prediction and Marginal Effects": {
+      "Predict and Confidence Intervals": {},
+      "Marginal Effects (margins)": {},
+      "Contrast Specification": {}
+    },
+    "Graphics and Visualization": {
+      "Model Fit Plots": {},
+      "QQ and PP Plots": {},
+      "Influence and Leverage Plots": {},
+      "Partial Regression Plots": {},
+      "Residual Plots": {},
+      "ACF/PACF Plots": {},
+      "Time Series Diagnostic Plots": {}
+    },
+    "Simulation and Data Utilities": {
+      "Bootstrap Resampling": {},
+      "Jackknife Resampling": {}
+    },
+    "Working with Large Datasets": {
+      "Chunked Estimation": {},
+      "Memory-Efficient Algorithms": {}
+    }
+  }
+}

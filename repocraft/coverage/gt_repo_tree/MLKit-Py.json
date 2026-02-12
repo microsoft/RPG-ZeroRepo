@@ -1,0 +1,92 @@
+{
+  "Supervised learning": {
+    "Linear Models": [
+    ],
+    "Kernel ridge regression": [
+    ],
+    "Support Vector Machines": {
+      "SVC": [],
+      "SVR": [],
+      "OneClassSVM": []
+    },
+    "Nearest Neighbors": [],
+    "Gaussian Processes": [],
+    "Cross decomposition": [],
+    "Naive Bayes": [],
+    "Decision Trees": [],
+    "Ensembles": [
+    ],
+    "Multiclass and multioutput algorithms": [],
+    "Feature selection": [],
+    "Semi-supervised learning": [
+    ],
+    "Isotonic regression": [
+    ],
+    "Probability calibration": [
+    ],
+    "Neural network models (supervised)": [
+    ]
+  },
+  "Unsupervised learning": {
+    "Gaussian mixture models": [],
+    "Manifold learning": [
+    ],
+    "Clustering": [
+    ],
+    "Biclustering": [
+    ],
+    "Decomposing signals in components (matrix factorization problems)": [
+    ],
+    "Covariance estimation": [
+    ],
+    "Novelty and Outlier Detection": [
+    ],
+    "Density Estimation": [
+    ],
+    "Neural network models (unsupervised)": [
+    ]
+  },
+  "Model selection and evaluation": {
+    "Cross-validation: evaluating estimator performance": [
+    ],
+    "Tuning the hyper-parameters of an estimator": [
+    ],
+    "Validation curves": {
+      "Classification Metrics": [],
+      "Regression Metrics": [
+      ],
+      "Clustering Metrics": [
+      ]
+    }
+  },
+  "Inspection": {
+    "Permutation feature importance": []
+  },
+  "Dataset transformations": {
+    "Feature extraction": {
+      "Feature hashing": [],
+      "Text feature extraction": [],
+      "Image feature extraction": []
+    },
+    "Preprocessing data": {
+      "Scaling and Normalization": [],
+      "Discretization and Binarization": [],
+      "Polynomial and Non-linear Feature Engineering": [
+      ],
+      "Categorical Feature Encoding": [],
+      "Missing Value Imputation": [],
+      "Kernel and Matrix Centering": [
+      ]
+    },
+    "Unsupervised dimensionality reduction": [
+    ],
+    "Random Projection": [
+    ],
+    "Kernel Approximation": [
+    ],
+    "Pairwise metrics, Affinities and Kernels": [
+    ]
+  },
+  "Dataset loading utilities": {},
+  "Model persistence": []
+}
