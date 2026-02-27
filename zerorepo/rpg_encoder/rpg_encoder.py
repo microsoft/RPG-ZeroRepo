@@ -114,7 +114,7 @@ class RPGEncoder:
         elif "nodes" in data:
             # New flat format: top-level keys contain RPG fields directly
             encoder.rpg = RPG.from_dict(data)
-            encoder.feature_tree = []
+            encoder.feature_tree = encoder.rpg.get_functionality_graph() if encoder.rpg else []
         else:
             encoder.feature_tree = []
 

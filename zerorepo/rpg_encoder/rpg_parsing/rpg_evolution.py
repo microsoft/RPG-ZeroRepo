@@ -6,6 +6,7 @@ and updates both the feature tree and the RPG graph incrementally.
 Supports branch switching for major modifications and maintains
 dependency graph index consistency.
 """
+import os
 import time
 import json
 import logging
@@ -290,8 +291,55 @@ class RPGEvolution:
             file2unit={},
         )
 
-        RPGEvolution._log_stage_summary("MODIFIED FILES", update_result, start_time, logger)
-        return {"rpg": ctx["last_rpg"], "summary": update_result}
+        # Filter: only refactor files whose L4 name (_file_summary_) has changed
+        files_to_refactor = {}
+        for file_path, features in file2feature.items():
+            new_summary = features.get(
+                "_file_summary_",
+                os.path.basename(file_path).replace(".py", ""),
+            )
+            for _nid, node in ctx["last_rpg"].nodes.items():
+                if node.meta and node.meta.type_name == NodeType.FILE:
+                    fp = node.meta.path
+                    if isinstance(fp, list):
+                        fp = fp[0] if fp else None
+                    if fp == file_path:
+                        if node.name != new_summary:
+                            logger.info(
+                                f"File summary changed: {file_path}: "
+                                f"'{node.name}' -> '{new_summary}'"
+                            )
+                            files_to_refactor[file_path] = features
+                        else:
+                            logger.info(
+                                f"File summary unchanged, skip refactor: {file_path}"
+                            )
+                        break
+
+        if files_to_refactor:
+            functional_areas = ctx["last_rpg"].get_functional_areas()
+            cur_feature_tree, _, cur_rpg = RefactorTree.refactor_modified_files(
+                parsed_tree=files_to_refactor,
+                existing_feature_tree=ctx.get("last_feature_tree", []),
+                existing_rpg=ctx["last_rpg"],
+                repo_dir=ctx["cur_repo_dir"],
+                repo_name=ctx["repo_name"],
+                repo_info=ctx["repo_info"],
+                repo_skeleton=cur_repo_skeleton,
+                skeleton_info=skeleton_info,
+                functional_areas=functional_areas,
+                context_window=5,
+                max_iters=10,
+                logger=logger,
+                llm_config=llm_config,
+            )
+
+            RPGEvolution._log_stage_summary("MODIFIED FILES", update_result, start_time, logger)
+            return {"rpg": cur_rpg, "feature_tree": cur_feature_tree, "summary": update_result}
+        else:
+            logger.info("No file summaries changed, skipping refactoring step")
+            RPGEvolution._log_stage_summary("MODIFIED FILES", update_result, start_time, logger)
+            return {"rpg": ctx["last_rpg"], "summary": update_result}
 
     @classmethod
     def process_diff(
@@ -375,7 +423,7 @@ class RPGEvolution:
             repo_name=repo_name,
             llm_config=llm_config
         )
-        if rpg_parser.judge_regenereate_rpg():
+        if getattr(rpg_parser, 'judge_regenereate_rpg', lambda: False)():
             logger.info("♻️ Major changes detected, regenerating RPG...")
             result_rpg, _, _ = rpg_parser.parse_rpg_from_repo(
                 max_repo_info_iters=3,
@@ -442,6 +490,8 @@ class RPGEvolution:
         if modified_result:
             mod_result = cls._process_modified_files(ctx, modified_result, logger, llm_config)
             ctx["last_rpg"] = mod_result["rpg"]
+            if "feature_tree" in mod_result:
+                ctx["last_feature_tree"] = mod_result["feature_tree"]
 
         # Assign feature paths to skeleton file nodes after all processing
         cur_skeleton, _, _ = load_skeleton_from_repo(

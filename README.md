@@ -12,6 +12,7 @@ The pipeline has three sequential phases:
 ## News and Updates
 ---
 - [Coming Soon] An RPG-based plugin for Claude Code is under active development and will be open-sourced once ready.
+- [2026-02-27] 🔥 We have released code of the [RPG-Encoder](zerorepo/rpg_encoder/) and [RepoCraft](repocraft/).
 - [2026-02-12] 🔥 We have open-sourced the ZeroRepo codebase. RPG-Encoder is currently going through the open-source release process and will be released once the process is complete.
 - [2026.02.02] 🔥 Our paper "[Closing the Loop: Universal Repository Representation with RPG-Encoder](https://arxiv.org/abs/2602.02084)" has been released on arXiv.
 - [2026.01.26] 🔥 [RPG-ZeroRepo](https://arxiv.org/abs/2509.16198) has been accepted as a poster at ICLR 2026.
@@ -27,7 +28,8 @@ The pipeline has three sequential phases:
 - [Checkpoint & Resume](#checkpoint--resume)
 - [Intermediate Files Reference](#intermediate-files-reference)
 - [Configuration](#configuration)
-- [Project Structure](#project-structure)
+- [RPG-Encoder](#rpg-encoder) -- RPG extraction, incremental maintenance, and agentic navigation ([detailed docs](zerorepo/rpg_encoder/README.md))
+- [RepoCraft Benchmark](#repocraft-benchmark) -- Benchmark construction and evaluation for repo-level code generation ([detailed docs](repocraft/README.md))
 
 ---
 
@@ -456,6 +458,78 @@ agents:
     max_steps: 300
     tools: [bash, str_replace_based_edit_tool, sequentialthinking, task_done]
 ```
+
+---
+
+## RPG-Encoder
+
+**Module:** `zerorepo/rpg_encoder/`
+**Paper:** *"Closing the Loop: Universal Repository Representation with RPG-Encoder"* ([arXiv:2602.02084](https://arxiv.org/abs/2602.02084))
+
+RPG-Encoder generalizes the Repository Planning Graph (RPG) from a static generative blueprint into a **unified, high-fidelity representation** for existing repositories. It closes the reasoning loop between comprehension and generation through three mechanisms:
+
+| Mechanism | Module | Description |
+|-----------|--------|-------------|
+| **Encoding** | `rpg_parsing/` | Extracts RPG from raw codebases via semantic lifting, structure reorganization, and artifact grounding |
+| **Evolution** | `rpg_parsing/rpg_evolution.py` | Incrementally maintains RPG via commit-level diff parsing, reducing overhead by 95.7% |
+| **Operation** | `rpg_agent/` | Provides a unified agentic interface (SearchNode, FetchNode, ExploreRPG) for structure-aware navigation |
+
+### Quick Start
+
+```bash
+# Parse a repository into RPG
+python parse_rpg.py parse \
+    --repo-dir /path/to/repo \
+    --repo-name myrepo \
+    --save-dir ./output
+
+# Incrementally update after code changes
+python parse_rpg.py update \
+    --repo-dir /path/to/updated/repo \
+    --last-repo-dir /path/to/old/repo \
+    --load-path ./output/rpg_encoder.json \
+    --save-dir ./output
+```
+
+See [`zerorepo/rpg_encoder/README.md`](zerorepo/rpg_encoder/README.md) for detailed documentation.
+
+---
+
+## RepoCraft Benchmark
+
+**Module:** `repocraft/`
+**Paper:** *"RPG: A Repository Planning Graph for Unified and Scalable Codebase Generation"* ([arXiv:2509.16198](https://arxiv.org/abs/2509.16198))
+
+RepoCraft is a benchmark for evaluating **repository-level code generation**, consisting of **1,052 tasks** across 6 real-world Python projects (scikit-learn, pandas, sympy, statsmodels, requests, django). It assesses whether AI agents can generate repositories that are functionally complete, algorithmically correct, and at real-world scale.
+
+| Metric | Description |
+|--------|-------------|
+| **Coverage** | Proportion of reference feature categories covered |
+| **Accuracy** | Pass Rate (unit tests) and Voting Rate (semantic checks) |
+| **Code Statistics** | File count, Lines of Code (LOC), Token count |
+
+### Quick Start
+
+```bash
+# Build benchmark (parse → refactor → sample → generate queries)
+python -m repocraft.benchmark pipeline \
+    --repo_dir /path/to/scikit-learn \
+    --output_dir ./all_results \
+    --repo_name sklearn
+
+# Evaluate a generated repository
+python -m repocraft.run \
+    --tasks_file ./all_results/task_results/sklearn.json \
+    --method_path /path/to/generated/MLKit-Py \
+    --cache_dir ./eval_cache
+
+# Analyze results
+python -m repocraft.evaluation --base-dir ./eval_cache --show-failed
+```
+
+See [`repocraft/README.md`](repocraft/README.md) for the full pipeline documentation.
+
+---
 
 ## Acknowledgements
 We thank the following projects for inspiration and valuable prior work that helped shape this project:

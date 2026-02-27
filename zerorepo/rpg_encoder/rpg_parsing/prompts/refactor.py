@@ -90,6 +90,64 @@ Return **only** the JSON object wrapped exactly as:
 
 
 
+REFACTOR_MODIFIED = """
+You are an expert software architect.
+
+## Goal
+Some files in the repository have been modified and their feature names (L4) have changed.
+Review each file's original placement and decide whether the intermediate path levels (L2, L3)
+should also be adjusted to match the updated functionality.
+
+## Input
+You will receive:
+1. **Functional areas** — the L1 nodes. Do NOT change these.
+2. **Current refactored tree** — the existing architecture (for context).
+3. **Modified files** — a JSON object keyed by each file's original full path (L1/L2/L3/old_L4):
+   - `new_name`: the updated L4 name (mandatory in output).
+   - `features`: the new feature descriptions after modification.
+
+## Decision Rules (priority order)
+For each file, apply the **first** matching rule:
+
+1. **Keep original L2-L3** — if they still semantically fit the updated features, just replace old L4 with new L4. This is the **default and strongly preferred** choice.
+2. **Move to an existing L2-L3 branch** — if the original L2-L3 no longer fit, look at the <current_refactored_tree> and pick an **already-existing** L2/L3 path (under the same L1) that better matches the new features.
+3. **Create new L2-L3 only as last resort** — only if NO existing branch in the tree is a reasonable fit, you may propose new L2-L3 names. This should be rare.
+
+In short: **reuse before creating**. Do not invent new branch names when a suitable path already exists in the tree.
+
+## Path Format (STRICT)
+Every path (both key and value) has **exactly four levels**:
+
+`L1/L2/L3/L4`
+
+- **L1** (functional area): MUST stay the same as the original — do NOT change it.
+- **L2** (category): broader purpose or lifecycle role.
+- **L3** (subcategory): precise specialization or context.
+- **L4** (file name): MUST be the `new_name` provided in the input.
+
+## Naming Rules for L2-L3
+- Use **lowercase English only**.
+- Use **"verb + object"** phrasing (e.g., `load config`, `validate token`).
+- Describe **purpose**, not implementation.
+- Avoid vague labels (`misc`, `core`, `general`, `handle`, `process`).
+
+## Output Format (STRICT)
+Return **only** a JSON object mapping each original path to its new path, wrapped as:
+
+<solution>
+{
+  "L1/old_L2/old_L3/old_L4": "L1/new_L2/new_L3/new_L4",
+  ...
+}
+</solution>
+
+Rules:
+- Every original path from the input must appear exactly once as a key.
+- Values must be valid 4-level paths with the correct `new_name` as L4.
+- If no L2-L3 change is needed, the value path keeps the same L2-L3 with the new L4.
+"""
+
+
 FUNCTIONAL_AREA = """
 You are an expert software architect and repository analyst.
 

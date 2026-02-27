@@ -23,10 +23,8 @@ from zerorepo.utils.api import parse_thinking_output
 from zerorepo.rpg_gen.base.llm_client import LLMClient, LLMConfig, Memory
 from zerorepo.rpg_gen.base.llm_client.message import SystemMessage, UserMessage, AssistantMessage
 
-# 默认模型配置，可以通过环境变量覆盖
 USE_MODEL = os.environ.get("USE_MODEL", "gpt-4.1-20250414")
 
-# 别名映射：将输入文件中的 repository_name 映射到 ground truth 文件名
 REPO_NAME_ALIAS = {
     "requests": "HttpEasy",
     "scikit-learn": "MLKit-Py",
@@ -45,16 +43,11 @@ def normalize_string(s):
 def attach_repo_log_handler(repo_name: str,
                             log_root: str = "repo-logs",
                             level: int = logging.INFO) -> None:
-    """
-    将 logs/<repo_name>.log 附着到根 logger，同时也支持输出到终端。
-    若之前已有别的 repo handler，会先移除之。
-    """
     global _current_repo_handler
 
     root_logger = logging.getLogger()
     root_logger.setLevel(level)
 
-    # 移除旧的文件 handler
     if _current_repo_handler:
         root_logger.removeHandler(_current_repo_handler)
         try:
@@ -62,7 +55,6 @@ def attach_repo_log_handler(repo_name: str,
         finally:
             _current_repo_handler = None
 
-    # 创建新的文件 handler
     os.makedirs(log_root, exist_ok=True)
     log_path = os.path.join(log_root, f"{repo_name}.log")
 
@@ -76,7 +68,6 @@ def attach_repo_log_handler(repo_name: str,
     root_logger.addHandler(file_handler)
     _current_repo_handler = file_handler
 
-    # 添加终端输出 handler（如果尚未添加）
     if not any(isinstance(h, logging.StreamHandler) for h in root_logger.handlers):
         console_handler = logging.StreamHandler()
         console_handler.setFormatter(logging.Formatter(
@@ -90,10 +81,6 @@ def attach_repo_log_handler(repo_name: str,
     
     
 def detach_repo_log_handler() -> None:
-    """
-    在处理完一个 repo 后调用，安全移除并关闭当前的 FileHandler。
-    防止文件句柄泄漏或之后的日志误写。
-    """
     global _current_repo_handler
     if _current_repo_handler:
         root_logger = logging.getLogger()
@@ -106,7 +93,6 @@ def detach_repo_log_handler() -> None:
     
 
 class SubtreeCoverageEvaluator:
-
 
     def __init__(
         self,
@@ -121,7 +107,6 @@ class SubtreeCoverageEvaluator:
         self.model = AutoModel.from_pretrained(model_id, trust_remote_code=True)
         self.model.eval()
 
-        # 初始化 LLM Client
         llm_model = llm_model or USE_MODEL
         self.llm_config = LLMConfig(model=llm_model, max_tokens=16134)
         self.llm_client = LLMClient(config=self.llm_config)
@@ -130,29 +115,31 @@ class SubtreeCoverageEvaluator:
         with torch.no_grad():
             inputs = self.tokenizer(texts, padding=True, truncation=True, return_tensors="pt")
             outputs = self.model(**inputs)
-            embeddings = outputs.last_hidden_state[:, 0]  # 使用 [CLS] 位置向量
+            embeddings = outputs.last_hidden_state[:, 0]
             embeddings = torch.nn.functional.normalize(embeddings, dim=1).cpu().numpy()
         
         return embeddings
     
-        
-    def smart_cluster_with_outlier_filter(self, X, centers=None, outlier_method="isoforest", re_cluster=True):
+            
+    def smart_cluster_with_outlier_filter(self, X, centers=None,
+        outlier_method="isoforest", re_cluster=True
+    ):
         """
-        聚类 + 自适应离群点识别 + 过滤
+        Clustering + adaptive outlier detection + filtering
 
         Args:
-            X (np.ndarray): 原始嵌入数据
-            centers (np.ndarray or None): 初始聚类中心；如果为 None，则自动使用 KMeans++
+            X (np.ndarray): raw embedding data
+            centers (np.ndarray or None): initial cluster centers; if None, use KMeans++ automatically
             outlier_method (str): 'lof' | 'isoforest' | 'ocsvm'
-            re_cluster (bool): 是否在过滤后重新聚类
+            re_cluster (bool): whether to re-cluster after filtering
 
         Returns:
-            dict: 包含干净数据、标签、离群掩码等
+            dict: contains cleaned data, labels, outlier mask, etc.
         """
         X = np.array(X)
         n_samples, n_features = X.shape
 
-        # Step 1: 初始聚类
+        # Step 1: Initial clustering
         if centers is not None:
             centers = np.array(centers)
             k = len(centers)
@@ -172,7 +159,7 @@ class SubtreeCoverageEvaluator:
             kmeans = KMeans(n_clusters=k, init='k-means++', random_state=42)
             labels = kmeans.fit_predict(X)
 
-        # Step 2: 离群点检测
+        # Step 2: Outlier detection
         try:
             if outlier_method == "lof":
                 if n_samples <= 20:
@@ -194,10 +181,10 @@ class SubtreeCoverageEvaluator:
             print(f"[Warning] Outlier detection failed: {e}")
             outlier_mask = np.array([False] * n_samples)
 
-        # Step 3: 剔除离群点
+        # Step 3: Remove outliers
         X_clean = X[~outlier_mask]
 
-        # Step 4: 重新聚类（可选）
+        # Step 4: Re-cluster (optional)
         if re_cluster and len(X_clean) > 0:
             if centers is not None:
                 if len(X_clean) < k:
@@ -262,9 +249,8 @@ class SubtreeCoverageEvaluator:
         
         outlier_mask = result["outlier_mask"]
         
-        # 非离群点
         retained_repo_paths = [p for p, keep in zip(repo_paths, ~outlier_mask) if keep]
-        # 离群点
+
         outlier_repo_paths = [p for p, flag in zip(repo_paths, outlier_mask) if flag]
         retained_repo_paths = [p for p, keep in zip(repo_paths, ~outlier_mask) if keep]
         
@@ -340,7 +326,6 @@ class SubtreeCoverageEvaluator:
                 f"Other Available Group Names:\n{json.dumps(other_keys, indent=1)}"
             )
 
-        # 1. Build system prompt
         if USE_MODEL not in ["gpt-5", "o4-mini-20250416"]:
             sys_prompt = REORGANIZE_PROMPT.format(
                 outlier_tag=self.outlier_tag,
@@ -360,7 +345,6 @@ class SubtreeCoverageEvaluator:
         if USE_MODEL in ["gpt-5", "o4-mini-20250416", "gpt-5.1-chat-20251113"]:
             sys_prompt += "\nPlease avoid excessive thinking; just perform reasonable reasoning and provide the action directly."
 
-        # 2. 使用 Memory 管理对话历史
         memory = Memory(context_window=self.context_window)
         memory.add_message(SystemMessage(content=sys_prompt))
 
@@ -368,13 +352,11 @@ class SubtreeCoverageEvaluator:
         other_keys = [k for k in cluster_result if k not in cur_keys]
         remaining_results = deepcopy({k: cluster_result[k] for k in other_keys})
 
-        # 添加初始用户消息
         memory.add_message(UserMessage(content=build_user_prompt(filter_cluster, other_keys)))
         final_results = deepcopy(cluster_result)
 
         for i in range(max_iterations):
             try:
-                # 使用 LLMClient 生成响应
                 response = self.llm_client.generate(memory)
                 if not response:
                     logging.warning(f"[Iteration {i + 1}] Empty response from LLM")
@@ -382,7 +364,6 @@ class SubtreeCoverageEvaluator:
 
                 logging.info(f"[Iteration {i + 1} Response]: {response}")
 
-                # 添加助手回复到 Memory
                 memory.add_message(AssistantMessage(content=response))
 
                 # Parse and clean response
@@ -555,7 +536,6 @@ class SubtreeCoverageEvaluator:
         assert os.path.exists(input_file), f"Input file {input_file} does not exist."
         assert os.path.exists(gt_dir), f"Ground truth directory {gt_dir} does not exist."
 
-        # 确保输出文件的目录存在
         output_dir = os.path.dirname(output_file)
         if output_dir:
             os.makedirs(output_dir, exist_ok=True)
@@ -567,7 +547,6 @@ class SubtreeCoverageEvaluator:
 
         repo_name = data.get("repository_name", os.path.basename(input_file).replace(".json", ""))
 
-        # 使用别名映射查找 ground truth 文件
         gt_name = REPO_NAME_ALIAS.get(repo_name, repo_name)
         if gt_name != repo_name:
             logging.info(f"Using alias mapping: {repo_name} -> {gt_name}")

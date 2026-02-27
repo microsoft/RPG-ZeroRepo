@@ -35,7 +35,7 @@ from zerorepo.rpg_gen.base.llm_client import (
 )
 from zerorepo.rpg_gen.base.unit import CodeSnippetBuilder
 from zerorepo.utils.logs import setup_logger
-from .prompts import REFACTOR_TREE, FUNCTIONAL_AREA
+from .prompts import REFACTOR_TREE, REFACTOR_MODIFIED, FUNCTIONAL_AREA
 
 class RefactorTree:
     def __init__(
@@ -1040,3 +1040,422 @@ class RefactorTree:
         instance.logger.info("Incremental refactor complete (classmethod).")
 
         return cur_feature_tree, trajectory, instance.rpg
+
+    # =========================================================================
+    # Modified files refactoring
+    # =========================================================================
+
+    def _get_file_feature_paths(self, file_paths: List[str]) -> Dict[str, str]:
+        """Get current feature paths for file nodes in the RPG.
+
+        Returns:
+            Dict mapping file summary name -> feature path string
+        """
+        paths: Dict[str, str] = {}
+        for _nid, node in self.rpg.nodes.items():
+            if node.meta and node.meta.type_name == NodeType.FILE:
+                fp = node.meta.path
+                if isinstance(fp, list):
+                    fp = fp[0] if fp else None
+                if fp and fp in file_paths:
+                    paths[node.name] = node.feature_path()
+        return paths
+
+    def _detach_file_from_feature_tree(self, file_node_id: str):
+        """Detach a file node from its current parent in the feature tree.
+
+        Removes the edge between the file node and its parent DIRECTORY node,
+        but keeps the file node and all its children (unit nodes) intact.
+        """
+        parent_id = self.rpg._parents.get(file_node_id)
+        if not parent_id:
+            return
+
+        # Remove from parent's adjacency list
+        adj = self.rpg._adjacency.get(parent_id, [])
+        if file_node_id in adj:
+            adj.remove(file_node_id)
+
+        # Remove edge
+        self.rpg.edges = [
+            e for e in self.rpg.edges
+            if not (e.src == parent_id and e.dst == file_node_id)
+        ]
+
+        # Remove parent reference
+        if file_node_id in self.rpg._parents:
+            del self.rpg._parents[file_node_id]
+
+    def _build_process_modified_user_prompt(
+        self,
+        *,
+        functional_areas: List,
+        cur_rpg_info: str,
+        modified_files_info: str,
+    ) -> str:
+        return (
+            f"### Functional Areas (L1 — do NOT change):\n"
+            f"<functional_areas>\n{json.dumps(functional_areas)}\n</functional_areas>\n\n"
+            f"### Current Refactored Repository Tree:\n"
+            f"<current_refactored_tree>\n{cur_rpg_info}\n</current_refactored_tree>\n\n"
+            f"### Modified Files:\n"
+            f"<modified_files>\n{modified_files_info}\n</modified_files>\n\n"
+            "For each file above, decide whether its current L2-L3 placement still "
+            "makes sense given the updated features. Return the path mapping as specified."
+        )
+
+    def _validate_modified_action(
+        self,
+        action: Dict,
+        modified_files_input: Dict[str, Dict],
+        functional_areas: List[str],
+    ) -> Tuple[Dict[str, str], str]:
+        """Validate LLM output for modified files.
+
+        Returns:
+            (valid_mapping, feedback_str)
+            - valid_mapping: {old_path: new_path} for correctly mapped files
+            - feedback_str: non-empty if there are issues the LLM should fix
+        """
+        input_keys = set(modified_files_input.keys())
+        valid_fa_set = {fa.strip().lower(): fa for fa in functional_areas}
+        errors = []
+        valid_mapping: Dict[str, str] = {}
+
+        for old_path, new_path in action.items():
+            # Check key exists in input
+            if old_path not in input_keys:
+                errors.append(
+                    f"- Key \"{old_path}\" is not a valid original path. "
+                    f"You must use the exact keys from <modified_files>."
+                )
+                continue
+
+            if not isinstance(new_path, str):
+                errors.append(
+                    f"- Value for \"{old_path}\" must be a string path, "
+                    f"got {type(new_path).__name__}."
+                )
+                continue
+
+            new_parts = new_path.split("/")
+            if len(new_parts) != 4:
+                errors.append(
+                    f"- \"{new_path}\" has {len(new_parts)} levels, expected exactly 4."
+                )
+                continue
+
+            # Check L1 matches original
+            old_parts = old_path.split("/")
+            if new_parts[0] != old_parts[0]:
+                real_l1 = old_parts[0]
+                errors.append(
+                    f"- \"{old_path}\": L1 must stay \"{real_l1}\", "
+                    f"but you wrote \"{new_parts[0]}\"."
+                )
+                continue
+
+            # Check L1 is a valid functional area
+            if new_parts[0].strip().lower() not in valid_fa_set:
+                errors.append(
+                    f"- \"{new_path}\": L1 \"{new_parts[0]}\" is not a recognized "
+                    f"functional area. Valid: {functional_areas}"
+                )
+                continue
+
+            # Check L4 matches the required new_name
+            expected_l4 = modified_files_input[old_path].get("new_name")
+            if expected_l4 and new_parts[3] != expected_l4:
+                errors.append(
+                    f"- \"{old_path}\": L4 must be \"{expected_l4}\" "
+                    f"(the new_name), but you wrote \"{new_parts[3]}\"."
+                )
+                continue
+
+            valid_mapping[old_path] = new_path
+
+        # Check for missing files
+        missing = input_keys - set(action.keys())
+        if missing:
+            errors.append(
+                f"- Missing files (every input key must appear in output): "
+                f"{json.dumps(sorted(missing))}"
+            )
+
+        feedback = ""
+        if errors:
+            feedback = (
+                "Your output has the following issues:\n\n"
+                + "\n".join(errors)
+                + "\n\nPlease fix these issues and return the complete JSON again. "
+                "Remember:\n"
+                "- Keys must be the EXACT original paths from <modified_files>.\n"
+                "- L1 must NOT change from the original.\n"
+                "- L4 must be the `new_name` provided for each file.\n"
+                "- Every input file must appear in the output.\n"
+            )
+
+        return valid_mapping, feedback
+
+    def process_modified_batch(
+        self,
+        functional_areas: List,
+        cur_feature_tree: List[Dict],
+        modified_files_input: Dict[str, Dict],
+        context_window: int = 5,
+        max_iters: int = 3,
+    ) -> Dict[str, str]:
+        """LLM call with feedback loop to decide path adjustments for modified files.
+
+        Args:
+            functional_areas: L1 functional area names.
+            cur_feature_tree: current refactored tree (for context).
+            modified_files_input: {old_L1/L2/L3/L4: {new_name: str, features: [str]}}
+            max_iters: max feedback rounds before accepting partial results.
+
+        Returns:
+            {old_path: new_path} mapping.
+        """
+        cur_rpg_info = get_rpg_info(
+            rpg_tree=cur_feature_tree, omit_leaf_nodes=True, sample_size=0
+        )
+        modified_files_info = json.dumps(
+            modified_files_input, ensure_ascii=False, indent=2
+        )
+
+        user_prompt = self._build_process_modified_user_prompt(
+            functional_areas=functional_areas,
+            cur_rpg_info=cur_rpg_info,
+            modified_files_info=modified_files_info,
+        )
+
+        self.logger.info(
+            f"Calling LLM for {len(modified_files_input)} modified files..."
+        )
+
+        agent_memory = Memory(context_window=context_window)
+        agent_memory.add_message(SystemMessage(REFACTOR_MODIFIED))
+        agent_memory.add_message(UserMessage(user_prompt))
+
+        for it in range(max_iters):
+            action, response = self.step(agent_memory)
+            agent_memory.add_message(AssistantMessage(response))
+
+            valid_mapping, feedback = self._validate_modified_action(
+                action, modified_files_input, functional_areas
+            )
+
+            if not feedback:
+                self.logger.info(
+                    f"All {len(valid_mapping)} files validated on iteration {it + 1}"
+                )
+                return valid_mapping
+
+            self.logger.info(
+                f"Iteration {it + 1}: {len(valid_mapping)} valid, "
+                f"sending feedback to LLM"
+            )
+            agent_memory.add_message(UserMessage(feedback))
+
+        # After max_iters, fill in any remaining files with fallback
+        self.logger.warning(
+            f"Max iterations reached. "
+            f"Valid: {len(valid_mapping)}/{len(modified_files_input)}"
+        )
+        for old_path, info in modified_files_input.items():
+            if old_path not in valid_mapping:
+                old_parts = old_path.split("/")
+                if len(old_parts) == 4:
+                    new_l4 = info.get("new_name", old_parts[3])
+                    fallback = "/".join(old_parts[:3] + [new_l4])
+                    valid_mapping[old_path] = fallback
+                    self.logger.info(
+                        f"Fallback for {old_path}: {fallback}"
+                    )
+
+        return valid_mapping
+
+    @classmethod
+    def refactor_modified_files(
+        cls,
+        parsed_tree: Dict,
+        existing_feature_tree: List[Dict],
+        existing_rpg: RPG,
+        repo_dir: str,
+        repo_name: str,
+        repo_info: str,
+        repo_skeleton: RepoSkeleton,
+        skeleton_info: str,
+        functional_areas: Optional[List[str]] = None,
+        context_window: int = 5,
+        max_iters: int = 10,
+        logger: Optional[logging.Logger] = None,
+        llm_config: Optional[LLMConfig] = None,
+    ) -> Tuple[List[Dict], Dict, RPG]:
+        """
+        Refactor modified files in the RPG.
+
+        Shows the LLM each file's original 4-level feature path (L1/L2/L3/L4)
+        plus its updated features, then lets the LLM decide whether to keep
+        the current L2-L3 placement or adjust it.
+
+        LLM output format: {original_L1/L2/L3/L4: new_L1/L2/L3/new_L4}
+
+        Unlike ``refactor_new_files``, this method does NOT create new file or
+        unit nodes — those should already exist in ``existing_rpg`` (e.g. via
+        ``RPG.update_from_parsed_tree``).  It only re-evaluates *where* the
+        file nodes sit in the feature-tree hierarchy.
+        """
+
+        if logger is None:
+            logger = setup_logger(logging.getLogger(f"RPGRefactorModified[{repo_name}]"))
+
+        logger.info("Starting refactor for modified files...")
+
+        # === Step 1. Create temporary instance ===
+        instance = cls(
+            repo_dir=repo_dir,
+            repo_info=repo_info,
+            repo_skeleton=repo_skeleton,
+            skeleton_info=skeleton_info,
+            repo_name=repo_name,
+            logger=logger,
+            llm_config=llm_config,
+        )
+        instance.rpg = existing_rpg
+
+        # === Step 2. Determine functional areas ===
+        if not functional_areas:
+            functional_areas = instance.rpg.get_functional_areas()
+            assert functional_areas, "Functional areas could not be inferred."
+        else:
+            instance.logger.info(f"Using existing functional areas: {functional_areas}")
+
+        # === Step 3. Collect file nodes, update L4 names, build LLM input ===
+        modified_files = set(parsed_tree.keys())
+        existing_file_nodes: Dict[str, Node] = {}   # file_path -> Node
+        old_path_to_file: Dict[str, str] = {}       # old_feature_path -> file_path
+
+        # Get flat features per file via transfer_parsed_tree
+        transfered_tree, _ = transfer_parsed_tree(input_tree=parsed_tree)
+
+        # Build modified_files_input: {old_L1/L2/L3/L4: {new_name, features}}
+        modified_files_input: Dict[str, Dict] = {}
+
+        for _nid, node in instance.rpg.nodes.items():
+            if node.meta and node.meta.type_name == NodeType.FILE:
+                fp = node.meta.path
+                if isinstance(fp, list):
+                    fp = fp[0] if fp else None
+                if fp and fp in modified_files:
+                    existing_file_nodes[fp] = node
+                    old_feature_path = node.feature_path()
+
+                    new_summary = parsed_tree[fp].get(
+                        "_file_summary_",
+                        os.path.basename(fp).replace(".py", ""),
+                    )
+                    old_path_to_file[old_feature_path] = fp
+
+                    # Get flat features for this file
+                    flat_features = transfered_tree.get(new_summary, [])
+                    if not flat_features:
+                        flat_features = transfered_tree.get(node.name, [])
+
+                    modified_files_input[old_feature_path] = {
+                        "new_name": new_summary,
+                        "features": flat_features,
+                    }
+
+                    # Update L4 FILE node name to the new summary
+                    if node.name != new_summary:
+                        instance.logger.info(
+                            f"Updating FILE node name: '{node.name}' -> '{new_summary}'"
+                        )
+                        node.name = new_summary
+
+        instance.logger.info(
+            f"Found {len(existing_file_nodes)} file nodes for "
+            f"{len(modified_files)} modified files"
+        )
+
+        if not modified_files_input:
+            instance.logger.info("No modified files to refactor.")
+            return existing_feature_tree, {}, instance.rpg
+
+        # === Step 4. Call LLM to get path mapping ===
+        cur_feature_tree = deepcopy(existing_feature_tree)
+        path_mapping = instance.process_modified_batch(
+            functional_areas=functional_areas,
+            cur_feature_tree=cur_feature_tree,
+            modified_files_input=modified_files_input,
+            context_window=context_window,
+        )
+
+        instance.logger.info(
+            f"LLM path mapping: {json.dumps(path_mapping, indent=2)}"
+        )
+
+        # === Step 5. Detach files from old locations & re-attach at new paths ===
+        area_update: Dict[str, Dict[str, Node]] = {}
+        for area in existing_feature_tree:
+            if isinstance(area, dict) and "name" in area:
+                area_update[area["name"]] = {}
+
+        # Fallback: if existing_feature_tree was empty, derive from RPG
+        if not area_update:
+            for fa in functional_areas:
+                area_update[fa] = {}
+
+        trajectory: Dict[str, str] = {}
+
+        for old_path, new_path in path_mapping.items():
+            file_path = old_path_to_file.get(old_path)
+            if not file_path:
+                instance.logger.warning(
+                    f"Old path not found in mapping: {old_path}"
+                )
+                continue
+
+            file_node = existing_file_nodes.get(file_path)
+            if not file_node:
+                instance.logger.warning(f"No file node for: {file_path}")
+                continue
+
+            parts = new_path.split("/")
+            if len(parts) != 4:
+                instance.logger.warning(
+                    f"Invalid new path (expected 4 levels): {new_path}"
+                )
+                continue
+
+            area_name = parts[0]
+            if area_name not in area_update:
+                instance.logger.warning(
+                    f"Unknown functional area: {area_name}"
+                )
+                continue
+
+            # Detach from old parent
+            instance._detach_file_from_feature_tree(file_node.id)
+
+            # Register for re-attachment
+            area_update[area_name][new_path] = file_node
+            trajectory[old_path] = new_path
+            instance.logger.info(f"  {old_path} -> {new_path}")
+
+        # Re-attach at new locations
+        instance.rpg.update_result_to_rpg(area_update)
+
+        # Clean up empty subtrees
+        removal_stats = instance.rpg.remove_empty_subtrees()
+        if removal_stats["removed_nodes"] > 0:
+            instance.logger.info(
+                f"Cleaned up {removal_stats['removed_nodes']} empty subtrees "
+                f"after modified-file refactoring"
+            )
+
+        instance.logger.info("Modified-file refactoring complete.")
+
+        return cur_feature_tree, trajectory, instance.rpg
+
