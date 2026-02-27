@@ -12,7 +12,7 @@ The pipeline has three sequential phases:
 ## News and Updates
 ---
 - [Coming Soon] An RPG-based plugin for Claude Code is under active development and will be open-sourced once ready.
-- [2026-02-27] 🔥 We have released code of the [RPG-Encoder](zerorepo/rpg_encoder/) and [RepoCraft](repocraft/).
+- [2026-02-27] 🔥 We have released code of the [RPG-Encoder](zerorepo/rpg_encoder/) for repository understanding and reconstruction and [RepoCraft](repocraft/) for end-to-end repository generation evaluation.
 - [2026-02-12] 🔥 We have open-sourced the ZeroRepo codebase. RPG-Encoder is currently going through the open-source release process and will be released once the process is complete.
 - [2026.02.02] 🔥 Our paper "[Closing the Loop: Universal Repository Representation with RPG-Encoder](https://arxiv.org/abs/2602.02084)" has been released on arXiv.
 - [2026.01.26] 🔥 [RPG-ZeroRepo](https://arxiv.org/abs/2509.16198) has been accepted as a poster at ICLR 2026.
