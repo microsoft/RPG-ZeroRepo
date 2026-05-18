@@ -25,6 +25,7 @@ rpgkit init . [options]
 | `--ignore-agent-tools` | Skip checks for AI agent CLI tools |
 | `--github-token <token>` | GitHub token for private repos or higher rate limits |
 | `--pre` | Download the latest pre-release template |
+| `--legacy-download` | Bypass the packaged assets and pull templates from the latest GitHub release zip (implied by `--pre`) |
 | `--skip-tls` | Skip SSL/TLS verification |
 | `--encode/--no-encode` | Run or skip initial RPG encoding at the end of init |
 | `--debug` | Show verbose diagnostic output |
@@ -70,11 +71,22 @@ rpgkit update --github-token $GITHUB_TOKEN
 | `--script <type>` | Script type: `sh` (POSIX) or `ps` (PowerShell) |
 | `--github-token <token>` | GitHub token for private repos or higher rate limits |
 | `--pre` | Download the latest pre-release template |
+| `--legacy-download` | Bypass the packaged assets and pull from the latest GitHub release zip (implied by `--pre`) |
+| `--pull` | Self-upgrade the CLI (auto-detects uv / pipx / pip) before syncing the workspace |
 | `--no-mcp` | Skip MCP server configuration |
 | `--skip-tls` | Skip SSL/TLS verification |
 | `--debug` | Show verbose diagnostic output |
 
-## `rpgkit check`
+### Provisioning sources
+
+Since `0.1.3`, `rpgkit init` and `rpgkit update` provision from two channels:
+
+| Channel | When used | Network needed |
+| ------- | --------- | -------------- |
+| Packaged assets (bundle) | Default. Pulled from `rpgkit_cli/core_pack/` inside the installed wheel | No |
+| GitHub release zip (legacy) | `--legacy-download`, `--pre`, or `--script ps`, or when the bundle is unavailable (e.g. editable installs) | Yes |
+
+`rpgkit init` writes the choice to `.rpgkit/.source` (`bundle` or `legacy`) so subsequent `rpgkit update` invocations default to the same channel. Override with the flag of your choice at any time.
 
 Verify that required tools are installed.
 

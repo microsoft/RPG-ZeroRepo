@@ -103,6 +103,31 @@ rpgkit check
 uvx --from "git+https://github.com/microsoft/RPG-ZeroRepo.git#subdirectory=RPG-Kit" rpgkit init <project-name>
 ```
 
+Since `0.1.3` the wheel ships the pipeline scripts and slash-command templates as packaged assets, so `rpgkit init` works offline (air-gapped, corporate proxy, etc.). To force the older GitHub-release-zip download path — e.g. to grab prompts newer than the installed CLI — pass `--legacy-download`.
+
+### Updating RPG-Kit
+
+Two flavours of update exist; pick the one that matches what you want to change.
+
+```bash
+# (A) Refresh THIS workspace from the currently-installed CLI version
+#     (offline, fast, idempotent)
+cd my-project
+rpgkit update
+
+# (B) Upgrade the CLI itself, then refresh THIS workspace
+#     (network — uv / pipx / pip is auto-detected)
+cd my-project
+rpgkit update --pull
+
+# (C) Bypass the bundled assets and pull from the latest GitHub release zip
+#     (useful when a prompt fix has shipped but the CLI release has not yet)
+cd my-project
+rpgkit update --legacy-download
+```
+
+`rpgkit update` records the channel you chose in `.rpgkit/.source` so subsequent runs default to the same source. Your edits to `.rpgkit/config.toml` (see [`docs/configuration.md`](docs/configuration.md)) are preserved across updates.
+
 ## Quick Start: New Repository
 
 Use this path when you want RPG-Kit to turn requirements into a new codebase.

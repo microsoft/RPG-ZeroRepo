@@ -40,6 +40,8 @@ my-project/
 │   ├── mcp.json                        # MCP server registration
 │   └── tasks.json                      # Optional workspace tasks
 └── .rpgkit/
+    ├── config.toml                     # Workspace AI / config (committed). See docs/configuration.md
+    ├── .source                         # Provisioning channel marker: "bundle" or "legacy"
     ├── scripts/                        # Pipeline scripts and support packages
     │   ├── feature_spec_to_json.py      # Feature specification
     │   ├── feature_build.py

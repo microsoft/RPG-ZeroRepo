@@ -21,6 +21,55 @@ rpgkit check
 
 If the selected AI assistant is not found, install and authenticate it, then rerun `rpgkit init` or `rpgkit update`.
 
+## Workspace Configuration (`.rpgkit/config.toml`)
+
+Since `0.1.3`, every workspace owns a `.rpgkit/config.toml` file that records which AI CLI command the pipeline scripts should invoke. This decouples the scripts from a single AI at packaging time — the same packaged scripts now serve any AI you pick.
+
+```toml
+# .rpgkit/config.toml
+[rpgkit]
+ai_cli_cmd = "claude"
+```
+
+The file is created automatically by `rpgkit init --ai <agent>`. Edit it any time to switch the workspace to a different AI; no need to re-run `init`.
+
+### Resolution priority
+
+When a pipeline script (or a hook, or the MCP server) needs to invoke the AI CLI, it resolves the command via the following chain. The first non-empty value wins:
+
+| # | Source | Use case |
+| - | ------ | -------- |
+| P1 | `LLMClient(tool="...")` constructor argument | Programmatic override (rare) |
+| P2 | `RPGKIT_AI_CLI_CMD` environment variable | CI runs, one-off experiments |
+| P3 | `.rpgkit/config.toml` `[rpgkit].ai_cli_cmd` | Normal default (per workspace) |
+| P4 | Release-zip baked-in literal | Workspaces provisioned with `--legacy-download` |
+
+If all four resolve to empty, the next `LLMClient.generate()` call raises a `RuntimeError` instructing the user to run `rpgkit init` or set the env var.
+
+### Supported AI CLI commands
+
+The values written to `ai_cli_cmd` mirror the per-AI substitutions performed by the GitHub release-zip CI:
+
+| `--ai` value | `ai_cli_cmd` |
+| ------------ | ------------ |
+| `copilot` | `copilot` |
+| `claude` | `claude` |
+| `gemini` | `gemini -p` |
+| `qwen` | `qwen -p` |
+| `cursor-agent` | `agent -p` |
+| `auggie` | `augment -p` |
+| `codex` | `codex exec` |
+| `codebuddy` | `codebuddy -p` |
+| `qoder` | `qodercli -p` |
+| `opencode` | `opencode run` |
+| `amp` | `amp --execute` |
+
+Only `copilot` and `claude` are currently verified end-to-end; the others are scaffolded but may need integration adjustments.
+
+### Other config keys
+
+The `[rpgkit]` table currently holds only `ai_cli_cmd`. Future releases will add timeouts, retry budgets, and model overrides under the same namespace; older keys remain forward-compatible.
+
 ## Initialization Options
 
 ### AI assistant selection
