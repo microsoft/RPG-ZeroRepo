@@ -1,6 +1,6 @@
 [project]
 name = "rpgkit-cli"
-version = "0.1.2"
+version = "0.1.3"
 description = "RPG-Kit CLI - A tool to generate feature trees for repository planning and code generation."
 requires-python = ">=3.12"
 dependencies = [
@@ -39,3 +39,12 @@ build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/rpgkit_cli"]
+
+# Bundle core assets (scripts + slash-command templates) into the wheel under
+# `rpgkit_cli/core_pack/` so that `rpgkit init` works offline (air-gapped /
+# corporate-proxy / enterprise environments).  These are the SAME source files
+# the GitHub Release zip workflow packages; bundling them in the wheel just
+# gives users a network-free fast path.  Plan: plans/01-package-bundle-and-ai-config.md
+[tool.hatch.build.targets.wheel.force-include]
+"scripts"            = "rpgkit_cli/core_pack/scripts"
+"templates/commands" = "rpgkit_cli/core_pack/commands"

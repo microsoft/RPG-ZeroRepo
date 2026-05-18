@@ -14,6 +14,7 @@ import shlex
 import signal as _signal
 import subprocess
 import time
+import tomllib
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
@@ -21,6 +22,7 @@ from dataclasses import dataclass, field, asdict
 
 from common.llm_types import Memory
 from common.session_manager import create_session_manager
+from . import paths as _paths
 from .paths import REPO_DIR as _REPO_DIR, WORKSPACE_ROOT as _WORKSPACE_ROOT
 
 
@@ -33,8 +35,85 @@ def _set_pdeathsig() -> None:
         pass
 
 
-# Default AI assistant command
-AI_CLI_CMD = "<AI_CLI_CMD>"
+# ----------------------------------------------------------------------------
+# AI CLI command resolution (added in rpgkit-cli 0.1.3)
+# ----------------------------------------------------------------------------
+#
+# Pre-0.1.3 each release-zip variant pre-substituted ``<AI_CLI_CMD>`` for
+# the chosen agent at packaging time, so this module just exposed the
+# literal string.  Bundle mode does not do that string-substitution dance
+# (one bundle serves every AI), so we resolve at runtime instead with a
+# P1-P4 priority chain.  See plans/01-package-bundle-and-ai-config.md §3.
+#
+#   P1. LLMClient(tool="...")              — explicit constructor argument
+#   P2. RPGKIT_AI_CLI_CMD env var          — for CI / tests / ad-hoc override
+#   P3. .rpgkit/config.toml [rpgkit].ai_cli_cmd
+#   P4. Module-level baked-in value         — release-zip CI replaces the
+#                                             literal "<AI_CLI_CMD>" with the
+#                                             concrete command at packaging
+#                                             time, keeping the legacy path
+#                                             working transparently.
+#
+# Returning empty string is OK at module-import time and at LLMClient
+# construction; the error is raised lazily in :meth:`LLMClient.generate`
+# so unit tests and tools that construct an LLMClient without intending
+# to invoke the LLM continue to work.
+
+_PLACEHOLDER_LITERAL = "<AI_CLI_CMD>"
+
+# Module-level default — the release-zip CI replaces this exact literal
+# with the chosen agent's command at packaging time.  Bundle installs
+# leave it unchanged and rely on P2/P3 to supply the value.
+_BAKED_IN_VALUE = _PLACEHOLDER_LITERAL
+
+
+def _load_ai_cli_cmd() -> str:
+    """Resolve the AI CLI command string via the P1-P4 priority chain.
+
+    P1 is handled by :class:`LLMClient.__init__` (constructor argument).
+    This function implements P2-P4 and returns ``""`` if none of them
+    yield a usable value — callers decide how to react.
+
+    The workspace root is *re-resolved at every invocation* via
+    :func:`paths._find_workspace_root`, not via the import-frozen
+    :data:`paths.WORKSPACE_ROOT` constant.  This matters for long-lived
+    processes that may serve more than one workspace (e.g. a future
+    global MCP server).  See plan §2.5/Z.
+    """
+    # P2: env var (highest non-P1 priority — useful in tests and one-off
+    # overrides without editing the workspace config).
+    env_val = _os.environ.get("RPGKIT_AI_CLI_CMD", "").strip()
+    if env_val:
+        return env_val
+
+    # P3: workspace config.toml.
+    try:
+        workspace = _paths._find_workspace_root()
+        cfg_path = workspace / ".rpgkit" / "config.toml"
+        if cfg_path.exists():
+            with open(cfg_path, "rb") as f:
+                data = tomllib.load(f)
+            cfg_val = (data.get("rpgkit") or {}).get("ai_cli_cmd", "")
+            if isinstance(cfg_val, str):
+                cfg_val = cfg_val.strip()
+                if cfg_val:
+                    return cfg_val
+    except Exception:
+        # Defensive: paths resolution, missing tomllib, or malformed TOML
+        # should never crash an LLMClient construction.  Fall through.
+        pass
+
+    # P4: legacy baked-in value (release-zip-substituted at build time).
+    if _BAKED_IN_VALUE and _BAKED_IN_VALUE != _PLACEHOLDER_LITERAL:
+        return _BAKED_IN_VALUE
+
+    return ""
+
+
+# Resolved once at import for backward-compat with callers that referenced
+# the module-level constant directly.  New code should call ``_load_ai_cli_cmd()``
+# or use ``LLMClient.tool`` (already populated through the same chain).
+AI_CLI_CMD = _load_ai_cli_cmd()
 
 
 # Mapping from the first token of AI_CLI_CMD to the canonical agent name
@@ -53,19 +132,23 @@ _CLI_TO_AGENT = {
 }
 
 
-def detect_agent_type() -> str:
-    """Detect which AI coding agent is being used based on AI_CLI_CMD.
+def detect_agent_type(cmd: Optional[str] = None) -> str:
+    """Detect which AI coding agent is being used.
 
-    AI_CLI_CMD is a placeholder that gets replaced per-agent during
-    release packaging (e.g. "claude -p", "copilot -p", "codex exec").
+    Args:
+        cmd: Optional explicit CLI command string.  When omitted we
+            resolve dynamically via :func:`_load_ai_cli_cmd` so this
+            function reflects the current workspace's configuration,
+            not whatever was in effect at module import time.
 
     Returns one of: claude, gemini, copilot, cursor, codex, auggie,
                     amp, opencode, codebuddy, qoder, qwen, unknown
     """
-    if not AI_CLI_CMD:
+    cmd = cmd if cmd is not None else _load_ai_cli_cmd()
+    if not cmd or cmd == _PLACEHOLDER_LITERAL:
         return "unknown"
 
-    first_token = AI_CLI_CMD.strip().split()[0]
+    first_token = cmd.strip().split()[0]
     return _CLI_TO_AGENT.get(first_token, "unknown")
 
 
@@ -148,18 +231,26 @@ class LLMClient:
             step_id: Current step ID in the trajectory
             logger: Logger instance
         """
-        self.tool = tool or AI_CLI_CMD
+        # P1 (explicit arg) wins; otherwise P2-P4 chain via _load_ai_cli_cmd.
+        # The empty-string case is tolerated here so unit tests / utilities
+        # that construct an LLMClient without intending to invoke the LLM
+        # keep working.  The actual error is raised in :meth:`generate` if
+        # the tool is still empty when a call is attempted.
+        # Plan §3, decision 19.
+        self.tool = tool if tool is not None else _load_ai_cli_cmd()
         self.trajectory = trajectory
         self.step_id = step_id
         self.logger = logger or logging.getLogger(__name__)
         
-        # Session manager — auto-determined from AI_CLI_CMD.
+        # Session manager — driven by detect_agent_type(self.tool) so the
+        # right subclass is chosen even when self.tool came from the
+        # workspace config (not the import-time AI_CLI_CMD constant).
         # project_dir must match the subprocess cwd (workspace root == REPO_DIR)
         # so that Claude CLI's session file path
         # (~/.claude/projects/<encoded-cwd>/) can be correctly located by
         # the session manager.
         self._session_manager = create_session_manager(
-            agent_type=detect_agent_type(),
+            agent_type=detect_agent_type(self.tool),
             project_dir=_REPO_DIR,
             trace_filename_builder=self._build_trace_filename,
             logger=self.logger,
@@ -246,6 +337,18 @@ class LLMClient:
         Raises:
             RuntimeError: If LLM call fails after all retries
         """
+        # Lazy validation: the constructor tolerates an empty/placeholder
+        # ``self.tool`` so that tests and tools can build an LLMClient
+        # without triggering an LLM invocation, but the moment we are
+        # actually asked to call out, the configuration must be valid.
+        # Plan §3, decision 19.
+        if not self.tool or self.tool == _PLACEHOLDER_LITERAL:
+            raise RuntimeError(
+                "AI CLI command not configured.  Run "
+                "`rpgkit init --ai <name>` in this workspace, or set the "
+                "RPGKIT_AI_CLI_CMD environment variable."
+            )
+
         # Create call record
         self._call_counter += 1
         call_record = LLMCallRecord(
