@@ -4,7 +4,6 @@ on:
   push:
     branches:
       - dev
-      - "dev/**"
     paths:
       - "RPG-Kit/**"
       - ".github/workflows/rpgkit-pre-release.yml"

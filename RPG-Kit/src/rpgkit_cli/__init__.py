@@ -2753,6 +2753,92 @@ def download_template_from_github(
     return zip_path, metadata
 
 
+def _resolve_rpgkit_source_root(source: Path) -> Path:
+    source = source.expanduser().resolve()
+    candidates = [source]
+    if (source / "RPG-Kit").is_dir():
+        candidates.insert(0, source / "RPG-Kit")
+
+    for candidate in candidates:
+        if (
+            (candidate / "templates" / "commands").is_dir()
+            and (candidate / "scripts").is_dir()
+            and (candidate / "pyproject.toml").is_file()
+        ):
+            return candidate
+
+    raise RuntimeError(
+        f"Invalid RPG-Kit source path: {source}. Expected the RPG-Kit directory "
+        "or the repository root containing RPG-Kit/."
+    )
+
+
+def _build_local_template_package(
+    source: Path,
+    ai_assistant: str,
+    script_type: str,
+) -> Tuple[Path, dict]:
+    source_root = _resolve_rpgkit_source_root(source)
+    repo_root = source_root.parent
+    project_dir = source_root.relative_to(repo_root).as_posix()
+    release_script = (
+        repo_root
+        / ".github"
+        / "workflows"
+        / "scripts"
+        / "rpgkit"
+        / "create-release-packages.sh"
+    )
+    if not release_script.is_file():
+        raise RuntimeError(
+            f"Release packaging script not found: {release_script}. "
+            "Pass the RPG-ZeroRepo root or its RPG-Kit/ directory to --source."
+        )
+
+    version = "v0.0.0-local"
+    env = os.environ.copy()
+    env.update(
+        {
+            "GITHUB_WORKSPACE": str(repo_root),
+            "PROJECT_DIR": project_dir,
+            "AGENTS": ai_assistant,
+            "SCRIPTS": script_type,
+            "PYTHON": sys.executable,
+        }
+    )
+    result = subprocess.run(
+        ["bash", str(release_script), version],
+        cwd=repo_root,
+        env=env,
+        text=True,
+        capture_output=True,
+    )
+    if result.returncode != 0:
+        detail = (
+            result.stderr or result.stdout or "local package build failed"
+        ).strip()
+        raise RuntimeError(
+            f"Failed to build local RPG-Kit template package from {source_root}: {detail}"
+        )
+
+    archive = (
+        source_root
+        / ".genreleases"
+        / f"rpgkit-template-{ai_assistant}-{script_type}-{version}.zip"
+    )
+    if not archive.is_file():
+        raise RuntimeError(
+            f"Local RPG-Kit template package was not created: {archive}"
+        )
+
+    return archive, {
+        "filename": archive.name,
+        "size": archive.stat().st_size,
+        "release": version,
+        "source": str(source_root),
+    }
+
+
 def download_and_extract_template(
     project_path: Path,
     ai_assistant: str,
@@ -2765,32 +2851,44 @@ def download_and_extract_template(
     debug: bool = False,
     github_token: str = None,
     pre: bool = False,
+    source: Path | None = None,
 ) -> Path:
-    """Download the latest release and extract it to create a new project.
+    """Download or build a template archive and extract it to create a project.
 
     Returns project_path. Uses tracker if provided (with keys: fetch, download, extract, cleanup).
     """
     current_dir = Path.cwd()
+    cleanup_zip = source is None
 
     if tracker:
-        tracker.start("fetch", "contacting GitHub API")
-    try:
-        zip_path, meta = download_template_from_github(
-            ai_assistant,
-            current_dir,
-            script_type=script_type,
-            verbose=verbose and tracker is None,
-            show_progress=(tracker is None),
-            client=client,
-            debug=debug,
-            github_token=github_token,
-            pre=pre,
+        fetch_detail = (
+            "building local template package" if source else "contacting GitHub API"
         )
+        tracker.start("fetch", fetch_detail)
+    try:
+        if source:
+            zip_path, meta = _build_local_template_package(
+                source,
+                ai_assistant,
+                script_type,
+            )
+        else:
+            zip_path, meta = download_template_from_github(
+                ai_assistant,
+                current_dir,
+                script_type=script_type,
+                verbose=verbose and tracker is None,
+                show_progress=(tracker is None),
+                client=client,
+                debug=debug,
+                github_token=github_token,
+                pre=pre,
+            )
         if tracker:
             tracker.complete(
-                "fetch", f"release {meta['release']} ({meta['size']:,} bytes)"
+                "fetch", f"template {meta['release']} ({meta['size']:,} bytes)"
             )
-            tracker.add("download", "Download template")
+            tracker.add("download", "Use template archive" if source else "Download template")
             tracker.complete("download", meta["filename"])
     except Exception as e:
         if tracker:
@@ -2942,12 +3040,14 @@ def download_and_extract_template(
         if tracker:
             tracker.add("cleanup", "Remove temporary archive")
 
-        if zip_path.exists():
+        if cleanup_zip and zip_path.exists():
             zip_path.unlink()
             if tracker:
                 tracker.complete("cleanup")
             elif verbose:
                 console.print(f"Cleaned up: {zip_path.name}")
+        elif tracker:
+            tracker.skip("cleanup", "local package retained")
 
     return project_path
 
@@ -3126,6 +3226,14 @@ def init(
         "--pre",
         help="Download the latest pre-release (dev build) instead of the latest stable release",
     ),
+    source: Optional[Path] = typer.Option(
+        None,
+        "--source",
+        help=(
+            "Use a local RPG-Kit source checkout to build and install the "
+            "template package instead of downloading a release asset."
+        ),
+    ),
     no_mcp: bool = typer.Option(
         False,
         "--no-mcp",
@@ -3293,6 +3401,12 @@ def init(
 
     console.print(f"[cyan]Selected AI assistant:[/cyan] {selected_ai}")
     console.print(f"[cyan]Selected script type:[/cyan] {selected_script}")
+    if source:
+        console.print(f"[cyan]Template source:[/cyan] {source}")
+        if pre:
+            console.print(
+                "[yellow]Warning:[/yellow] --pre is ignored when --source is provided"
+            )
 
     tracker = StepTracker("Initialize RPG-Kit Project")
 
@@ -3305,8 +3419,15 @@ def init(
     tracker.add("script-select", "Select script type")
     tracker.complete("script-select", selected_script)
     for key, label in [
-        ("fetch", "Fetch latest pre-release" if pre else "Fetch latest release"),
-        ("download", "Download template"),
+        (
+            "fetch",
+            "Build local template package"
+            if source
+            else "Fetch latest pre-release"
+            if pre
+            else "Fetch latest release",
+        ),
+        ("download", "Use local template package" if source else "Download template"),
         ("extract", "Extract template"),
         ("zip-list", "Archive contents"),
         ("extracted-summary", "Extraction summary"),
@@ -3344,6 +3465,7 @@ def init(
                 debug=debug,
                 github_token=github_token,
                 pre=pre,
+                source=source,
             )
 
             ensure_executable_scripts(project_path, tracker=tracker)
@@ -3592,6 +3714,14 @@ def update(
         "--pre",
         help="Download the latest pre-release (dev build) instead of the latest stable release",
     ),
+    source: Optional[Path] = typer.Option(
+        None,
+        "--source",
+        help=(
+            "Use a local RPG-Kit source checkout to build and install the "
+            "template package instead of downloading a release asset."
+        ),
+    ),
     no_mcp: bool = typer.Option(
         False,
         "--no-mcp",
@@ -3677,6 +3807,12 @@ def update(
 
     console.print(f"[cyan]Selected AI assistant:[/cyan] {selected_ai}")
     console.print(f"[cyan]Selected script type:[/cyan] {selected_script}")
+    if source:
+        console.print(f"[cyan]Template source:[/cyan] {source}")
+        if pre:
+            console.print(
+                "[yellow]Warning:[/yellow] --pre is ignored when --source is provided"
+            )
 
     # Build step tracker
     tracker = StepTracker("Update RPG-Kit Project")
@@ -3688,8 +3824,15 @@ def update(
     tracker.add("script-select", "Select script type")
     tracker.complete("script-select", selected_script)
     for key, label in [
-        ("fetch", "Fetch latest pre-release" if pre else "Fetch latest release"),
-        ("download", "Download template"),
+        (
+            "fetch",
+            "Build local template package"
+            if source
+            else "Fetch latest pre-release"
+            if pre
+            else "Fetch latest release",
+        ),
+        ("download", "Use local template package" if source else "Download template"),
         ("extract", "Extract template"),
         ("zip-list", "Archive contents"),
         ("extracted-summary", "Extraction summary"),
@@ -3723,6 +3866,7 @@ def update(
                 debug=debug,
                 github_token=github_token,
                 pre=pre,
+                source=source,
             )
 
             ensure_executable_scripts(project_path, tracker=tracker)
