@@ -114,7 +114,9 @@ build_variant() {
   
   # Create empty data directory for runtime output
   mkdir -p "$SPEC_DIR/data"
-  
+
+  [[ -f pyproject.toml ]] && { cp pyproject.toml "$SPEC_DIR/pyproject.toml"; echo "Copied pyproject.toml -> .rpgkit"; }
+
   [[ -d memory ]] && { cp -r memory "$SPEC_DIR/"; echo "Copied memory -> .rpgkit"; }
   
   # Only copy the relevant script variant directory
