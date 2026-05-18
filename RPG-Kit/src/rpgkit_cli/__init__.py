@@ -403,9 +403,24 @@ def _detect_install_method() -> str:
     except Exception:
         return "unknown"
 
+    exe_posix = exe_str.replace("\\", "/")
+
+    # IMPORTANT: editable detection must run FIRST.  An editable install
+    # placed inside a uv-managed venv would otherwise be reported as
+    # "uv" and ``rpgkit update --pull`` would try to upgrade from the
+    # registry instead of asking the user to `git pull` their checkout.
+    try:
+        import importlib.metadata as _im
+
+        dist = _im.distribution("rpgkit-cli")
+        durl = dist.read_text("direct_url.json")
+        if durl and '"editable": true' in durl:
+            return "editable"
+    except Exception:
+        pass
+
     # uv tool install creates venvs under ~/.local/share/uv/tools/<name>/
     # (or %LOCALAPPDATA%\uv\tools\<name>\ on Windows).
-    exe_posix = exe_str.replace("\\", "/")
     if "/uv/tools/" in exe_posix:
         return "uv"
     try:
@@ -418,17 +433,6 @@ def _detect_install_method() -> str:
     # pipx puts each tool's venv under ~/.local/share/pipx/venvs/<name>/
     if "/pipx/venvs/" in exe_posix:
         return "pipx"
-
-    # Editable install: package metadata has direct_url.json with editable=true.
-    try:
-        import importlib.metadata as _im
-
-        dist = _im.distribution("rpgkit-cli")
-        durl = dist.read_text("direct_url.json")
-        if durl and '"editable": true' in durl:
-            return "editable"
-    except Exception:
-        pass
 
     # Plain pip: distinguish user-site vs system-site by path prefix.
     try:
@@ -2956,14 +2960,19 @@ def download_and_extract_template(
     # CI's per-shell partitioning is vestigial — see plan §2.5/C).
     # When the user explicitly asks for PowerShell, fall back to the
     # legacy zip path so that future PowerShell variants in releases
-    # keep working.
+    # keep working.  The notice is emitted through the tracker (when
+    # present) so it is actually visible during init/update.
     if use_bundle and script_type == "ps":
         use_bundle = False
-        if tracker is None and verbose:
-            console.print(
-                "[yellow]--script ps requested: falling back to release-zip download "
-                "(bundle ships POSIX scripts only).[/yellow]"
-            )
+        notice = (
+            "--script ps: falling back to release-zip download "
+            "(bundle ships POSIX-shell-oriented scripts only)"
+        )
+        if tracker:
+            tracker.add("ps-fallback", "PowerShell fallback")
+            tracker.skip("ps-fallback", notice)
+        elif verbose:
+            console.print(f"[yellow]{notice}[/yellow]")
 
     if use_bundle:
         return _install_from_bundle(
@@ -3009,10 +3018,12 @@ def _install_from_bundle(
     from . import _assets
 
     if tracker:
+        # init()/update() already registered fetch/download/extract step keys,
+        # so just transition them through completed states instead of
+        # re-adding (which would overwrite the existing label).
         tracker.start("fetch", "packaged assets (offline)")
         tracker.complete("fetch", "bundle ready")
-        tracker.add("download", "Download template")
-        tracker.skip("download", "bundle mode")
+        tracker.skip("download", "bundle mode (no network)")
 
     if not is_current_dir:
         project_path.mkdir(parents=True)
@@ -3038,13 +3049,14 @@ def _install_from_bundle(
             ),
         )
 
-        # 2. Copy slash-command templates filtered by selected AI.  The
-        #    union of all command markdown files lives under
-        #    core_pack/commands/; we materialise into the AI-specific
-        #    directory the agent expects (e.g. .claude/commands/ or
-        #    .github/agents/+ .github/prompts/).
-        _install_command_templates_from_bundle(
-            project_path, ai_assistant, _assets.commands_dir()
+        # 2. Materialise slash-command templates into the AI-specific
+        #    directory.  _materialise_commands_for_agent owns the
+        #    per-agent file-name / folder rules and matches what the
+        #    legacy zip path produces (down to the rpgkit.<name>.md
+        #    prefix), so downstream consumers see the same layout
+        #    regardless of provisioning source.
+        _materialise_commands_for_agent(
+            ai_assistant, _assets.commands_dir(), project_path
         )
 
         # 3. Record the provisioning source so subsequent ``rpgkit update``
@@ -3052,12 +3064,9 @@ def _install_from_bundle(
         _write_source_marker(project_path, _SOURCE_BUNDLE)
 
         if tracker:
-            tracker.start("zip-list")
-            tracker.complete("zip-list", "bundle")
-            tracker.start("extracted-summary")
-            tracker.complete("extracted-summary", "bundle copied")
+            tracker.skip("zip-list", "bundle (no archive)")
+            tracker.skip("extracted-summary", "bundle copied")
             tracker.complete("extract")
-            tracker.add("cleanup", "Remove temporary archive")
             tracker.skip("cleanup", "bundle mode")
     except Exception as e:
         if tracker:
@@ -3067,34 +3076,6 @@ def _install_from_bundle(
         raise
 
     return project_path
-
-
-def _install_command_templates_from_bundle(
-    project_path: Path,
-    ai_assistant: str,
-    src_commands_dir: Path,
-) -> None:
-    """Install slash-command templates from the bundle into the per-AI dir.
-
-    The bundle's ``commands/`` directory ships the canonical (AI-agnostic)
-    template content.  Each AI integration places these into a different
-    target directory with a different filename convention; this helper
-    delegates that mapping to :func:`_materialise_commands_for_agent`,
-    which is also used by the legacy zip path so behaviour is identical
-    across provisioning sources.
-    """
-    agent_config = AGENT_CONFIG.get(ai_assistant)
-    if not agent_config:
-        # Unknown agent — copy raw markdown into a neutral location so
-        # nothing is lost; downstream init() will already have rejected
-        # this AI selection.
-        dest = project_path / ".rpgkit" / "commands"
-        shutil.copytree(src_commands_dir, dest, dirs_exist_ok=True)
-        return
-
-    _materialise_commands_for_agent(
-        ai_assistant, src_commands_dir, project_path
-    )
 
 
 def _materialise_commands_for_agent(
@@ -3115,7 +3096,9 @@ def _materialise_commands_for_agent(
       copilot → ``.github/agents/rpgkit.<name>.agent.md``
                 ``.github/prompts/rpgkit.<name>.prompt.md`` (frontmatter
                 points at the corresponding agent)
-      others  → fallback: ``.rpgkit/commands/rpgkit.<name>.md``
+      others  → fallback: ``.rpgkit/commands/rpgkit.<name>.md`` (same
+                ``rpgkit.<name>.md`` prefix for consistency with the
+                supported agents above)
 
     NOTE: ``claude`` and ``copilot`` are the only verified agents in
     AGENT_CONFIG today.  Add new agents here when AGENT_CONFIG grows.
@@ -3146,6 +3129,9 @@ def _materialise_commands_for_agent(
                 f"---\nagent: {stem}\n---\n", encoding="utf-8"
             )
     else:
+        # Unknown agent (init() validates against AGENT_CONFIG so this
+        # branch is unreachable from the public CLI, but provides a
+        # well-defined behaviour if a future caller bypasses validation).
         dest = project_path / ".rpgkit" / "commands"
         dest.mkdir(parents=True, exist_ok=True)
         for src in src_commands_dir.glob("*.md"):
@@ -3349,6 +3335,11 @@ def _download_and_extract_release_zip(
                 tracker.complete("cleanup")
             elif verbose:
                 console.print(f"Cleaned up: {zip_path.name}")
+
+    # Record provisioning source so a later ``rpgkit update`` defaults
+    # to the same channel.  Counterpart to ``_install_from_bundle`` which
+    # writes ``bundle``.  Plan §2.5 (decision 12).
+    _write_source_marker(project_path, _SOURCE_LEGACY)
 
     return project_path
 
@@ -3763,14 +3754,8 @@ def init(
                 legacy_download=effective_legacy,
             )
 
-            # Persist provisioning source (bundle vs. legacy) so a later
-            # ``rpgkit update`` defaults to the same channel.  The
-            # _install_from_bundle path already wrote `bundle`; record
-            # `legacy` for the alternative branch.  Idempotent: the
-            # marker is overwritten on every init regardless.
-            from . import _assets as _assets_mod  # local import: cheap, avoids cycles
-            if effective_legacy or not _assets_mod.available():
-                _write_source_marker(project_path, _SOURCE_LEGACY)
+            # .rpgkit/.source is written by whichever provisioning path
+            # actually ran (_install_from_bundle / _download_and_extract_release_zip).
 
             # Materialise .rpgkit/config.toml with the resolved AI CLI
             # command.  llm_client.py reads this at runtime to invoke
@@ -4127,6 +4112,47 @@ def update(
     console.print(f"[cyan]Selected AI assistant:[/cyan] {selected_ai}")
     console.print(f"[cyan]Selected script type:[/cyan] {selected_script}")
 
+    # --pull: self-upgrade the CLI BEFORE building the live tracker so
+    # that the subprocess output (and the subsequent ``os.execvp``) does
+    # not have to fight with rich.Live for terminal control.  Plan §2.5/F.
+    #
+    # After a successful upgrade we re-exec the (now upgraded) rpgkit
+    # binary to run the rest of the update flow.  This avoids the
+    # staleness footgun where the running Python process still has the
+    # old CLI code in memory while the filesystem now holds the new
+    # core_pack/ assets — mixing them would invite subtle bugs (new
+    # prompts copied by old logic).  Re-exec gives us a clean separation.
+    if pull:
+        method = _detect_install_method()
+        cmd = _upgrade_command(method)
+        if cmd is None:
+            console.print(
+                f"[yellow]--pull: cannot auto-upgrade for install method "
+                f"'{method}'.  Upgrade manually, then re-run "
+                f"`rpgkit update`.[/yellow]"
+            )
+        else:
+            console.print(
+                f"[cyan]Upgrading rpgkit-cli via {method}...[/cyan]"
+            )
+            rc = subprocess.call(cmd)
+            if rc == 0:
+                # Re-exec without --pull so we run the upgraded logic
+                # against the freshly-installed core_pack.  All other
+                # CLI flags are preserved verbatim.
+                new_argv = [a for a in sys.argv if a != "--pull"]
+                rpgkit_bin = shutil.which("rpgkit") or new_argv[0]
+                console.print(
+                    "[cyan]CLI upgrade complete; re-exec'ing to apply "
+                    "new templates...[/cyan]"
+                )
+                os.execvp(rpgkit_bin, [rpgkit_bin, *new_argv[1:]])
+            else:
+                console.print(
+                    f"[yellow]CLI upgrade exited with code {rc}; "
+                    f"continuing with currently installed version.[/yellow]"
+                )
+
     # Build step tracker
     tracker = StepTracker("Update RPG-Kit Project")
 
@@ -4161,41 +4187,15 @@ def update(
             local_ssl_context = ssl_context if verify else False
             local_client = httpx.Client(verify=local_ssl_context)
 
-            # --pull: self-upgrade the CLI first so the bundle we copy
-            # from is the latest.  --pre and --legacy-download both
-            # imply the user wants the network path.  Source-marker
-            # tracking honours the user's prior choice when no flag
-            # forces a particular channel.  Plan §2.5/F, §5.3 step 8.
-            if pull:
-                method = _detect_install_method()
-                cmd = _upgrade_command(method)
-                if cmd is None:
-                    console.print(
-                        f"[yellow]--pull: cannot auto-upgrade for install method "
-                        f"'{method}'.  Upgrade manually, then re-run "
-                        f"`rpgkit update`.[/yellow]"
-                    )
-                else:
-                    console.print(
-                        f"[cyan]Upgrading rpgkit-cli via {method}...[/cyan]"
-                    )
-                    rc = subprocess.call(cmd)
-                    if rc != 0:
-                        console.print(
-                            f"[yellow]CLI upgrade exited with code {rc}; "
-                            f"continuing with currently installed version.[/yellow]"
-                        )
-
             prior_source = _read_source_marker(project_path)
+            # Bundle is the default.  Three things can flip us to legacy:
+            #   1. user passes --legacy-download explicitly
+            #   2. user passes --pre (no notion of bundle pre-releases)
+            #   3. workspace was previously provisioned from legacy and
+            #      user has not overridden the channel
             effective_legacy = (
-                legacy_download
-                or pre
-                or (prior_source == _SOURCE_LEGACY and not legacy_download)
+                legacy_download or pre or prior_source == _SOURCE_LEGACY
             )
-            # If --legacy-download is explicitly passed, honour it.
-            # If neither flag is passed and no prior marker exists, default to bundle.
-            if not legacy_download and not pre and prior_source is None:
-                effective_legacy = False
 
             download_and_extract_template(
                 project_path,
@@ -4211,9 +4211,8 @@ def update(
                 legacy_download=effective_legacy,
             )
 
-            from . import _assets as _assets_mod
-            if effective_legacy or not _assets_mod.available():
-                _write_source_marker(project_path, _SOURCE_LEGACY)
+            # .rpgkit/.source is written by whichever provisioning path
+            # actually ran (_install_from_bundle / _download_and_extract_release_zip).
 
             # Refresh .rpgkit/config.toml only when missing (preserves
             # user customisations on re-update).
