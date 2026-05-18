@@ -551,6 +551,9 @@ _GITIGNORE_RPGKIT_COMMON = """\
 # Runtime workspace (logs, generated data, trajectory)
 .rpgkit/
 
+# RPG-Kit Python environment
+.venv_rpgkit/
+
 # Codegen dev environments
 .venv_dev/
 .rpgkit_dev_env/
@@ -1375,7 +1378,7 @@ def _workspace_has_python_code(project_path: Path) -> bool:
     ``__pycache__``) are pruned too — a ``*.py`` under any of them
     would not indicate user code.
     """
-    PRUNE = {".rpgkit", ".git", ".venv", "venv", "node_modules",
+    PRUNE = {".rpgkit", ".git", ".venv", ".venv_rpgkit", "venv", "node_modules",
              "__pycache__", ".tox", ".mypy_cache", ".pytest_cache",
              ".ruff_cache", "dist", "build"}
     for dirpath, dirnames, filenames in os.walk(project_path):
@@ -3107,6 +3110,71 @@ def ensure_executable_scripts(
                 console.print(f"  - {f}")
 
 
+def setup_venv_rpgkit(
+    project_path: Path, tracker: StepTracker | None = None
+) -> None:
+    """Create or update .venv_rpgkit with RPG-Kit Python dependencies."""
+    venv_dir = project_path / ".venv_rpgkit"
+    rpgkit_dir = project_path / ".rpgkit"
+    pyproject = rpgkit_dir / "pyproject.toml"
+
+    if tracker:
+        tracker.start("venv")
+
+    if not pyproject.is_file():
+        msg = ".rpgkit/pyproject.toml not found — cannot install Python dependencies"
+        if tracker:
+            tracker.skip("venv", msg)
+        else:
+            console.print(f"[yellow]Warning:[/yellow] {msg}")
+        return
+
+    try:
+        is_new = not venv_dir.exists()
+
+        if is_new:
+            subprocess.run(
+                ["uv", "venv", str(venv_dir)],
+                check=True,
+                capture_output=True,
+                text=True,
+            )
+
+        if os.name == "nt":
+            pip_python = venv_dir / "Scripts" / "python.exe"
+        else:
+            pip_python = venv_dir / "bin" / "python3"
+
+        subprocess.run(
+            ["uv", "pip", "install", str(rpgkit_dir), "--python", str(pip_python)],
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+
+        if tracker:
+            tracker.complete(
+                "venv",
+                "created .venv_rpgkit" if is_new else "updated .venv_rpgkit",
+            )
+    except FileNotFoundError:
+        msg = "uv not found — install uv (https://docs.astral.sh/uv/) to enable auto-setup"
+        if tracker:
+            tracker.skip("venv", msg)
+        console.print(f"[yellow]Warning:[/yellow] {msg}")
+    except subprocess.CalledProcessError as e:
+        detail = e.stderr.strip() if e.stderr else str(e)
+        msg = f"Failed to set up .venv_rpgkit:\n{detail}"
+        if tracker:
+            tracker.error("venv", detail[:120])
+        console.print(f"[red]Error:[/red] {msg}")
+    except Exception as e:
+        msg = f"Failed to set up .venv_rpgkit: {e}"
+        if tracker:
+            tracker.error("venv", str(e)[:120])
+        console.print(f"[red]Error:[/red] {msg}")
+
+
 def ensure_rpgkit_runtime_dirs(
     project_path: Path, tracker: StepTracker | None = None
 ) -> None:
@@ -3435,6 +3503,7 @@ def init(
         ("gitignore", "Configure .gitignore"),
         ("mcp", "Configure MCP server"),
         ("legacy-cleanup", "Remove obsolete persistent rules"),
+        ("venv", "Set up Python environment"),
         ("cleanup", "Cleanup"),
         ("git", "Initialize git repository"),
         ("hooks", "Install auto-update hooks"),
@@ -3502,6 +3571,8 @@ def init(
                     tracker.skip("legacy-cleanup", "none")
             except Exception as exc:
                 tracker.error("legacy-cleanup", str(exc))
+
+            setup_venv_rpgkit(project_path, tracker=tracker)
 
             if not no_git:
                 tracker.start("git")
@@ -3617,6 +3688,12 @@ def init(
             f"{step_num}. Set [cyan]CODEX_HOME[/cyan] environment variable before running Codex: [cyan]{cmd}[/cyan]"
         )
         step_num += 1
+
+    steps_lines.append(
+        f"{step_num}. Activate the RPG-Kit Python environment: "
+        f"[cyan]source .venv_rpgkit/bin/activate[/cyan]"
+    )
+    step_num += 1
 
     steps_lines.append(f"{step_num}. Start using slash commands with your AI agent:")
 
@@ -3840,6 +3917,7 @@ def update(
         ("gitignore", "Configure .gitignore"),
         ("mcp", "Configure MCP server"),
         ("legacy-cleanup", "Remove obsolete persistent rules"),
+        ("venv", "Set up Python environment"),
         ("hooks", "Install auto-update hooks"),
         ("cleanup", "Cleanup"),
         ("final", "Finalize"),
@@ -3909,6 +3987,8 @@ def update(
             except Exception as exc:
                 tracker.error("legacy-cleanup", str(exc))
 
+            setup_venv_rpgkit(project_path, tracker=tracker)
+
             # Re-install hooks so behavior fixes propagate to existing
             # workspaces.  Without this, the .git/hooks/* files stay
             # frozen at whatever version was active during the original
@@ -3954,6 +4034,16 @@ def update(
     console.print(
         f"[dim]Updated: scripts, templates, and {AGENT_CONFIG[selected_ai]['name']} "
         f"command definitions in [cyan]{project_path}[/cyan][/dim]"
+    )
+    console.print()
+    console.print(
+        Panel(
+            "Activate the RPG-Kit Python environment before using slash commands:\n\n"
+            "[cyan]source .venv_rpgkit/bin/activate[/cyan]",
+            title="[yellow]Environment Setup[/yellow]",
+            border_style="yellow",
+            padding=(1, 2),
+        )
     )
 
 
