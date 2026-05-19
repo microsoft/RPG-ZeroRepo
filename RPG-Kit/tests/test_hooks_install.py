@@ -557,8 +557,11 @@ def test_setup_gitignore_is_idempotent(tmp_path):
     assert first == second  # second call is a no-op
     # No duplicate RPG-Kit header
     assert second.count(rpgkit_cli._GITIGNORE_RPGKIT_HEADER) == 1
-    # No duplicate .rpgkit/ entry
-    assert second.count(".rpgkit/") == 1
+    # No duplicate .rpgkit/ directory entry.  Count actual lines (after
+    # stripping) because the appended block also contains
+    # `!.rpgkit/config.toml` which holds .rpgkit/ as a substring.
+    lines = [l.strip() for l in second.splitlines()]
+    assert lines.count(".rpgkit/") == 1
 
 
 def test_setup_gitignore_partial_existing_rules_only_appends_missing(tmp_path):
@@ -567,8 +570,13 @@ def test_setup_gitignore_partial_existing_rules_only_appends_missing(tmp_path):
     (tmp_path / ".gitignore").write_text(".rpgkit/\n")
     rpgkit_cli._setup_gitignore(tmp_path, "copilot")
     content = (tmp_path / ".gitignore").read_text()
-    # .rpgkit/ must NOT be duplicated
-    assert content.count(".rpgkit/") == 1
+    # .rpgkit/ directory entry must NOT be duplicated.  Compare exact
+    # lines (after stripping) because the appended block also contains
+    # `!.rpgkit/config.toml` which holds .rpgkit/ as a substring.
+    lines = [l.strip() for l in content.splitlines()]
+    assert lines.count(".rpgkit/") == 1
+    # The new managed config.toml un-ignore line is present
+    assert "!.rpgkit/config.toml" in lines
     # Missing rules are now present
     assert ".vscode/mcp.json" in content
     assert ".github/agents/" in content

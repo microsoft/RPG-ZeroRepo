@@ -715,6 +715,9 @@ _GITIGNORE_RPGKIT_HEADER = "# RPG-Kit ignores (managed by `rpgkit init/update`)"
 _GITIGNORE_RPGKIT_COMMON = """\
 # Runtime workspace (logs, generated data, trajectory)
 .rpgkit/
+# but DO track the workspace AI config so collaborators see the same
+# default — see docs/configuration.md
+!.rpgkit/config.toml
 
 # Codegen dev environments
 .venv_dev/
@@ -3516,7 +3519,11 @@ def init(
     pre: bool = typer.Option(
         False,
         "--pre",
-        help="Download the latest pre-release (dev build) instead of the latest stable release",
+        help=(
+            "Download the latest pre-release (dev build) from GitHub. "
+            "Implies --legacy-download since bundle mode has no notion "
+            "of pre-release builds."
+        ),
     ),
     no_mcp: bool = typer.Option(
         False,
@@ -4006,7 +4013,11 @@ def update(
     pre: bool = typer.Option(
         False,
         "--pre",
-        help="Download the latest pre-release (dev build) instead of the latest stable release",
+        help=(
+            "Download the latest pre-release (dev build) from GitHub. "
+            "Implies --legacy-download since bundle mode has no notion "
+            "of pre-release builds."
+        ),
     ),
     no_mcp: bool = typer.Option(
         False,

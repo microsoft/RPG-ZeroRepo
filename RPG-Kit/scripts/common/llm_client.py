@@ -59,12 +59,17 @@ def _set_pdeathsig() -> None:
 # so unit tests and tools that construct an LLMClient without intending
 # to invoke the LLM continue to work.
 
-_PLACEHOLDER_LITERAL = "<AI_CLI_CMD>"
+# Sentinel value used to detect whether the release-zip CI substituted
+# the baked-in value.  Built programmatically (string concatenation)
+# so that ``sed s|<AI_CLI_CMD>|...|g`` — the CI's substitution invocation,
+# see .github/workflows/scripts/rpgkit/create-release-packages.sh — does
+# not also rewrite this line and break the comparison below.
+_PLACEHOLDER_LITERAL = "<" + "AI_CLI_CMD" + ">"
 
 # Module-level default — the release-zip CI replaces this exact literal
 # with the chosen agent's command at packaging time.  Bundle installs
 # leave it unchanged and rely on P2/P3 to supply the value.
-_BAKED_IN_VALUE = _PLACEHOLDER_LITERAL
+_BAKED_IN_VALUE = "<AI_CLI_CMD>"
 
 
 def _load_ai_cli_cmd() -> str:
@@ -562,7 +567,25 @@ class LLMClient:
 
         Returns:
             LLM response text, or None if all retries failed.
+
+        Raises:
+            RuntimeError: only when ``self.tool`` is not configured.
+                Genuine LLM-call failures (subprocess errors, timeouts,
+                bad responses) are swallowed and surface as ``None``;
+                missing configuration is an unrecoverable user-action
+                error and must not be silently masked.
         """
+        # Eagerly surface the "AI CLI not configured" condition.  This is
+        # not a transient failure that ``None`` should represent — the
+        # user needs an actionable error.  Genuine LLM failures continue
+        # to be caught below.
+        if not self.tool or self.tool == _PLACEHOLDER_LITERAL:
+            raise RuntimeError(
+                "AI CLI command not configured.  Run "
+                "`rpgkit init --ai <name>` in this workspace, or set the "
+                "RPGKIT_AI_CLI_CMD environment variable."
+            )
+
         prompt = self._flatten_memory(memory)
         try:
             return self.generate(
