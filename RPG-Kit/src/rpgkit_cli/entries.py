@@ -1,0 +1,44 @@
+"""Console-script entries for ``rpgkit-cli``.
+
+Currently provides:
+
+* :func:`mcp_main` — the ``rpgkit-mcp`` console script.  Sets up
+  ``sys.path`` so that the bundled ``scripts/`` directory is importable,
+  then hands off to ``mcp_server.main()``.
+
+This module is deliberately tiny and stdout-silent — MCP uses stdio as
+its transport, so writing anything to stdout from import-time code would
+corrupt the JSON-RPC stream.  All diagnostics go to stderr.
+"""
+
+from __future__ import annotations
+
+
+def mcp_main() -> None:
+    """Console-script entry for MCP clients (stdio transport)."""
+    import os
+    import sys
+
+    from . import _assets
+
+    os.environ.setdefault("PYTHONDONTWRITEBYTECODE", "1")
+
+    scripts_dir = _assets.scripts_dir()
+    if scripts_dir is None or not scripts_dir.is_dir():
+        sys.stderr.write(
+            "rpgkit-mcp: packaged scripts directory unavailable. "
+            "Try reinstalling: `uv tool install rpgkit-cli --force`.\n"
+        )
+        sys.exit(2)
+
+    # Make ``mcp_server`` and its sibling packages (``common``, ``rpg``)
+    # importable from the packaged scripts dir.
+    sys.path.insert(0, str(scripts_dir))
+
+    try:
+        from mcp_server import main as _mcp_server_main  # type: ignore[import-not-found]
+    except Exception as exc:  # pragma: no cover - import-time failure surface
+        sys.stderr.write(f"rpgkit-mcp: failed to import mcp_server: {exc}\n")
+        sys.exit(3)
+
+    _mcp_server_main()

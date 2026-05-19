@@ -61,14 +61,24 @@ def test_install_claude_hooks_writes_session_start(project):
     session_start = data["hooks"]["SessionStart"]
     assert isinstance(session_start, list) and len(session_start) == 1
     cmd = session_start[0]["hooks"][0]["command"]
-    assert "update_graphs.py" in cmd
+    # Hook now invokes the global ``rpgkit`` CLI; no embedded sys.executable.
+    assert "rpgkit script update_graphs.py status" in cmd
+    # PATH fallback for GUI-launched session starts (VS Code / IDE git UI).
+    assert "command -v rpgkit" in cmd
     assert cmd.endswith("status 2>/dev/null || echo '[RPG-Kit] RPG status unavailable'")
 
 
 def test_install_claude_hooks_is_idempotent_across_python_upgrades(project, monkeypatch):
-    """Re-installing with a different ``sys.executable`` must not stack duplicate SessionStart entries: an outdated Python path pointing to a missing interpreter would fail every session start, while still appearing alongside the new entry."""
+    """Re-installing must not stack duplicate SessionStart entries.
+
+    Hooks no longer embed ``sys.executable``; they delegate to the
+    globally-installed ``rpgkit`` CLI.  Re-running install therefore
+    yields the exact same command and must remain a single entry
+    (not a duplicate per invocation).
+    """
     rpgkit_cli._install_claude_hooks(project)
-    # Simulate a Python interpreter upgrade (path differs).
+    # Simulate any environment change that previously affected hook content;
+    # the new hook body is interpreter-independent so this should be a no-op.
     monkeypatch.setattr(rpgkit_cli.sys, "executable", "/opt/new-python/bin/python")
     rpgkit_cli._install_claude_hooks(project)
     data = json.loads((project / ".claude" / "settings.json").read_text())
@@ -79,15 +89,18 @@ def test_install_claude_hooks_is_idempotent_across_python_upgrades(project, monk
     ]
     assert len(rpgkit_entries) == 1
     cmd = rpgkit_entries[0]["hooks"][0]["command"]
-    assert "/opt/new-python/bin/python" in cmd  # latest interpreter wins
+    # Always uses the rpgkit-script form regardless of interpreter path.
+    assert "rpgkit script update_graphs.py" in cmd
+    assert "/opt/new-python/bin/python" not in cmd
 
 
 def test_install_claude_hooks_shell_escapes_special_chars(project, monkeypatch):
-    """Paths with spaces or quotes must survive ``sh -c`` tokenisation.
+    """Interpreter / workspace paths must not appear in the hook command.
 
-    Claude hooks run shell form, so the command field is passed verbatim
-    to ``sh -c``. We rely on ``shlex.quote`` for safety; json.dumps
-    would leave bare spaces in paths exposed.
+    Previously the hook embedded ``sys.executable`` and the workspace
+    script path, requiring ``shlex.quote`` to survive spaces.  The new
+    hook body invokes the global ``rpgkit`` CLI directly, so paths with
+    special characters can't end up inside the command string.
     """
     monkeypatch.setattr(
         rpgkit_cli.sys, "executable", "/path with space/python"
@@ -97,8 +110,9 @@ def test_install_claude_hooks_shell_escapes_special_chars(project, monkeypatch):
         json.loads((project / ".claude" / "settings.json").read_text())
         ["hooks"]["SessionStart"][0]["hooks"][0]["command"]
     )
-    # shlex.quote wraps in single quotes on POSIX
-    assert "'/path with space/python'" in cmd
+    # No path leakage from the interpreter / workspace location.
+    assert "/path with space" not in cmd
+    assert "rpgkit script update_graphs.py" in cmd
 
 
 def test_install_claude_hooks_merges_existing(project):

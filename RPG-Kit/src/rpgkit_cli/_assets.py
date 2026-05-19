@@ -46,28 +46,101 @@ def core_pack_root() -> Path:
     return Path(str(files("rpgkit_cli").joinpath("core_pack")))
 
 
-def available() -> bool:
-    """True iff a usable bundle exists in the installed package.
+def _dev_scripts_dir() -> Path | None:
+    """Locate the repo-root ``scripts/`` directory for editable/dev installs.
 
-    Returns ``False`` for editable installs (where ``force-include`` did
-    not run) and for any other situation where the bundle is missing
-    or incomplete.  Callers use this to decide whether to fall back to
-    the legacy GitHub-release-zip download path.
+    When ``rpgkit-cli`` is installed in editable mode (``pip install -e .``
+    or ``uv run rpgkit ...`` from the source tree), hatch's
+    ``force-include`` does not populate ``rpgkit_cli/core_pack/``.  In
+    that case we fall back to the live source at ``<repo>/scripts/``,
+    which sits two levels above this file::
+
+        <repo>/
+            src/rpgkit_cli/_assets.py   ← __file__
+            scripts/                     ← target
     """
-    root = core_pack_root()
-    return root.is_dir() and (root / "scripts").is_dir()
+    here = Path(__file__).resolve()
+    # src/rpgkit_cli/_assets.py → repo = parents[2]
+    if len(here.parents) >= 3:
+        candidate = here.parents[2] / "scripts"
+        if candidate.is_dir():
+            return candidate
+    return None
+
+
+def _dev_commands_dir() -> Path | None:
+    """Counterpart to :func:`_dev_scripts_dir` for slash-command templates."""
+    here = Path(__file__).resolve()
+    if len(here.parents) >= 3:
+        candidate = here.parents[2] / "templates" / "commands"
+        if candidate.is_dir():
+            return candidate
+    return None
+
+
+def available() -> bool:
+    """True iff a usable scripts source exists.
+
+    Returns ``True`` when either the wheel-bundled ``core_pack/scripts/``
+    OR the dev-mode ``<repo>/scripts/`` is present.  Used to decide
+    whether the bundle path is viable; callers fall back to the legacy
+    GitHub-release-zip download path otherwise.
+    """
+    return scripts_dir().is_dir()
 
 
 def scripts_dir() -> Path:
-    """Directory containing the bundled RPG-Kit pipeline scripts."""
-    return core_pack_root() / "scripts"
+    """Directory containing the RPG-Kit pipeline scripts.
+
+    Resolution order:
+      1. Wheel bundle: ``<site-packages>/rpgkit_cli/core_pack/scripts/``
+      2. Dev/editable fallback: ``<repo>/scripts/``
+
+    Falls back to the wheel path even when missing so error messages
+    contain a stable, recognisable location.
+    """
+    bundled = core_pack_root() / "scripts"
+    if bundled.is_dir():
+        return bundled
+    dev = _dev_scripts_dir()
+    if dev is not None:
+        return dev
+    return bundled  # may not exist; caller decides how to surface
 
 
 def commands_dir() -> Path:
-    """Directory containing the bundled slash-command templates."""
-    return core_pack_root() / "commands"
+    """Directory containing the slash-command templates.
+
+    Same resolution order as :func:`scripts_dir`.
+    """
+    bundled = core_pack_root() / "commands"
+    if bundled.is_dir():
+        return bundled
+    dev = _dev_commands_dir()
+    if dev is not None:
+        return dev
+    return bundled
 
 
 def mcp_server_path() -> Path:
-    """Convenience: path to the bundled MCP server entry script."""
+    """Convenience: path to the MCP server entry script."""
     return scripts_dir() / "mcp_server.py"
+
+
+def list_scripts() -> list[str]:
+    """Return all script relative paths (POSIX-style) under :func:`scripts_dir`.
+
+    Filters to ``.py`` files only, skips ``__pycache__`` directories,
+    and sorts alphabetically.  Used by ``rpgkit script --list``.
+    """
+    root = scripts_dir()
+    if not root.is_dir():
+        return []
+    out: list[str] = []
+    for p in root.rglob("*.py"):
+        if "__pycache__" in p.parts:
+            continue
+        out.append(p.relative_to(root).as_posix())
+    out.sort()
+    return out
+

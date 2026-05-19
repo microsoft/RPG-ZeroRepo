@@ -1434,37 +1434,26 @@ def _generate_mcp_config(
 ) -> None:
     """Generate MCP server configuration for the selected AI assistant.
 
-    Both Claude and VS Code Copilot launch the MCP server via the current
-    Python interpreter (``sys.executable``) running
-    ``<project>/.rpgkit/scripts/mcp_server.py`` — this guarantees the
-    interpreter that has ``rpgkit-cli``'s dependencies (mcp, rapidfuzz, …)
-    installed is used to host the server.
+    Both Claude and VS Code Copilot launch the MCP server via the
+    ``rpgkit-mcp`` console script installed alongside ``rpgkit-cli``.
+    This keeps the config portable across machines (no absolute paths
+    to a workspace-local copy) and ensures the server always runs
+    against the bundled scripts that match the installed CLI version.
 
     - Claude:  ``.mcp.json``         (key ``mcpServers.rpg-tools``)
     - Copilot: ``.vscode/mcp.json``  (key ``servers.rpg-tools``,
       VS Code 1.102+ standard layout)
 
-    Generated paths are absolute and machine-specific; the corresponding
-    files are ignored via :func:`_setup_gitignore` (called earlier in the
-    init flow), not by this function.
+    The ``rpgkit-mcp`` command must be on ``PATH``.  ``rpgkit init``
+    emits a warning at the end of the run when it isn't, so MCP
+    clients fail with a clear cause rather than the opaque
+    ``Connection closed`` error.
     """
-    # Resolve absolute paths up-front so we never write a stale/relative path.
     project_path = project_path.resolve()
-    server_script = (project_path / ".rpgkit" / "scripts" / "mcp_server.py").resolve()
-
-    if not server_script.is_file():
-        # Should not happen — extraction step runs before us — but bail out
-        # cleanly instead of writing a config that would fail at runtime.
-        msg = f"mcp_server.py not found at {server_script}"
-        if tracker:
-            tracker.error("mcp", msg)
-        else:
-            console.print(f"[yellow]Warning: {msg}[/yellow]")
-        return
 
     mcp_server_config = {
-        "command": sys.executable,
-        "args": [str(server_script)],
+        "command": "rpgkit-mcp",
+        "args": [],
     }
 
     try:
@@ -2057,13 +2046,10 @@ def _install_claude_hooks(project_path: Path) -> None:
     if settings_path.exists():
         shutil.copy2(settings_path, settings_dir / "settings.json.bak")
 
-    # Shell form: ``command`` is passed to ``sh -c``. Use shlex.quote so
-    # paths containing spaces or special characters survive shell
-    # tokenisation (json.dumps is JSON-safe but not shell-safe).
-    update_script = shlex.quote(
-        str((project_path / ".rpgkit" / "scripts" / "update_graphs.py").resolve())
-    )
-    python = shlex.quote(sys.executable)
+    # The command is executed by Claude Code via ``sh -c``, so we inline
+    # the same PATH-fallback used by git hooks (see _HOOK_PATH_FALLBACK).
+    # Use ``;`` rather than ``&&`` so the rpgkit call always runs after
+    # the (possibly no-op) PATH adjustment.
     marker = "update_graphs.py"  # used for idempotent dedupe across upgrades
 
     rpg_session_entry = {
@@ -2072,7 +2058,8 @@ def _install_claude_hooks(project_path: Path) -> None:
             {
                 "type": "command",
                 "command": (
-                    f"{python} {update_script} status 2>/dev/null"
+                    f"{_HOOK_PATH_FALLBACK}; "
+                    "rpgkit script update_graphs.py status 2>/dev/null"
                     " || echo '[RPG-Kit] RPG status unavailable'"
                 ),
                 "timeout": 10,
@@ -2306,6 +2293,27 @@ def _strip_hook_block(
     return "\n".join(out)
 
 
+# ---------------------------------------------------------------------------
+# PATH fallback for hook bodies
+# ---------------------------------------------------------------------------
+#
+# Hooks invoke ``rpgkit`` (the globally-installed CLI) rather than a
+# workspace-local script copy.  When the hook is triggered from a GUI
+# editor's source-control panel (VS Code, IntelliJ, GitHub Desktop, ...)
+# the process environment may not include the user's shell PATH, so
+# ``rpgkit`` is unresolvable and the hook silently fails.
+#
+# This snippet is prepended to every hook body.  When ``rpgkit`` is
+# already on PATH (terminal invocations) the test short-circuits and
+# the ``export`` is skipped — zero overhead.  When it isn't, we
+# prepend ``$HOME/.local/bin`` which is ``uv tool install``'s default
+# bin directory.
+_HOOK_PATH_FALLBACK = (
+    'command -v rpgkit >/dev/null 2>&1 || '
+    'export PATH="$HOME/.local/bin:$PATH"'
+)
+
+
 def _install_hook_snippet(
     hooks_dir: Path,
     hook_name: str,
@@ -2371,19 +2379,23 @@ def _install_git_pre_commit_hook(project_path: Path) -> bool:
     The hook passes ``--staged-only`` so only files the user
     ``git add``'d contribute to the diff — working-tree-but-not-staged
     changes are out of scope for the imminent commit.
+
+    The hook invokes the globally-installed ``rpgkit`` CLI rather than
+    a workspace-local script copy.  A PATH fallback prepends
+    ``$HOME/.local/bin`` (uv tool install's default bin dir) so the
+    hook works when triggered from GUI editors (VS Code / IntelliJ
+    source-control panels) whose process environment may not include
+    the user's shell PATH.
     """
     hooks_dir = _resolve_git_hooks_dir(project_path)
     if hooks_dir is None:
         return False
 
-    python = shlex.quote(sys.executable)
-    update_script = shlex.quote(
-        str((project_path / ".rpgkit" / "scripts" / "update_graphs.py").resolve())
-    )
     marker = "# RPG-Kit: incremental RPG sync on commit"
     body = (
         f"{marker}\n"
-        f"{python} {update_script} sync --staged-only 2>/dev/null || true"
+        f"{_HOOK_PATH_FALLBACK}\n"
+        f"rpgkit script update_graphs.py sync --staged-only 2>/dev/null || true"
     )
     # Legacy: pre-Step-3 pre-commit shipped a 2-line snippet under the
     # marker below.  Removed on upgrade so users don't end up running
@@ -2413,14 +2425,11 @@ def _install_git_post_merge_hook(project_path: Path) -> bool:
     if hooks_dir is None:
         return False
 
-    python = shlex.quote(sys.executable)
-    update_script = shlex.quote(
-        str((project_path / ".rpgkit" / "scripts" / "update_graphs.py").resolve())
-    )
     marker = "# RPG-Kit: incremental RPG sync after merge / pull"
     body = (
         f"{marker}\n"
-        f"{python} {update_script} sync 2>/dev/null || true"
+        f"{_HOOK_PATH_FALLBACK}\n"
+        f"rpgkit script update_graphs.py sync 2>/dev/null || true"
     )
     # post-merge was introduced with the sentinel-block design already
     # in mind, so no legacy migration is needed here.
@@ -2458,10 +2467,6 @@ def _install_git_post_commit_hook(project_path: Path) -> bool:
     if hooks_dir is None:
         return False
 
-    python = shlex.quote(sys.executable)
-    update_script = shlex.quote(
-        str((project_path / ".rpgkit" / "scripts" / "update_graphs.py").resolve())
-    )
     log_file = shlex.quote(
         str((project_path / ".rpgkit" / "logs" / "update_rpg.log").resolve())
     )
@@ -2472,8 +2477,9 @@ def _install_git_post_commit_hook(project_path: Path) -> bool:
     workspace_dir = shlex.quote(str(project_path.resolve()))
     body = (
         f"{marker}\n"
+        f"{_HOOK_PATH_FALLBACK}\n"
         # Phase 1: synchronous meta.git advance
-        f"{python} {update_script} sync 2>/dev/null || true\n"
+        f"rpgkit script update_graphs.py sync 2>/dev/null || true\n"
         # Phase 2: background full RPG update.
         #
         # Lock semantics (v4):
@@ -2507,7 +2513,7 @@ def _install_git_post_commit_hook(project_path: Path) -> bool:
         f"if mkdir {lock_file} 2>/dev/null; then\n"
         f"  nohup env -u GIT_INDEX_FILE -u GIT_DIR "
         f'sh -c "cd {workspace_dir}; sleep 2; '
-        f'{python} {update_script} update-rpg --json >> {log_file} 2>&1; '
+        f'rpgkit script update_graphs.py update-rpg --json >> {log_file} 2>&1; '
         f'rmdir {lock_file}" </dev/null >/dev/null 2>&1 &\n'
         f"fi"
     )
@@ -3857,6 +3863,39 @@ def init(
     console.print(tracker.render())
     console.print("\n[bold green]Project ready.[/bold green]")
 
+    # PATH self-check: hooks and MCP rely on ``rpgkit`` / ``rpgkit-mcp``
+    # being resolvable.  If they aren't on PATH, the user will hit
+    # opaque failures from git hooks and MCP clients later — surface
+    # the actionable hint now.
+    import shutil as _shutil
+    if _shutil.which("rpgkit-mcp") is None or _shutil.which("rpgkit") is None:
+        reinstall_cmd: Optional[list[str]] = _upgrade_command(_detect_install_method())
+        # ``--force`` reinstalls in place which fixes most PATH issues
+        # caused by partial installs / corrupted shim links.
+        if reinstall_cmd and reinstall_cmd[:3] == ["uv", "tool", "upgrade"]:
+            reinstall_hint = "uv tool install rpgkit-cli --force"
+        elif reinstall_cmd and reinstall_cmd[:2] == ["pipx", "upgrade"]:
+            reinstall_hint = "pipx install rpgkit-cli --force"
+        elif reinstall_cmd:
+            reinstall_hint = " ".join(reinstall_cmd)
+        else:
+            reinstall_hint = "uv tool install rpgkit-cli --force  # or your installer's equivalent"
+        console.print()
+        path_panel = Panel(
+            "[yellow]Warning:[/yellow] [cyan]rpgkit[/cyan] / [cyan]rpgkit-mcp[/cyan] "
+            "not found on PATH.\n\n"
+            "Git hooks and the MCP server invoke these commands; they will "
+            "fail until PATH is fixed.\n\n"
+            "[bold]Fix:[/bold]\n"
+            "  - Linux/macOS: add [cyan]~/.local/bin[/cyan] to PATH in your shell rc\n"
+            "  - Windows:     add [cyan]%USERPROFILE%\\.local\\bin[/cyan] to PATH\n"
+            f"  - Or reinstall: [cyan]{reinstall_hint}[/cyan]",
+            title="[red]PATH check[/red]",
+            border_style="yellow",
+            padding=(1, 2),
+        )
+        console.print(path_panel)
+
     # Show git error details if initialization failed
     if git_error_message:
         console.print()
@@ -4315,6 +4354,118 @@ def update(
         f"[dim]Updated: scripts, templates, and {AGENT_CONFIG[selected_ai]['name']} "
         f"command definitions in [cyan]{project_path}[/cyan][/dim]"
     )
+
+
+@app.command(
+    context_settings={
+        "allow_extra_args": True,
+        "ignore_unknown_options": True,
+        # Disable click's auto-help so ``--help`` is forwarded to the
+        # target script.  Use ``rpgkit script`` (no args) or
+        # ``rpgkit --help script`` to see this command's own help.
+        "help_option_names": [],
+    },
+)
+def script(
+    ctx: typer.Context,
+    relpath: Optional[str] = typer.Argument(
+        None,
+        help="Script path relative to the packaged scripts directory "
+        "(e.g. 'smoke_test.py' or 'rpg_edit/validate.py'). "
+        "The '.py' suffix is optional.",
+    ),
+    list_all: bool = typer.Option(
+        False,
+        "--list",
+        help="List all available scripts and exit.",
+    ),
+    where: Optional[str] = typer.Option(
+        None,
+        "--where",
+        metavar="NAME",
+        help="Print the absolute filesystem path of NAME and exit.",
+    ),
+) -> None:
+    """Execute a bundled RPG-Kit pipeline script.
+
+    All arguments after ``<relpath>`` are forwarded verbatim to the
+    target script.  Standard input/output/error are inherited so the
+    child's behaviour matches direct invocation.
+
+    Examples::
+
+        rpgkit script smoke_test.py --json
+        rpgkit script rpg_edit/validate.py
+        rpgkit script --list
+        rpgkit script --where mcp_server.py
+    """
+    from . import _assets
+
+    if list_all:
+        for name in _assets.list_scripts():
+            console.print(name)
+        raise typer.Exit(0)
+
+    if where is not None:
+        path = _resolve_script_path(where)
+        if path is None:
+            console.print(f"[red]script not found: {where}[/red]")
+            raise typer.Exit(1)
+        # Print plain path (no markup) so it pipes cleanly into $(...)
+        print(str(path))
+        raise typer.Exit(0)
+
+    if not relpath:
+        console.print(
+            "[red]error:[/red] missing script path. "
+            "Use [cyan]rpgkit script --list[/cyan] to see available scripts."
+        )
+        raise typer.Exit(2)
+
+    path = _resolve_script_path(relpath)
+    if path is None:
+        console.print(f"[red]script not found: {relpath}[/red]")
+        raise typer.Exit(1)
+
+    # Build child env: inherit, plus disable .pyc writes so the read-mostly
+    # tool-venv install dir doesn't accumulate __pycache__ noise.
+    env = os.environ.copy()
+    env.setdefault("PYTHONDONTWRITEBYTECODE", "1")
+
+    cmd = [sys.executable, str(path), *ctx.args]
+    proc = subprocess.run(cmd, env=env)
+    raise typer.Exit(proc.returncode)
+
+
+def _resolve_script_path(relpath: str) -> Optional[Path]:
+    """Resolve ``relpath`` against the packaged scripts dir.
+
+    Rejects path-traversal and absolute paths; appends ``.py`` when no
+    suffix is given.  Returns ``None`` if the resolved path is not a
+    regular file inside :func:`_assets.scripts_dir`.
+    """
+    from . import _assets
+
+    # Normalise separators for cross-platform invocation
+    rel = relpath.replace("\\", "/")
+    # Security: reject parent-traversal and absolute paths
+    if rel.startswith("/") or ".." in rel.split("/"):
+        return None
+    p = Path(rel)
+    if p.is_absolute():
+        return None
+    if p.suffix == "":
+        p = p.with_suffix(".py")
+    root = _assets.scripts_dir()
+    candidate = (root / p).resolve()
+    try:
+        candidate.relative_to(root.resolve())
+    except ValueError:
+        # Resolved outside the scripts root (e.g. via symlink) — refuse
+        return None
+    if not candidate.is_file():
+        return None
+    return candidate
 
 
 @app.command()

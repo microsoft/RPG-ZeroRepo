@@ -29,6 +29,7 @@ dependencies = [
 
 [project.scripts]
 rpgkit = "rpgkit_cli:main"
+rpgkit-mcp = "rpgkit_cli.entries:mcp_main"
 
 [project.urls]
 Repository = "https://github.com/microsoft/RPG-ZeroRepo"

@@ -377,10 +377,18 @@ def create_mcp_server(rpg_file: str):
 
 
 # ---------------------------------------------------------------------------
-# Entry point: python .rpgkit/scripts/mcp_server.py [--rpg-file PATH]
+# Entry point: ``rpgkit-mcp`` console script (via rpgkit_cli.entries:mcp_main)
+# or direct ``python <scripts_dir>/mcp_server.py [--rpg-file PATH]`` for
+# debugging.
 # ---------------------------------------------------------------------------
 
-if __name__ == "__main__":
+def main() -> None:
+    """Run the MCP server over stdio.
+
+    Used by both the ``rpgkit-mcp`` console-script entry (which sets up
+    ``sys.path`` then imports and calls this function) and the direct
+    ``python mcp_server.py`` invocation under ``__main__``.
+    """
     rpg_path = _resolve_rpg_path()
     # NOTE: do NOT sys.exit when the file is missing.  The MCP transport
     # must stay up so the client can actually receive the
@@ -396,3 +404,7 @@ if __name__ == "__main__":
 
     server = create_mcp_server(rpg_file=rpg_path)
     server.run(transport="stdio")
+
+
+if __name__ == "__main__":
+    main()
