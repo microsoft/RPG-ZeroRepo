@@ -4360,7 +4360,12 @@ def check():
 
 @app.command()
 def version():
-    """Display version and system information."""
+    """Display version and system information.
+
+    Also fetches the latest release tag from GitHub and reports whether
+    the locally installed CLI is up to date, behind, or ahead (dev
+    build).  Network failures are swallowed and surface as "offline".
+    """
     show_banner()
 
     # Get CLI version from package metadata
@@ -4382,8 +4387,9 @@ def version():
     # Fetch latest template release version
     repo_owner, repo_name = _get_repo_info()
 
-    template_version = "unknown"
+    latest_version = "unknown"
     release_date = "unknown"
+    fetch_error: str | None = None
 
     try:
         release_data = _fetch_latest_rpgkit_release(
@@ -4392,7 +4398,7 @@ def version():
             client,
             timeout=10,
         )
-        template_version = _format_rpgkit_version(release_data.get("tag_name", "unknown"))
+        latest_version = _format_rpgkit_version(release_data.get("tag_name", "unknown"))
         release_date = release_data.get("published_at", "unknown")
         if release_date != "unknown":
             # Format the date nicely
@@ -4401,16 +4407,65 @@ def version():
                 release_date = dt.strftime("%Y-%m-%d")
             except Exception:
                 pass
-    except Exception:
-        pass
+    except Exception as exc:
+        fetch_error = str(exc).splitlines()[0] if str(exc) else type(exc).__name__
+
+    # ------------------------------------------------------------------
+    # Compute the status hint: up-to-date / outdated / ahead / offline.
+    # Uses ``packaging.version`` (stdlib-ish — ships with setuptools and
+    # is a transitive dep of pip itself) so PEP 440 pre-release / dev
+    # suffixes are compared correctly.  Falls back to a plain string
+    # comparison when ``packaging`` is unavailable.
+    # ------------------------------------------------------------------
+    status_label = "[dim]unknown[/dim]"
+    status_hint: str | None = None
+
+    if fetch_error is not None:
+        status_label = "[yellow]offline[/yellow]"
+        status_hint = (
+            f"Could not query GitHub for the latest release: {fetch_error}. "
+            "Local install is still usable; rerun `rpgkit version` when "
+            "you have network access to compare."
+        )
+    elif cli_version != "unknown" and latest_version != "unknown":
+        try:
+            from packaging.version import Version as _Ver
+
+            local_v = _Ver(cli_version)
+            remote_v = _Ver(latest_version)
+        except Exception:
+            local_v = cli_version
+            remote_v = latest_version
+
+        if local_v == remote_v:
+            status_label = "[green]up to date[/green]"
+        elif local_v < remote_v:
+            status_label = f"[yellow]outdated → {latest_version}[/yellow]"
+            status_hint = (
+                f"A newer release ([cyan]{latest_version}[/cyan]) is "
+                f"available.  Upgrade with one of:\n"
+                f"  [cyan]uv tool upgrade rpgkit-cli[/cyan]\n"
+                f"  [cyan]pipx upgrade rpgkit-cli[/cyan]\n"
+                f"  [cyan]pip install -U rpgkit-cli[/cyan]\n"
+                f"After upgrading, run [cyan]rpgkit update[/cyan] in each "
+                f"existing workspace to apply the new prompts."
+            )
+        else:
+            status_label = f"[cyan]ahead of release ({latest_version})[/cyan]"
+            status_hint = (
+                f"Local CLI ({cli_version}) is newer than the latest "
+                f"published release ({latest_version}) — typically a dev "
+                f"build from git.  No action needed."
+            )
 
     info_table = Table(show_header=False, box=None, padding=(0, 2))
     info_table.add_column("Key", style="cyan", justify="right")
     info_table.add_column("Value", style="white")
 
     info_table.add_row("CLI Version", cli_version)
-    info_table.add_row("Template Version", template_version)
+    info_table.add_row("Latest Release", latest_version)
     info_table.add_row("Released", release_date)
+    info_table.add_row("Status", status_label)
     info_table.add_row("", "")
     info_table.add_row("Python", platform.python_version())
     info_table.add_row("Platform", platform.system())
@@ -4425,6 +4480,18 @@ def version():
     )
 
     console.print(panel)
+    if status_hint:
+        console.print()
+        console.print(
+            Panel(
+                status_hint,
+                title="[bold]Upgrade tip[/bold]",
+                border_style="yellow"
+                if "outdated" in status_label or "offline" in status_label
+                else "cyan",
+                padding=(1, 2),
+            )
+        )
     console.print()
 
 
