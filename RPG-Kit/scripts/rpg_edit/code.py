@@ -44,6 +44,7 @@ from common.paths import (  # noqa: E402
     DATA_DIR,
     WORKSPACE_ROOT,
     REPO_DIR,
+    cmd_for,
 )
 from common.logging_setup import setup_file_logging  # noqa: E402
 
@@ -174,7 +175,7 @@ def _build_validation_cmds(code_changes: List[dict]) -> Tuple[str, str]:
     we still use absolute paths to keep the prompt cwd-agnostic — it
     must work no matter where the user runs the slash command from.
     """
-    smoke = f"python3 {WORKSPACE_ROOT}/.rpgkit/scripts/smoke_test.py --json"
+    smoke = f"{cmd_for("smoke_test.py")} --json"
 
     patterns = _derive_test_files(code_changes)
     if patterns:

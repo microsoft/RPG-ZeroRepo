@@ -83,19 +83,60 @@ REPO_DIR = WORKSPACE_ROOT
 
 
 # ============================================================================
-# Scripts Directory (absolute, for embedding in next_action messages)
+# Scripts Directory (absolute path on the filesystem)
 # ============================================================================
+#
+# Anchor SCRIPTS_DIR to ``__file__``'s parent so the constant resolves
+# correctly regardless of how the scripts were deployed:
+#
+#   * Pre-0.1.3 layout: scripts copied into ``<workspace>/.rpgkit/scripts/``.
+#   * Post-0.1.3 layout: scripts live inside the installed wheel at
+#     ``<site-packages>/rpgkit_cli/core_pack/scripts/`` and are invoked
+#     via ``rpgkit script <name>`` (see plan 02).
+#
+# In both cases the surrounding ``common/`` package is at
+# ``SCRIPTS_DIR/common/``, so ``Path(__file__).parent.parent`` is the
+# scripts root.  Callers that need to spawn or sys.path-insert sibling
+# code (e.g. ``rpg_edit/impact.py``) get a working path automatically.
+#
+# For *user-facing hints* embedded in ``next_action`` messages, prefer
+# :func:`cmd_for` instead of stringifying ``SCRIPTS_DIR`` — the former
+# emits the supported ``rpgkit script <name>`` invocation rather than a
+# raw filesystem path the user can't easily re-run.
 
-# Anchor SCRIPTS_DIR to WORKSPACE_ROOT so that paths embedded in
-# next_action messages (read by the AI agent) reference the user's
-# workspace path — not the symlink target.
-SCRIPTS_DIR = WORKSPACE_ROOT / ".rpgkit" / "scripts"
+SCRIPTS_DIR = Path(__file__).resolve().parent.parent
 TOOLS_DIR = SCRIPTS_DIR / "tools"
 
 
 def get_scripts_dir() -> str:
-    """Get the scripts directory path as string for use in next_action messages."""
+    """Return the scripts directory as a string (filesystem path).
+
+    Kept for backward compatibility with code that uses this as a
+    base path for sibling-script Path/sys.path operations.  Do NOT
+    use this to build invocation strings shown to the user — use
+    :func:`cmd_for` instead.
+    """
     return str(SCRIPTS_DIR)
+
+
+def cmd_for(script_relpath: str) -> str:
+    """Return the canonical ``rpgkit script`` invocation for a script.
+
+    Args:
+        script_relpath: Path relative to the scripts root, e.g.
+            ``"run_batch.py"`` or ``"rpg_edit/validate.py"``.  Leading
+            slashes are stripped; ``.py`` suffix is preserved.
+
+    Returns:
+        A shell-ready string such as ``"rpgkit script run_batch.py"``.
+
+    Use this for any ``next_action`` hint or error message that
+    suggests the user run a script.  After plan 02, the workspace no
+    longer hosts a ``.rpgkit/scripts/`` copy, so the historic
+    ``python3 .rpgkit/scripts/X.py`` form would fail; ``rpgkit script
+    X.py`` works regardless of workspace layout.
+    """
+    return f"rpgkit script {script_relpath.lstrip('/')}"
 
 
 # ============================================================================

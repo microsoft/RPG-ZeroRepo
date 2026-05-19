@@ -7,8 +7,8 @@ an RPG from scratch and saves it to .rpgkit/data/rpg.json.
 Prints a single JSON result to stdout with status and statistics.
 
 Usage:
-    python3 .rpgkit/scripts/rpg_encoder/run_encode.py --json
-    python3 .rpgkit/scripts/rpg_encoder/run_encode.py --repo-dir ./my-project
+    rpgkit script rpg_encoder/run_encode.py --json
+    rpgkit script rpg_encoder/run_encode.py --repo-dir ./my-project
 """
 
 import json

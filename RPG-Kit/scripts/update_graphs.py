@@ -13,11 +13,11 @@ Subcommands:
   full        AST scan + mappings + edges (legacy, use 'sync' instead)
 
 Usage:
-  python3 .rpgkit/scripts/update_graphs.py dep --json
-  python3 .rpgkit/scripts/update_graphs.py enrich --json
-  python3 .rpgkit/scripts/update_graphs.py enrich --file models/user.py --dry-run --json
-  python3 .rpgkit/scripts/update_graphs.py sync --json
-  python3 .rpgkit/scripts/update_graphs.py update-rpg --json
+  rpgkit script update_graphs.py dep --json
+  rpgkit script update_graphs.py enrich --json
+  rpgkit script update_graphs.py enrich --file models/user.py --dry-run --json
+  rpgkit script update_graphs.py sync --json
+  rpgkit script update_graphs.py update-rpg --json
 """
 
 import argparse

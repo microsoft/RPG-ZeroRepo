@@ -7,7 +7,7 @@ repository changes to an existing RPG graph.
 Prints a single JSON result to stdout with status and diff statistics.
 
 Usage:
-    python3 .rpgkit/scripts/rpg_encoder/run_update_rpg.py --json \\
+    rpgkit script rpg_encoder/run_update_rpg.py --json \\
         --rpg-file .rpgkit/data/rpg.json --last-repo-dir ./old-version
 """
 

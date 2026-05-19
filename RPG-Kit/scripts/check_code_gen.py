@@ -21,6 +21,7 @@ from common.paths import (
     TASKS_FILE,
     CODE_GEN_STATE_FILE as STATE_FILE,
     get_scripts_dir,
+    cmd_for,
     REPO_DIR,
 )
 from common.execution_state import load_code_gen_state
@@ -155,8 +156,8 @@ def determine_state(
             "remaining": total_tasks
         }
         result["next_action"] = (
-            f"Run: python3 {scripts}/init_codebase.py --json to initialize the repository, "
-            f"then run: python3 {scripts}/run_batch.py --next --json to start the first batch."
+            f"Run: {cmd_for("init_codebase.py")} --json to initialize the repository, "
+            f"then run: {cmd_for("run_batch.py")} --next --json to start the first batch."
         )
         result["workflow_hint"] = (
             "run_batch.py --next dispatches a sub-agent that autonomously "
@@ -262,7 +263,7 @@ def determine_state(
                 result["auto_recovery_error"] = str(e)
                 result["next_action"] = (
                     f"Tests passed but auto-recovery failed ({e}). "
-                    f"Run: python3 {scripts}/run_batch.py --resume --json to retry."
+                    f"Run: {cmd_for("run_batch.py")} --resume --json to retry."
                 )
                 return result
         else:
@@ -280,14 +281,14 @@ def determine_state(
             if phase == "failed":
                 result["next_action"] = (
                     f"Batch {current_batch_id} has failed. "
-                    f"Run: python3 {scripts}/run_batch.py --retry {current_batch_id} --json "
-                    f"to retry, or python3 {scripts}/run_batch.py --next --json to skip "
+                    f"Run: {cmd_for("run_batch.py")} --retry {current_batch_id} --json "
+                    f"to retry, or {cmd_for("run_batch.py")} --next --json to skip "
                     f"it and move on."
                 )
             else:
                 result["next_action"] = (
                     f"Resume the current batch (phase: {phase}). "
-                    f"Run: python3 {scripts}/run_batch.py --resume --json"
+                    f"Run: {cmd_for("run_batch.py")} --resume --json"
                 )
             result["workflow_hint"] = (
                 "run_batch.py --resume dispatches a sub-agent that autonomously "
@@ -307,7 +308,7 @@ def determine_state(
         result["message"] = f"Ready to continue ({remaining} tasks remaining)"
         result["next_batch"] = next_batch
         result["next_action"] = (
-            f"Run: python3 {scripts}/run_batch.py --next --json "
+            f"Run: {cmd_for("run_batch.py")} --next --json "
             f"to start the next batch."
         )
         result["workflow_hint"] = (
@@ -344,11 +345,11 @@ def determine_state(
 
         if not ft_passed:
             result["next_action"] = (
-                f"Run: python3 {scripts}/run_batch.py --final-test --json"
+                f"Run: {cmd_for("run_batch.py")} --final-test --json"
             )
         elif not gr_passed:
             result["next_action"] = (
-                f"Final test passed. Run: python3 {scripts}/run_batch.py --global-review --json"
+                f"Final test passed. Run: {cmd_for("run_batch.py")} --global-review --json"
             )
         else:
             result["next_action"] = (

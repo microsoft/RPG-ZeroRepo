@@ -357,9 +357,9 @@ def inspect_state() -> Dict[str, Any]:
 
     # Add next_action for clear guidance
     if type_value == "init":
-        result["next_action"] = "python3 .rpgkit/scripts/build_skeleton.py --max-iterations 10"
+        result["next_action"] = "rpgkit script build_skeleton.py --max-iterations 10"
     elif type_value == "warning":
-        result["next_action"] = "python3 .rpgkit/scripts/build_skeleton.py --patch"
+        result["next_action"] = "rpgkit script build_skeleton.py --patch"
     else:
         result["next_action"] = "Skeleton is consistent. Proceed to next step."
     

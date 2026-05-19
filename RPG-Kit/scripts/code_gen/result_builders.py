@@ -17,6 +17,7 @@ from typing import Any, Dict, List
 
 from common.execution_state import BatchExecutionState, CodeGenState, load_code_gen_state
 from common.task_batch import PlannedTask, load_tasks_from_tasks_json
+from common.paths import cmd_for
 
 
 def _error(message: str, scripts: str) -> Dict[str, Any]:
@@ -24,7 +25,7 @@ def _error(message: str, scripts: str) -> Dict[str, Any]:
     return {
         "success": False,
         "error": message,
-        "next_action": f"Fix the issue, then run: python3 {scripts}/run_batch.py --next --json",
+        "next_action": f"Fix the issue, then run: {cmd_for("run_batch.py")} --next --json",
     }
 
 
@@ -39,12 +40,12 @@ def _all_done(global_state: CodeGenState, tasks_path: Path, scripts: str) -> Dic
         msg = f"All batches processed: {completed} completed, {failed} failed out of {total}."
         next_act = (
             f"Some batches failed. You can retry them with: "
-            f"python3 {scripts}/run_batch.py --retry <batch_id> --json, "
-            f"or run final validation: python3 {scripts}/run_batch.py --final-test --json"
+            f"{cmd_for("run_batch.py")} --retry <batch_id> --json, "
+            f"or run final validation: {cmd_for("run_batch.py")} --final-test --json"
         )
     else:
         msg = f"All {completed} batches completed successfully!"
-        next_act = f"Run final validation: python3 {scripts}/run_batch.py --final-test --json"
+        next_act = f"Run final validation: {cmd_for("run_batch.py")} --final-test --json"
 
     return {
         "success": True,
@@ -100,10 +101,10 @@ def _success_result(
         },
         "next_action": (
             f"Batch completed. {remaining} tasks remaining. "
-            f"Run: python3 {scripts}/run_batch.py --next --json"
+            f"Run: {cmd_for("run_batch.py")} --next --json"
             if remaining > 0 else
-            f"All batches done! Run: python3 {scripts}/run_batch.py --final-test --json\n"
-            f"Then run: python3 {scripts}/run_batch.py --global-review --json"
+            f"All batches done! Run: {cmd_for("run_batch.py")} --final-test --json\n"
+            f"Then run: {cmd_for("run_batch.py")} --global-review --json"
         ),
     }
 
@@ -146,7 +147,7 @@ def _failure_result(
         "next_action": (
             f"Batch failed after {len(attempts)} attempts. "
             f"Branch '{batch_state.branch_name}' preserved for inspection. "
-            f"Retry: python3 {scripts}/run_batch.py --retry {batch_id} --json, "
-            f"or continue: python3 {scripts}/run_batch.py --next --json"
+            f"Retry: {cmd_for("run_batch.py")} --retry {batch_id} --json, "
+            f"or continue: {cmd_for("run_batch.py")} --next --json"
         ),
     }

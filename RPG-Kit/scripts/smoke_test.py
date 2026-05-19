@@ -34,7 +34,7 @@ from typing import Any, Dict, List, Optional
 # ---------------------------------------------------------------------------
 sys.path.insert(0, str(Path(__file__).parent))
 
-from common.paths import DEV_VENV_DIR, REPO_DIR, get_scripts_dir
+from common.paths import DEV_VENV_DIR, REPO_DIR, get_scripts_dir, cmd_for
 
 logger = logging.getLogger(__name__)
 
@@ -405,7 +405,7 @@ def main() -> int:
     scripts = get_scripts_dir()
     if not result.success:
         print("\n  Fix the issues above, then re-run:")
-        print(f"    python3 {scripts}/smoke_test.py --json")
+        print(f"    {cmd_for("smoke_test.py")} --json")
 
     return 0 if result.success else 1
 

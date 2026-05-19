@@ -6,7 +6,7 @@ actually work correctly. The review scope is driven by impact analysis
 data (callers, affected_files), NOT a full global review.
 
 Usage:
-    python3 .rpgkit/scripts/rpg_edit/review.py \
+    rpgkit script rpg_edit/review.py \
       --plan .rpgkit/data/rpg_edit_plan.json \
       --impact .rpgkit/data/rpg_edit_impact.json \
       --json
@@ -34,7 +34,7 @@ SCRIPTS_DIR = Path(__file__).resolve().parent.parent
 if str(SCRIPTS_DIR) not in sys.path:
     sys.path.insert(0, str(SCRIPTS_DIR))
 
-from common.paths import WORKSPACE_ROOT, REPO_DIR  # noqa: E402
+from common.paths import WORKSPACE_ROOT, REPO_DIR, cmd_for  # noqa: E402
 
 logger = logging.getLogger(__name__)
 
@@ -344,7 +344,7 @@ def build_impact_review_prompt(
     tools_dir = WORKSPACE_ROOT / ".rpgkit" / "scripts" / "tools"
     browser_tool = str(tools_dir / "browser.py")
     gui_tool = str(tools_dir / "gui.py")
-    smoke_test_cmd = f"python3 {WORKSPACE_ROOT}/.rpgkit/scripts/smoke_test.py --json"
+    smoke_test_cmd = f"{cmd_for("smoke_test.py")} --json"
 
     # Start instructions depend on project type
     start_instructions = (
