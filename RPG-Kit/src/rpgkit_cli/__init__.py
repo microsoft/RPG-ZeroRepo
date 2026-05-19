@@ -3017,12 +3017,18 @@ def _install_from_bundle(
     verbose: bool = True,
     tracker: StepTracker | None = None,
 ) -> Path:
-    """Copy packaged scripts + per-AI command templates into the workspace.
+    """Materialise per-AI command templates into the workspace.
 
-    Mirrors the post-extract layout produced by the legacy zip path so
-    that downstream steps (``ensure_executable_scripts``,
-    ``_setup_gitignore``, ``_generate_mcp_config``, ``_install_hooks``)
-    work unchanged.
+    The pipeline scripts themselves live inside the installed wheel at
+    ``rpgkit_cli/core_pack/scripts/`` and are invoked via ``rpgkit
+    script <name>`` (and ``rpgkit-mcp`` for the MCP server) — they are
+    NOT copied to ``<workspace>/.rpgkit/scripts/`` anymore.  See plan 02
+    for the motivation: a single source of truth per CLI install, no
+    risk of workspace/wheel drift, and no per-workspace scripts dir
+    to keep in sync.
+
+    Only slash-command templates land in the workspace, plus the
+    provisioning marker that records which channel was used.
     """
     from . import _assets
 
@@ -3042,39 +3048,22 @@ def _install_from_bundle(
 
     try:
         rpgkit_root = project_path / ".rpgkit"
-        rpgkit_scripts = rpgkit_root / "scripts"
-        rpgkit_scripts.parent.mkdir(parents=True, exist_ok=True)
+        rpgkit_root.mkdir(parents=True, exist_ok=True)
 
-        # 1. Copy scripts.  Use shutil.copytree with dirs_exist_ok so
-        #    that re-running on an existing workspace overwrites stale
-        #    pipeline scripts without complaint.
-        src_scripts = _assets.scripts_dir()
-        shutil.copytree(
-            src_scripts,
-            rpgkit_scripts,
-            dirs_exist_ok=True,
-            ignore=shutil.ignore_patterns(
-                "__pycache__", "*.pyc", ".pytest_cache", ".mypy_cache"
-            ),
-        )
-
-        # 2. Materialise slash-command templates into the AI-specific
+        # 1. Materialise slash-command templates into the AI-specific
         #    directory.  _materialise_commands_for_agent owns the
-        #    per-agent file-name / folder rules and matches what the
-        #    legacy zip path produces (down to the rpgkit.<name>.md
-        #    prefix), so downstream consumers see the same layout
-        #    regardless of provisioning source.
+        #    per-agent file-name / folder rules.
         _materialise_commands_for_agent(
             ai_assistant, _assets.commands_dir(), project_path
         )
 
-        # 3. Record the provisioning source so subsequent ``rpgkit update``
+        # 2. Record the provisioning source so subsequent ``rpgkit update``
         #    invocations default to the same channel.
         _write_source_marker(project_path, _SOURCE_BUNDLE)
 
         if tracker:
             tracker.skip("zip-list", "bundle (no archive)")
-            tracker.skip("extracted-summary", "bundle copied")
+            tracker.skip("extracted-summary", "templates only")
             tracker.complete("extract")
             tracker.skip("cleanup", "bundle mode")
     except Exception as e:
@@ -3350,62 +3339,30 @@ def _download_and_extract_release_zip(
     # writes ``bundle``.  Plan §2.5 (decision 12).
     _write_source_marker(project_path, _SOURCE_LEGACY)
 
+    # Discard the scripts copy extracted from the zip — they're not
+    # used at runtime anymore (the workspace invokes ``rpgkit script
+    # <name>`` which resolves to the packaged scripts dir).  Keeping
+    # them would just be dead weight that drifts vs the installed CLI.
+    # Plan 02 D7: legacy zip contributes commands only.
+    legacy_scripts_dir = project_path / ".rpgkit" / "scripts"
+    if legacy_scripts_dir.is_dir():
+        shutil.rmtree(legacy_scripts_dir, ignore_errors=True)
+
     return project_path
 
 
 def ensure_executable_scripts(
     project_path: Path, tracker: StepTracker | None = None
 ) -> None:
-    """Ensure POSIX .sh scripts under .rpgkit/scripts (recursively) have execute bits (no-op on Windows)."""
-    if os.name == "nt":
-        return  # Windows: skip silently
-    scripts_root = project_path / ".rpgkit" / "scripts"
-    if not scripts_root.is_dir():
-        return
-    failures: list[str] = []
-    updated = 0
-    for script in scripts_root.rglob("*.sh"):
-        try:
-            if script.is_symlink() or not script.is_file():
-                continue
-            try:
-                with script.open("rb") as f:
-                    if f.read(2) != b"#!":
-                        continue
-            except Exception:
-                continue
-            st = script.stat()
-            mode = st.st_mode
-            if mode & 0o111:
-                continue
-            new_mode = mode
-            if mode & 0o400:
-                new_mode |= 0o100
-            if mode & 0o040:
-                new_mode |= 0o010
-            if mode & 0o004:
-                new_mode |= 0o001
-            if not (new_mode & 0o100):
-                new_mode |= 0o100
-            os.chmod(script, new_mode)
-            updated += 1
-        except Exception as e:
-            failures.append(f"{script.relative_to(scripts_root)}: {e}")
-    if tracker:
-        detail = f"{updated} updated" + (
-            f", {len(failures)} failed" if failures else ""
-        )
-        tracker.add("chmod", "Set script permissions recursively")
-        (tracker.error if failures else tracker.complete)("chmod", detail)
-    else:
-        if updated:
-            console.print(
-                f"[cyan]Updated execute permissions on {updated} script(s) recursively[/cyan]"
-            )
-        if failures:
-            console.print("[yellow]Some scripts could not be updated:[/yellow]")
-            for f in failures:
-                console.print(f"  - {f}")
+    """Deprecated no-op.
+
+    Previously ensured POSIX execute bits on ``.rpgkit/scripts/**/*.sh``.
+    After plan 02, scripts live inside the installed wheel where the
+    exec bits are set at install time by the packaging tool, and the
+    workspace no longer hosts a scripts copy.  Kept as a stub to keep
+    existing call sites simple; safe to remove in a future cleanup PR.
+    """
+    return
 
 
 def ensure_rpgkit_runtime_dirs(

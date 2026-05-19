@@ -23,7 +23,7 @@ code entities) and edges (dependencies, containment).
 Run the check script to determine the current encode state:
 
 ```bash
-python3 .rpgkit/scripts/rpg_encoder/check_encode.py --json
+rpgkit script rpg_encoder/check_encode.py --json
 ```
 
 Inspect the `type` field in the output:
@@ -62,7 +62,7 @@ Inspect the `type` field in the output:
 Run the full encode script:
 
 ```bash
-python3 .rpgkit/scripts/rpg_encoder/run_encode.py --json > .rpgkit/logs/encode.log 2>&1
+rpgkit script rpg_encoder/run_encode.py --json > .rpgkit/logs/encode.log 2>&1
 ```
 
 This may take several minutes depending on repository size and LLM response times.

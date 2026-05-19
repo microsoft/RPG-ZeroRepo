@@ -35,7 +35,7 @@ uses) and runs the LLM-driven feature graph diff + dep_graph rebuild.
 Run the check script:
 
 ```bash
-python3 .rpgkit/scripts/rpg_encoder/check_encode.py --json
+rpgkit script rpg_encoder/check_encode.py --json
 ```
 
 Inspect the `type` field in the JSON output:
@@ -66,7 +66,7 @@ manually**.
 
 ```bash
 mkdir -p .rpgkit/logs
-python3 .rpgkit/scripts/update_graphs.py update-rpg --json \
+rpgkit script update_graphs.py update-rpg --json \
     > .rpgkit/logs/update_rpg.log 2>&1
 ```
 

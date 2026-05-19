@@ -18,7 +18,7 @@ runs pytest, and fixes issues — up to 5 iterations per attempt, 2 attempts per
 Run the check script to determine current state:
 
 ```bash
-python3 .rpgkit/scripts/check_code_gen.py --json
+rpgkit script check_code_gen.py --json
 ```
 
 **If type is "error"**:
@@ -31,7 +31,7 @@ python3 .rpgkit/scripts/check_code_gen.py --json
 
 **If type is "in_progress"**:
 
-* Run `python3 .rpgkit/scripts/run_batch.py --resume --json` to resume
+* Run `rpgkit script run_batch.py --resume --json` to resume
 
 **If type is "complete"**:
 
@@ -42,7 +42,7 @@ python3 .rpgkit/scripts/check_code_gen.py --json
 **This step is only needed once**, before the first batch.
 
 ```bash
-python3 .rpgkit/scripts/init_codebase.py --json
+rpgkit script init_codebase.py --json
 ```
 
 This creates README.md, .gitignore, base classes, and an initial commit.
@@ -96,19 +96,19 @@ Remember both choices for the session.
 **Single-batch mode:**
 
 ```bash
-python3 .rpgkit/scripts/run_batch.py --next --json
+rpgkit script run_batch.py --next --json
 ```
 
 **File-merge mode (no unit limit):**
 
 ```bash
-python3 .rpgkit/scripts/run_batch.py --next --merge-file --json
+rpgkit script run_batch.py --next --merge-file --json
 ```
 
 **File-merge mode (with unit limit):**
 
 ```bash
-python3 .rpgkit/scripts/run_batch.py --next --merge-file --max-units <N> --json
+rpgkit script run_batch.py --next --merge-file --max-units <N> --json
 ```
 
 **Read the JSON output:**
@@ -129,7 +129,7 @@ Continue until `type` is `"complete"` or no tasks remain.
 When all batches are processed:
 
 ```bash
-python3 .rpgkit/scripts/run_batch.py --final-test --json
+rpgkit script run_batch.py --final-test --json
 ```
 
 This runs pytest (full suite) and smoke test (import check, entry point, stub detection).
@@ -140,7 +140,7 @@ If smoke test reports errors, a repair agent is dispatched automatically.
 After final test passes, run the global review:
 
 ```bash
-python3 .rpgkit/scripts/run_batch.py --global-review --json
+rpgkit script run_batch.py --global-review --json
 ```
 
 This dispatches a sub-agent that:
@@ -167,7 +167,7 @@ This step can be re-run independently without re-running `--final-test`.
 
    Next steps:
       • Review failed batches (branches preserved for inspection)
-      • Run: python3 .rpgkit/scripts/run_batch.py --retry <batch_id> --json
+      • Run: rpgkit script run_batch.py --retry <batch_id> --json
 ```
 
 ---
@@ -176,19 +176,19 @@ This step can be re-run independently without re-running `--final-test`.
 
 ```bash
 # Resume an interrupted batch
-python3 .rpgkit/scripts/run_batch.py --resume --json
+rpgkit script run_batch.py --resume --json
 
 # Retry a specific failed batch
-python3 .rpgkit/scripts/run_batch.py --retry <batch_id> --json
+rpgkit script run_batch.py --retry <batch_id> --json
 
 # Run a specific batch by ID
-python3 .rpgkit/scripts/run_batch.py --batch-id <id> --json
+rpgkit script run_batch.py --batch-id <id> --json
 
 # Repo validation (pytest + smoke)
-python3 .rpgkit/scripts/run_batch.py --final-test --json
+rpgkit script run_batch.py --final-test --json
 
 # Full feature review + visual QA
-python3 .rpgkit/scripts/run_batch.py --global-review --json
+rpgkit script run_batch.py --global-review --json
 ```
 
 ## Recovery
@@ -196,7 +196,7 @@ python3 .rpgkit/scripts/run_batch.py --global-review --json
 To resume from any state:
 
 ```bash
-python3 .rpgkit/scripts/check_code_gen.py --json
+rpgkit script check_code_gen.py --json
 ```
 
 Follow the `next_action` field — it always tells you the exact command to run.

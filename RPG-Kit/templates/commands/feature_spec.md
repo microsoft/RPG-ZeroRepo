@@ -607,7 +607,7 @@ Convert generated Markdown feature specification files to JSON format.
 Execute the following command:
 
 ```bash
-python3 .rpgkit/scripts/feature_spec_to_json.py
+rpgkit script feature_spec_to_json.py
 ```
 
 #### 5.2: Verify Output

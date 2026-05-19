@@ -16,7 +16,7 @@ Design function and class interfaces for your repository files based on the skel
 Run the check script to determine current state:
 
 ```bash
-python3 .rpgkit/scripts/check_interfaces.py --json
+rpgkit script check_interfaces.py --json
 ```
 
 **If type is "error"**:
@@ -62,7 +62,7 @@ python3 .rpgkit/scripts/check_interfaces.py --json
 Run the interface designer:
 
 ```bash
-python3 .rpgkit/scripts/design_interfaces.py > .rpgkit/logs/design_interfaces.log 2>&1
+rpgkit script design_interfaces.py > .rpgkit/logs/design_interfaces.log 2>&1
 ```
 
 Then print the output by:
@@ -89,7 +89,7 @@ defined by the data flow DAG. This ensures dependencies are resolved correctly.
 After generation, run the check script again:
 
 ```bash
-python3 .rpgkit/scripts/check_interfaces.py --json
+rpgkit script check_interfaces.py --json
 ```
 
 Verify:

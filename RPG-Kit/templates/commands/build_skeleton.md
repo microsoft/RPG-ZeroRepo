@@ -20,7 +20,7 @@ Unless it is explicitly empty, you may assume it is always available as `$ARGUME
 
 ### Step 1: Pre-check
 
-Run the script `python3 .rpgkit/scripts/check_skeleton.py` to verify the current state.
+Run the script `rpgkit script check_skeleton.py` to verify the current state.
 
 1. Inspect the `type` field in the output:
 
@@ -69,7 +69,7 @@ Run the script `python3 .rpgkit/scripts/check_skeleton.py` to verify the current
 2. Execute the following command with the selected iteration count:
 
    ```bash
-   python3 .rpgkit/scripts/build_skeleton.py --max-iterations <default_or_user_defined> > .rpgkit/logs/build_skeleton.log 2>&1
+   rpgkit script build_skeleton.py --max-iterations <default_or_user_defined> > .rpgkit/logs/build_skeleton.log 2>&1
    ```
 
    Then print the output by:
@@ -97,7 +97,7 @@ Run the script `python3 .rpgkit/scripts/check_skeleton.py` to verify the current
 Run the validation script:
 
 ```bash
-python3 .rpgkit/scripts/check_skeleton.py --verbose
+rpgkit script check_skeleton.py --verbose
 ```
 
 Display the validation results to the user:
@@ -115,7 +115,7 @@ Display the validation results to the user:
 Run the summary script to generate a formatted report and save to file:
 
 ```bash
-python3 .rpgkit/scripts/summary_skeleton.py
+rpgkit script summary_skeleton.py
 ```
 
 This saves the summary (including directory structure, component paths, and statistics) to `.rpgkit/data/skeleton_summary.txt`.

@@ -7,7 +7,6 @@ __pycache__/
 # --- RPG-Kit generated data & temp ---
 .rpgkit/data/
 .rpgkit/tmp/
-.rpgkit/scripts/**/__pycache__/
 
 # --- Logs ---
 *.log

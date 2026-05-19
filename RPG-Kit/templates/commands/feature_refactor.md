@@ -10,7 +10,7 @@ name: rpgkit.feature_refactor
 1. Run the validation script to verify input and check output file status:
 
    ```bash
-   python3 .rpgkit/scripts/feature_refactor_validation.py
+   rpgkit script feature_refactor_validation.py
    ```
 
    The script outputs a JSON object. Determine the next action based on the `status` and `action` fields:
@@ -47,7 +47,7 @@ name: rpgkit.feature_refactor
    2. Execute the following command with the selected max iteration count (default: 10 or user-defined):
 
       ```bash
-      python3 .rpgkit/scripts/feature_refactor.py --max-iterations <default_or_user_defined_iterations> > .rpgkit/logs/feature_refactor.log 2>&1
+      rpgkit script feature_refactor.py --max-iterations <default_or_user_defined_iterations> > .rpgkit/logs/feature_refactor.log 2>&1
       ```
 
       Then print the output by:

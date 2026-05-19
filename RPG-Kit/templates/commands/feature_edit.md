@@ -37,7 +37,7 @@ The text typed by the user after `/rpgkit.feature_edit` **is the edit instructio
 Execute from repository root:
 
 ```bash
-python3 .rpgkit/scripts/feature_edit_validation.py --edit_instruction "$ARGUMENTS"
+rpgkit script feature_edit_validation.py --edit_instruction "$ARGUMENTS"
 ```
 
 **Important:** If `$ARGUMENTS` contains a double quote (`"`), it MUST be escaped before being passed to the script.
@@ -96,7 +96,7 @@ Please confirm to proceed:
 Execute the following command:
 
 ```bash
-python3 .rpgkit/scripts/feature_edit.py > .rpgkit/logs/feature_edit.log 2>&1
+rpgkit script feature_edit.py > .rpgkit/logs/feature_edit.log 2>&1
 ```
 
 Then print the output by:

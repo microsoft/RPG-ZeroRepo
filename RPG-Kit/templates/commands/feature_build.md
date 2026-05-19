@@ -19,7 +19,7 @@ This workflow has four steps:
 Execute the following command to check the current state of input/output files:
 
 ```bash
-python3 .rpgkit/scripts/feature_build_validation.py
+rpgkit script feature_build_validation.py
 ```
 
 **After execution, parse the JSON output and display a user-friendly summary.**
@@ -61,7 +61,7 @@ The script automatically detects whether the output file (`feature_build.json`) 
 1. **Execute the command:**
 
    ```bash
-   python3 .rpgkit/scripts/feature_build.py \
+   rpgkit script feature_build.py \
     --mode step1 > .rpgkit/logs/feature_build.log 2>&1
    ```
 
@@ -116,7 +116,7 @@ After the spec-driven build is complete, ask the user whether they want to expan
    a. **Get expansion direction suggestions:**
 
       ```bash
-      python3 .rpgkit/scripts/feature_build.py \
+      rpgkit script feature_build.py \
        --mode suggest-directions > .rpgkit/logs/feature_build.log 2>&1
       ```
 
@@ -150,7 +150,7 @@ After the spec-driven build is complete, ask the user whether they want to expan
       Then pass the normalized indices to the script:
 
       ```bash
-      python3 .rpgkit/scripts/feature_build.py \
+      rpgkit script feature_build.py \
        --mode step2 \
        --direction "<normalized indices>" > .rpgkit/logs/feature_build.log 2>&1
       ```
@@ -158,7 +158,7 @@ After the spec-driven build is complete, ask the user whether they want to expan
       For example, if the user enters `1,3,5`:
 
       ```bash
-      python3 .rpgkit/scripts/feature_build.py \
+      rpgkit script feature_build.py \
        --mode step2 \
        --direction "1,3,5" > .rpgkit/logs/feature_build.log 2>&1
       ```
