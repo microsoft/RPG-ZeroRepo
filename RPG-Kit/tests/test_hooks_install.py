@@ -151,8 +151,12 @@ def test_install_copilot_hooks_writes_folder_open_task(project):
     t = tasks["tasks"][0]
     assert t["label"] == "RPG-Kit: load status"
     assert t["runOptions"] == {"runOn": "folderOpen"}
+    # Task now invokes the global ``rpgkit`` CLI; args carry the
+    # dispatcher subcommand + script relpath, with ``status`` last.
+    assert t["command"] == "rpgkit"
+    assert t["args"][0] == "script"
+    assert t["args"][1] == "update_graphs.py"
     assert t["args"][-1] == "status"
-    assert t["args"][0].endswith("update_graphs.py")
     # Status output should appear silently — we don't want it stealing focus.
     assert t["presentation"]["reveal"] == "silent"
     # NOTE: .gitignore management was moved to `_setup_gitignore` (called

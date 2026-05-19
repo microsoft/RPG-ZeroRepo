@@ -1705,11 +1705,21 @@ def _run_initial_encode(project_path: Path) -> bool:
     """
     encoder = project_path / ".rpgkit" / "scripts" / "rpg_encoder" / "run_encode.py"
     if not encoder.is_file():
-        console.print(
-            f"[yellow]Encoder script not found at {encoder}; "
-            f"run [cyan]/rpgkit.encode[/] in your AI agent later.[/yellow]"
-        )
-        return False
+        # New layout (plan 02): scripts live inside the installed wheel
+        # under ``rpgkit_cli/core_pack/scripts/``.  Resolve the encoder
+        # from there so the optional initial-encode kickoff works after
+        # ``rpgkit init`` — which no longer copies scripts into the
+        # workspace.
+        from . import _assets
+        candidate = _assets.scripts_dir() / "rpg_encoder" / "run_encode.py"
+        if candidate.is_file():
+            encoder = candidate
+        else:
+            console.print(
+                f"[yellow]Encoder script not found at {candidate}; "
+                f"run [cyan]/rpgkit.encode[/] in your AI agent later.[/yellow]"
+            )
+            return False
 
     log_dir = project_path / ".rpgkit" / "logs"
     try:
@@ -2563,15 +2573,15 @@ def _install_copilot_hooks(project_path: Path) -> None:
             # Backup is best-effort; never block installation on it.
             pass
 
-    update_script = str(
-        (project_path / ".rpgkit" / "scripts" / "update_graphs.py").resolve()
-    )
-
     rpg_status_task = {
         "label": "RPG-Kit: load status",
         "type": "shell",
-        "command": sys.executable,
-        "args": [update_script, "status"],
+        # Invoke the globally-installed CLI rather than a workspace
+        # script copy (which no longer exists after plan 02).  Same
+        # rationale as the git-hook bodies: portable command name,
+        # auto-tracks the installed wheel's scripts.
+        "command": "rpgkit",
+        "args": ["script", "update_graphs.py", "status"],
         "presentation": {
             "echo": False,
             "reveal": "silent",
