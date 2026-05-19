@@ -2784,20 +2784,7 @@ def _build_local_template_package(
     source_root = _resolve_rpgkit_source_root(source)
     repo_root = source_root.parent
     project_dir = source_root.relative_to(repo_root).as_posix()
-    release_script = (
-        repo_root
-        / ".github"
-        / "workflows"
-        / "scripts"
-        / "rpgkit"
-        / "create-release-packages.sh"
-    )
-    if not release_script.is_file():
-        raise RuntimeError(
-            f"Release packaging script not found: {release_script}. "
-            "Pass the RPG-ZeroRepo root or its RPG-Kit/ directory to --source."
-        )
-
+    scripts_root = repo_root / ".github" / "workflows" / "scripts" / "rpgkit"
     version = "v0.0.0-local"
     env = os.environ.copy()
     env.update(
@@ -2809,8 +2796,45 @@ def _build_local_template_package(
             "PYTHON": sys.executable,
         }
     )
+
+    if os.name == "nt":
+        release_script = scripts_root / "create-release-packages.ps1"
+        runner = shutil.which("pwsh")
+        command = (
+            [
+                runner,
+                "-NoProfile",
+                "-ExecutionPolicy",
+                "Bypass",
+                "-File",
+                str(release_script),
+                version,
+                "-Agents",
+                ai_assistant,
+                "-Scripts",
+                script_type,
+            ]
+            if runner
+            else None
+        )
+    else:
+        release_script = scripts_root / "create-release-packages.sh"
+        runner = shutil.which("bash")
+        command = [runner, str(release_script), version] if runner else None
+
+    if not release_script.is_file():
+        raise RuntimeError(
+            f"Release packaging script not found: {release_script}. "
+            "Pass the RPG-ZeroRepo root or its RPG-Kit/ directory to --source."
+        )
+    if command is None:
+        requirement = "PowerShell 7 (pwsh)" if os.name == "nt" else "bash"
+        raise RuntimeError(
+            f"Local --source packaging requires {requirement}, but it was not found on PATH."
+        )
+
     result = subprocess.run(
-        ["bash", str(release_script), version],
+        command,
         cwd=repo_root,
         env=env,
         text=True,
@@ -3689,10 +3713,16 @@ def init(
         )
         step_num += 1
 
+    venv_path = project_path / ".venv_rpgkit"
+    if os.name == "nt":
+        activate_cmd = r".venv_rpgkit\Scripts\activate"
+    else:
+        activate_cmd = "source .venv_rpgkit/bin/activate"
     steps_lines.append(
         f"{step_num}. Activate the RPG-Kit Python environment: "
-        f"[cyan]source .venv_rpgkit/bin/activate[/cyan]"
+        f"[cyan]{activate_cmd}[/cyan]"
     )
+
     step_num += 1
 
     steps_lines.append(f"{step_num}. Start using slash commands with your AI agent:")
@@ -4036,16 +4066,22 @@ def update(
         f"command definitions in [cyan]{project_path}[/cyan][/dim]"
     )
     console.print()
-    console.print(
-        Panel(
-            "Activate the RPG-Kit Python environment before using slash commands:\n\n"
-            "[cyan]source .venv_rpgkit/bin/activate[/cyan]",
-            title="[yellow]Environment Setup[/yellow]",
-            border_style="yellow",
-            padding=(1, 2),
+    venv_path = Path(project_path) / ".venv_rpgkit"
+    if venv_path.exists():
+        activate_cmd = (
+            r".venv_rpgkit\Scripts\activate"
+            if os.name == "nt"
+            else "source .venv_rpgkit/bin/activate"
         )
-    )
-
+        console.print(
+            Panel(
+                "Activate the RPG-Kit Python environment before using slash commands:\n\n"
+                f"[cyan]{activate_cmd}[/cyan]",
+                title="[yellow]Environment Setup[/yellow]",
+                border_style="yellow",
+                padding=(1, 2),
+            )
+        )
 
 @app.command()
 def check():
