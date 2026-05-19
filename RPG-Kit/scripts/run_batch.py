@@ -680,7 +680,7 @@ def run_batch(
                 return _error(
                     f"Tests pass but branch merge failed: {merge_error}. "
                     f"Branch '{branch_name}' preserved. "
-                    f"Retry: {cmd_for("run_batch.py")} --retry {batch_id} --json",
+                    f"Retry: {cmd_for('run_batch.py')} --retry {batch_id} --json",
                     scripts,
                 )
             state_complete_batch(batch_id, True, state_path, rpg_backup_path=rpg_backup)
@@ -817,7 +817,7 @@ def run_batch(
             return _error(
                 f"Tests passed but branch merge failed: {merge_error}. "
                 f"Branch '{branch_name}' preserved. "
-                f"Retry: {cmd_for("run_batch.py")} --retry {batch_id} --json",
+                f"Retry: {cmd_for('run_batch.py')} --retry {batch_id} --json",
                 scripts,
             )
 

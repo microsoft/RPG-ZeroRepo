@@ -1525,10 +1525,9 @@ def _workspace_has_python_code(project_path: Path) -> bool:
     code) skip the prompt because the encoder would produce an empty
     graph and waste LLM tokens.
 
-    The walk prunes the ``.rpgkit`` directory in-place so we don't
-    accidentally count the runtime scripts we just extracted (every
-    workspace has ``.rpgkit/scripts/*.py`` after init).  Common
-    boilerplate dirs (``.git``, ``.venv``, ``node_modules``,
+    The walk prunes the ``.rpgkit`` directory in-place so workspace
+    runtime state (``data/``, ``logs/``) doesn't influence the detection.
+    Common boilerplate dirs (``.git``, ``.venv``, ``node_modules``,
     ``__pycache__``) are pruned too — a ``*.py`` under any of them
     would not indicate user code.
     """
@@ -3351,20 +3350,6 @@ def _download_and_extract_release_zip(
     return project_path
 
 
-def ensure_executable_scripts(
-    project_path: Path, tracker: StepTracker | None = None
-) -> None:
-    """Deprecated no-op.
-
-    Previously ensured POSIX execute bits on ``.rpgkit/scripts/**/*.sh``.
-    After plan 02, scripts live inside the installed wheel where the
-    exec bits are set at install time by the packaging tool, and the
-    workspace no longer hosts a scripts copy.  Kept as a stub to keep
-    existing call sites simple; safe to remove in a future cleanup PR.
-    """
-    return
-
-
 def ensure_rpgkit_runtime_dirs(
     project_path: Path, tracker: StepTracker | None = None
 ) -> None:
@@ -3731,8 +3716,6 @@ def init(
             # command.  llm_client.py reads this at runtime to invoke
             # the right sub-agent.  Plan §3 / decision 13.
             _write_workspace_config(project_path, selected_ai)
-
-            ensure_executable_scripts(project_path, tracker=tracker)
 
             # Materialize .gitignore *before* MCP/hook generation so the
             # files those steps create (.vscode/mcp.json, .vscode/tasks.json,
@@ -4224,8 +4207,6 @@ def update(
             # Refresh .rpgkit/config.toml only when missing (preserves
             # user customisations on re-update).
             _write_workspace_config(project_path, selected_ai)
-
-            ensure_executable_scripts(project_path, tracker=tracker)
 
             # Pre-create runtime directories so stage prompts that redirect
             # to .rpgkit/logs/<stage>.log don't fail when the folder is

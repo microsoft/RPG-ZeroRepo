@@ -52,7 +52,7 @@ Run the script `rpgkit script check_base_classes.py` to verify the current state
 1. Display the following prompt and wait for user confirmation:
 
    ```text
-   Description: Run the script `.rpgkit/scripts/design_base_classes.py` to:
+   Description: Run the script `rpgkit script design_base_classes.py` to:
      - Design functional base classes (behavioral abstractions)
      - Design global data structures (shared data formats)
    

@@ -57,7 +57,7 @@ Run the script `rpgkit script check_skeleton.py` to verify the current state.
 1. Display the following prompt and wait for user confirmation:
 
    ```text
-   Description: Run the script `.rpgkit/scripts/build_skeleton.py` to:
+   Description: Run the script `rpgkit script build_skeleton.py` to:
      - Step 1: Design directory structure for components
      - Step 2: Assign features to Python files
    

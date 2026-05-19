@@ -69,7 +69,7 @@ Run the script `rpgkit script check_data_flow.py` to verify the current state.
 1. Display the following prompt and wait for user confirmation:
 
    ```text
-   Description: Run the script `.rpgkit/scripts/build_data_flow.py` to:
+   Description: Run the script `rpgkit script build_data_flow.py` to:
      - Design inter-component data flow as a DAG
      - Generate subtree processing order
    

@@ -405,7 +405,7 @@ def main() -> int:
     scripts = get_scripts_dir()
     if not result.success:
         print("\n  Fix the issues above, then re-run:")
-        print(f"    {cmd_for("smoke_test.py")} --json")
+        print(f"    {cmd_for('smoke_test.py')} --json")
 
     return 0 if result.success else 1
 

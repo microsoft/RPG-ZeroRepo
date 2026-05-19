@@ -8,7 +8,7 @@ This script parses:
 Output: A structured JSON file with all parsed content.
 
 Usage:
-    python .rpgkit/scripts/feature_spec_to_json.py [--input-dir DIR] [--output FILE] [--no-evidence]
+    rpgkit script feature_spec_to_json.py [--input-dir DIR] [--output FILE] [--no-evidence]
 
 Arguments:
     --input-dir    Directory containing feature_spec.md and features/ folder

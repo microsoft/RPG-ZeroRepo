@@ -73,7 +73,7 @@ Inspect the `type` field in the output:
 Display the following prompt and wait for user confirmation:
 
 ```markdown
-The script `.rpgkit/scripts/feature_edit.py` will be executed to edit the feature tree based on your instructions.
+The script `rpgkit script feature_edit.py` will be executed to edit the feature tree based on your instructions.
 
 **File:** `.rpgkit/data/feature_tree.json`
 

@@ -344,7 +344,7 @@ def build_impact_review_prompt(
     tools_dir = WORKSPACE_ROOT / ".rpgkit" / "scripts" / "tools"
     browser_tool = str(tools_dir / "browser.py")
     gui_tool = str(tools_dir / "gui.py")
-    smoke_test_cmd = f"{cmd_for("smoke_test.py")} --json"
+    smoke_test_cmd = f"{cmd_for('smoke_test.py')} --json"
 
     # Start instructions depend on project type
     start_instructions = (

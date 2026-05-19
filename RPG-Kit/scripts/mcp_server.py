@@ -10,14 +10,16 @@ Tools provided:
 - ``list_rpg_tree``    -- browse RPG feature tree structure
 
 The server communicates over stdio (the standard MCP transport for
-CLI-based servers).  It is designed to be deployed under
-``<workspace>/.rpgkit/scripts/`` by ``rpgkit init`` / ``rpgkit update``,
-and registered automatically in ``.mcp.json`` (Claude) or
-``.vscode/mcp.json`` (VS Code Copilot).
+CLI-based servers).  It ships inside the ``rpgkit-cli`` wheel and is
+launched by MCP clients via the ``rpgkit-mcp`` console script (which
+``.mcp.json`` / ``.vscode/mcp.json`` register as the ``rpg-tools``
+command — see ``rpgkit_cli.entries:mcp_main``).
 
-Run directly::
+Run directly (for debugging)::
 
-    python <workspace>/.rpgkit/scripts/mcp_server.py [--rpg-file PATH]
+    rpgkit-mcp [--rpg-file PATH]
+    # or equivalently:
+    rpgkit script mcp_server.py [--rpg-file PATH]
 """
 
 import json

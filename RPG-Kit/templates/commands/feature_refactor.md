@@ -33,7 +33,7 @@ name: rpgkit.feature_refactor
    1. Must display the following information and prompt the user to confirm the maximum number of iterations (default: 10).
 
       ```markdown
-      **description**: Run the script `.rpgkit/scripts/feature_refactor.py` to perform a two-step process:
+      **description**: Run the script `rpgkit script feature_refactor.py` to perform a two-step process:
         - Step 1: Plan the structure and number of subtrees
         - Step 2: Iteratively assign features to the planned subtrees
       

@@ -537,7 +537,7 @@ def init_codebase(
                     "initialized_at": state.initialized_at,
                     "suggestion": "Run run_batch.py to start codegen",
                     "next_action": (
-                        f"Already initialized. Run: {cmd_for("run_batch.py")} --next --json "
+                        f"Already initialized. Run: {cmd_for('run_batch.py')} --next --json "
                         f"to start the next batch."
                     )
                 }
@@ -600,7 +600,7 @@ def init_codebase(
             "gitignore_created": False,
             "base_class_files": 0,
             "next_action": (
-                f"Codebase already set up. Run: {cmd_for("run_batch.py")} --next --json "
+                f"Codebase already set up. Run: {cmd_for('run_batch.py')} --next --json "
                 f"to start the first batch."
             )
         }
@@ -633,7 +633,7 @@ def init_codebase(
         "commit_hash": commit_hash,
         "message": "Repository initialized successfully" if not dry_run else "Dry run complete",
         "next_action": (
-            f"Codebase initialized. Run: {cmd_for("run_batch.py")} --next --json "
+            f"Codebase initialized. Run: {cmd_for('run_batch.py')} --next --json "
             f"to start the first batch."
         ) if not dry_run else "Dry run complete. Re-run without --dry-run to apply changes."
     }
