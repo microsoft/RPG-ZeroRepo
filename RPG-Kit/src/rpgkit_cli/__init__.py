@@ -3508,6 +3508,18 @@ def init(
             "prompt and run, or --no-encode to skip the prompt and not run."
         ),
     ),
+    no_rpgkit_git: bool = typer.Option(
+        False,
+        "--no-rpgkit-git",
+        help=(
+            "Skip initialising a private git repository inside .rpgkit/ "
+            "(see plan 03).  Default is ON: rpgkit init seeds .rpgkit/.git "
+            "so every subsequent `rpgkit script` invocation auto-snapshots "
+            "the workspace state, letting you `git log` / `git diff` "
+            "between pipeline stages without extra tooling.  This flag "
+            "disables the feature for the current init only."
+        ),
+    ),
 ):
     """Initialize a new RPG-Kit project from the latest template.
 
@@ -3970,6 +3982,29 @@ def init(
         console.print()
         console.print(permissions_hint)
 
+    # Initialise the private snapshot repo inside .rpgkit/.  Done BEFORE
+    # the optional initial encode so the encoder's output, if it runs,
+    # becomes a fresh commit on top of the [init] baseline — perfect
+    # diff target.  Plan 03.
+    if not no_rpgkit_git:
+        from . import _inner_git
+        from importlib.metadata import version as _pkg_version, PackageNotFoundError
+        try:
+            ver = _pkg_version("rpgkit-cli")
+        except PackageNotFoundError:
+            ver = "dev"
+        channel = "legacy" if legacy_download else "bundle"
+        script_label = script_type if script_type else "sh"
+        ai_label = selected_ai if selected_ai else "?"
+        if _inner_git.ensure_inner_git(
+            project_path,
+            initial_msg=f"[init] v{ver} \u2014 {ai_label}/{script_label}, {channel} channel",
+        ):
+            console.print(
+                "[dim]Inner snapshot repo initialised at "
+                "[cyan].rpgkit/.git[/cyan] \u2014 `cd .rpgkit && git log` to inspect.[/dim]"
+            )
+
     # Final step: optionally build the initial RPG by running the
     # encoder.  Skipped silently for empty workspaces / non-tty / when
     # the user passes --no-encode.
@@ -4029,6 +4064,17 @@ def update(
             "Before syncing, run the appropriate upgrade command for the "
             "installed CLI (uv / pipx / pip) so the latest packaged "
             "assets are used.  Requires network."
+        ),
+    ),
+    no_rpgkit_git: bool = typer.Option(
+        False,
+        "--no-rpgkit-git",
+        help=(
+            "Skip backfilling the private snapshot repo at .rpgkit/.git "
+            "for workspaces created before plan 03.  Default is ON: if "
+            "the inner repo is missing, `rpgkit update` creates it and "
+            "commits a catch-up snapshot.  Pre-existing inner repos are "
+            "never touched."
         ),
     ),
 ):
@@ -4303,6 +4349,25 @@ def update(
         f"command definitions in [cyan]{project_path}[/cyan][/dim]"
     )
 
+    # Plan 03: backfill inner snapshot repo for workspaces created before
+    # this feature shipped.  Idempotent — does nothing if .rpgkit/.git
+    # already exists, and silently noops if --no-rpgkit-git was passed.
+    if not no_rpgkit_git:
+        from . import _inner_git
+        from importlib.metadata import version as _pkg_version, PackageNotFoundError
+        try:
+            ver = _pkg_version("rpgkit-cli")
+        except PackageNotFoundError:
+            ver = "dev"
+        if _inner_git.ensure_inner_git(
+            project_path,
+            initial_msg=f"[update] v{ver} \u2014 catch-up snapshot",
+        ):
+            console.print(
+                "[dim]Initialised inner snapshot repo at "
+                "[cyan].rpgkit/.git[/cyan] for this workspace.[/dim]"
+            )
+
 
 @app.command(
     context_settings={
@@ -4382,6 +4447,29 @@ def script(
 
     cmd = [sys.executable, str(path), *ctx.args]
     proc = subprocess.run(cmd, env=env)
+
+    # Plan 03: snapshot the current state of .rpgkit/ into the inner git
+    # repo so users can `git log` / `git diff` between pipeline stages.
+    # No-op (silently) when the script is read-only (check_*, *_validation),
+    # the inner repo is absent (--no-rpgkit-git on init), or git is busy.
+    #
+    # Use the *resolved* path (always carries .py) for the commit message
+    # so `rpgkit script smoke_test` and `rpgkit script smoke_test.py`
+    # produce identical history entries.
+    from . import _inner_git, _assets
+    ws_root = _inner_git.find_workspace_root()
+    if ws_root is not None:
+        try:
+            commit_relpath = str(path.relative_to(_assets.scripts_dir())).replace("\\", "/")
+        except ValueError:
+            commit_relpath = relpath.replace("\\", "/")
+        _inner_git.auto_commit_after_script(
+            ws_root,
+            commit_relpath,
+            list(ctx.args),
+            proc.returncode,
+        )
+
     raise typer.Exit(proc.returncode)
 
 
@@ -4570,6 +4658,21 @@ def version():
     info_table.add_row("Platform", platform.system())
     info_table.add_row("Architecture", platform.machine())
     info_table.add_row("OS Version", platform.version())
+
+    # Plan 03: surface the inner-snapshot repo state when present.
+    try:
+        from . import _inner_git
+        ws = _inner_git.find_workspace_root()
+        if ws is not None:
+            count = _inner_git.snapshot_count(ws)
+            if count is not None:
+                info_table.add_row("", "")
+                info_table.add_row(
+                    "Inner git",
+                    f"{count} snapshots (cd {ws.name}/.rpgkit && git log)",
+                )
+    except Exception:
+        pass
 
     panel = Panel(
         info_table,
