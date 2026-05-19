@@ -104,6 +104,48 @@ Display version and system information.
 rpgkit version
 ```
 
+## `rpgkit script`
+
+Execute one of the bundled RPG-Kit pipeline scripts.  After install
+(`uv tool install rpgkit-cli`) the scripts live inside the wheel under
+`rpgkit_cli/core_pack/scripts/` and are no longer copied into each
+workspace; this command is the supported way to invoke them.
+
+```bash
+rpgkit script <relpath> [args...]
+```
+
+Arguments after `<relpath>` are forwarded verbatim to the target
+script.  Standard input/output/error and exit code are inherited.
+
+### Options
+
+- `--list` — print every available script (relative path) and exit.
+- `--where <name>` — print the absolute filesystem path of one script
+  and exit; pipeable into `$(...)` for ad-hoc inspection.
+
+The `.py` suffix on `<relpath>` is optional.  Path traversal (`..`)
+and absolute paths are rejected for safety.
+
+### Examples
+
+```bash
+rpgkit script smoke_test.py --json
+rpgkit script rpg_edit/validate.py
+rpgkit script --list
+rpgkit script --where mcp_server.py
+```
+
+The slash-command templates installed by `rpgkit init` (in
+`.claude/commands/` or `.github/agents/`) all use `rpgkit script …`
+under the hood, so AI agents invoke the pipeline through the same
+contract.
+
+A companion console script, `rpgkit-mcp`, is the MCP server entry
+point and is what `.mcp.json` / `.vscode/mcp.json` register as the
+`rpg-tools` command — no absolute paths in the config, no per-machine
+edits.
+
 ## Network and Release Options
 
 ```bash

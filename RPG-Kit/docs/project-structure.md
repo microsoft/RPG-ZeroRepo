@@ -42,54 +42,16 @@ my-project/
 └── .rpgkit/
     ├── config.toml                     # Workspace AI / config (committed). See docs/configuration.md
     ├── .source                         # Provisioning channel marker: "bundle" or "legacy"
-    ├── scripts/                        # Pipeline scripts and support packages
-    │   ├── feature_spec_to_json.py      # Feature specification
-    │   ├── feature_build.py
-    │   ├── feature_build_validation.py
-    │   ├── feature_refactor.py
-    │   ├── feature_refactor_validation.py
-    │   ├── feature_edit.py
-    │   ├── feature_edit_validation.py
-    │   ├── build_skeleton.py            # RPG construction
-    │   ├── check_skeleton.py
-    │   ├── summary_skeleton.py
-    │   ├── build_data_flow.py
-    │   ├── check_data_flow.py
-    │   ├── generate_viz.py
-    │   ├── design_base_classes.py
-    │   ├── check_base_classes.py
-    │   ├── design_interfaces.py
-    │   ├── check_interfaces.py
-    │   ├── plan_tasks.py
-    │   ├── check_tasks.py
-    │   ├── init_codebase.py             # Code generation
-    │   ├── run_batch.py                 # TDD batch executor, final test, global review
-    │   ├── check_code_gen.py
-    │   ├── update_graphs.py             # Incremental RPG and dependency graph updates
-    │   ├── mcp_server.py                # rpg-tools MCP server
-    │   ├── code_gen/                    # Code generation subpackage
-    │   ├── common/                      # Shared utilities and path definitions
-    │   ├── feature/                     # Feature processing
-    │   ├── func_design/                 # Function/interface design agents
-    │   ├── skeleton/                    # Skeleton building
-    │   ├── rpg/                         # RPG models, services, graph query engine
-    │   ├── rpg_edit/                    # Surgical RPG/code edit pipeline
-    │   └── rpg_encoder/                 # Reverse encoder
-    │       ├── check_encode.py          # Pre-check rpg.json state
-    │       ├── run_encode.py            # Full encode
-    │       ├── run_update_rpg.py        # Incremental update implementation
-    │       ├── rpg_encoding.py          # RPG encoding pipeline
-    │       ├── rpg_evolution.py         # Incremental RPG evolution
-    │       ├── semantic_parsing.py      # Semantic feature extraction
-    │       └── refactor_tree.py         # Feature tree refactoring
-    ├── data/                            # Runtime artifacts, populated by commands
-    ├── logs/                            # Per-stage logs
-    └── reports/                         # Review and diagnostic reports when generated
+    ├── data/                           # Runtime artifacts, populated by commands
+    ├── logs/                           # Per-stage logs
+    └── reports/                        # Review and diagnostic reports when generated
 ```
+
+> Pipeline scripts (formerly materialised into `.rpgkit/scripts/`) now live inside the installed `rpgkit-cli` wheel under `rpgkit_cli/core_pack/scripts/` and are invoked via the global [`rpgkit script <name>`](cli-reference.md) command. They are no longer copied into each workspace, so `rpgkit init` produces a much smaller footprint and a single source of truth per CLI install.
 
 The agent configuration directory varies by the selected AI assistant and release package. For the verified CLI path, `--ai claude` installs `.claude/commands/`, while `--ai copilot` installs `.github/agents/`, `.github/prompts/`, and `.vscode/mcp.json`.
 
-Command definitions are installed into the AI-agent-specific folder. Normal users should not need to edit `.rpgkit/scripts/` or `.rpgkit/data/` manually.
+Command definitions are installed into the AI-agent-specific folder. Normal users should not need to edit `.rpgkit/data/` manually.
 
 ## Generated Data Files
 

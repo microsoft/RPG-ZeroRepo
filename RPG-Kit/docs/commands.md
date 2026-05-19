@@ -92,8 +92,8 @@ Generate and iteratively refine the feature tree from `.rpgkit/data/feature_spec
 
 **Current workflow:**
 
-1. **Validate status** — runs `.rpgkit/scripts/feature_build_validation.py` to verify that `feature_spec.json` exists and decide whether this is a first build or an expansion.
-2. **Build or expand** — runs `.rpgkit/scripts/feature_build.py --mode step1`.
+1. **Validate status** — runs `rpgkit script feature_build_validation.py` to verify that `feature_spec.json` exists and decide whether this is a first build or an expansion.
+2. **Build or expand** — runs `rpgkit script feature_build.py --mode step1`.
    - If `feature_build.json` does not exist, RPG-Kit builds the feature tree from the specification and iterates until requirements are covered.
    - If `feature_build.json` already exists, RPG-Kit switches to beyond-spec expansion mode and adds production-relevant features not described by the original spec.
 3. **Review** — validates coverage, duplicates, and MIU constraints. Coverage review uses a default threshold of `98.0` and up to `3` review iterations.
@@ -201,9 +201,9 @@ Build inter-component data flow as a directed acyclic graph (DAG).
 2. **Iteration choice** — asks for max iterations:
    - `Y` uses the default of 5 iterations.
    - A number sets a custom iteration budget.
-3. **DAG design** — runs `.rpgkit/scripts/build_data_flow.py --max-iterations <N>`.
-4. **Validation** — runs `.rpgkit/scripts/check_data_flow.py --verbose`.
-5. **Visualization** — runs `.rpgkit/scripts/generate_viz.py` when a new data flow is built.
+3. **DAG design** — runs `rpgkit script build_data_flow.py --max-iterations <N>`.
+4. **Validation** — runs `rpgkit script check_data_flow.py --verbose`.
+5. **Visualization** — runs `rpgkit script generate_viz.py` when a new data flow is built.
 
 **Example:**
 
@@ -356,9 +356,9 @@ This command is independent from `/rpgkit.feature_edit` and `/rpgkit.update_rpg`
 
 **Workflow:**
 
-1. **Pre-check** — runs `.rpgkit/scripts/rpg_edit/validate.py --json` and stops if the RPG or dependency graph is unavailable.
-2. **Locate target nodes** — runs `.rpgkit/scripts/rpg_edit/locate.py --query "<instruction>" --json` and selects existing nodes or nearest parent nodes for new features.
-3. **Analyze impact** — runs `.rpgkit/scripts/rpg_edit/impact.py --node-id ... --json` to identify affected nodes, callers, callees, and files.
+1. **Pre-check** — runs `rpgkit script rpg_edit/validate.py --json` and stops if the RPG or dependency graph is unavailable.
+2. **Locate target nodes** — runs `rpgkit script rpg_edit/locate.py --query "<instruction>" --json` and selects existing nodes or nearest parent nodes for new features.
+3. **Analyze impact** — runs `rpgkit script rpg_edit/impact.py --node-id ... --json` to identify affected nodes, callers, callees, and files.
 4. **Optional visual reconnaissance** — for UI/layout/style edits, probes the app with the browser helper when available.
 5. **Mandatory code reconnaissance** — reads affected files and searches related patterns before producing a plan.
 6. **Generate and confirm plan** — writes `.rpgkit/data/rpg_edit_plan.json` and asks the user to apply, cancel, revise, or inspect a node.
@@ -392,8 +392,8 @@ Encode the current repository into an RPG from scratch.
 
 **Process:**
 
-1. **Pre-check** — runs `.rpgkit/scripts/rpg_encoder/check_encode.py --json`.
-2. **Full encode** — runs `.rpgkit/scripts/rpg_encoder/run_encode.py --json`.
+1. **Pre-check** — runs `rpgkit script rpg_encoder/check_encode.py --json`.
+2. **Full encode** — runs `rpgkit script rpg_encoder/run_encode.py --json`.
 3. **Next steps** — suggests `/rpgkit.update_rpg` for incremental updates and MCP tools for exploration.
 
 If `rpg.json` already exists, the command asks whether to full re-encode, switch to `/rpgkit.update_rpg`, or quit.
@@ -418,9 +418,9 @@ Under normal use, RPG-Kit installs a post-commit hook that updates the RPG in th
 
 **Process:**
 
-1. **Pre-check** — runs `.rpgkit/scripts/rpg_encoder/check_encode.py --json` and stops if `rpg.json` is missing or corrupt.
+1. **Pre-check** — runs `rpgkit script rpg_encoder/check_encode.py --json` and stops if `rpg.json` is missing or corrupt.
 2. **Commit baseline check** — verifies `HEAD~1` exists. If there is no previous commit, run `/rpgkit.encode` instead.
-3. **Incremental update** — runs `.rpgkit/scripts/update_graphs.py update-rpg --json`, comparing the current workspace against `HEAD~1`, the same baseline used by the hook.
+3. **Incremental update** — runs `rpgkit script update_graphs.py update-rpg --json`, comparing the current workspace against `HEAD~1`, the same baseline used by the hook.
 4. **Report result** — displays node/edge deltas, functional areas, alignment status, and output path.
 
 Use this command when:
