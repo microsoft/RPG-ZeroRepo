@@ -386,7 +386,7 @@ def cmd_update_rpg(
     Designed for post-commit background invocation via ``setsid``::
 
         setsid env -u GIT_INDEX_FILE -u GIT_DIR sh -c \
-            "cd <workspace>; python update_graphs.py update-rpg --json >> log 2>&1" &
+            "cd <workspace>; rpgkit script update_graphs.py update-rpg --json >> log 2>&1" &
 
     Requires:
         - rpg.json exists (encode has been run)

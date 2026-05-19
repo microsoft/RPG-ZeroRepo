@@ -208,7 +208,7 @@ claim against an independent re-run.
 
 [FAIL] You MUST NOT:
 - Modify or read files under `.rpgkit/`
-- Run any `.rpgkit/scripts/*.py` commands
+- Run any `rpgkit script ...` or `rpgkit-mcp` commands
 - Run arbitrary shell commands beyond pytest/pip/git listed above
 - Install packages that are not genuinely needed by the source code
 - Delete files that are not part of your task
@@ -311,7 +311,7 @@ The core implementation is already complete.
 [FAIL] You MUST NOT:
 - Modify existing source code or test files
 - Modify or read files under `.rpgkit/`
-- Run any `.rpgkit/scripts/*.py` commands
+- Run any `rpgkit script ...` or `rpgkit-mcp` commands
 
 ## Task Details
 

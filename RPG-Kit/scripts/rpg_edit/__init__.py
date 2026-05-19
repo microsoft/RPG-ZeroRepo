@@ -1,7 +1,7 @@
 """RPG edit pipeline — CLI entry points for the ``/rpgkit.rpg_edit`` flow.
 
 Each module is a standalone script meant to be invoked as
-``python3 .rpgkit/scripts/rpg_edit/<name>.py [args]``.  They share the
+``rpgkit script rpg_edit/<name>.py [args]``.  They share the
 ``common.paths`` / ``rpg`` / ``run_batch`` infrastructure that lives at
 ``scripts/`` and add ``scripts/`` (i.e. ``parent.parent``) to ``sys.path``
 on import so the relative-import path stays predictable regardless of cwd.
