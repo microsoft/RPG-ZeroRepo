@@ -1,5 +1,5 @@
 ---
-mode: agent
+name: rpgkit.plan_tasks
 description: Plan implementation tasks from interface definitions
 ---
 

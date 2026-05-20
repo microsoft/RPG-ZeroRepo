@@ -1,5 +1,5 @@
 ---
-mode: agent
+name: rpgkit.code_gen
 description: Implement code using TDD workflow with iterative test-code-fix cycles
 ---
 

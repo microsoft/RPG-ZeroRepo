@@ -1,5 +1,5 @@
 ---
-mode: agent
+name: rpgkit.design_interfaces
 description: Design interfaces (functions/classes) for repository files
 ---
 
