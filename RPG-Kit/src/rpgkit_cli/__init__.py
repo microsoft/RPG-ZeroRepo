@@ -1514,6 +1514,175 @@ def _generate_mcp_config(
 
 
 # ---------------------------------------------------------------------------
+# Copilot CLI: global MCP registration
+# ---------------------------------------------------------------------------
+
+_COPILOT_CLI_MCP_CONFIG = Path.home() / ".copilot" / "mcp-config.json"
+
+
+def _register_copilot_cli_global_mcp(tracker=None) -> None:
+    """Register ``rpg-tools`` in ``~/.copilot/mcp-config.json`` (global).
+
+    The GitHub Copilot CLI (``copilot``) — unlike the VS Code Copilot
+    extension — does NOT read workspace-local ``.vscode/mcp.json``.  It
+    only reads the global ``~/.copilot/mcp-config.json`` (or accepts
+    inline JSON via ``--additional-mcp-config``).
+
+    To make ``copilot`` find ``rpg-tools`` automatically in any
+    rpgkit-initialised workspace, we register the server globally on
+    first ``rpgkit init --ai copilot`` (or ``rpgkit update``).
+
+    This is safe because ``rpgkit-mcp`` is cwd-aware (it walks up to
+    find ``rpg.json``) and stateless across workspaces — one global
+    registration serves every workspace the user ``cd``-s into.  In
+    workspaces without ``rpg.json`` the server starts in degraded mode
+    and tool calls return a ``rpg_unavailable`` hint instructing the
+    user to run ``/rpgkit.encode``.
+
+    Safety rules (see audit decisions D-globalmcp-1..4):
+      - **No-op when in-sync.**  If the file already contains exactly
+        the entry we'd write, we don't touch it at all (no mtime bump,
+        no .bak).  This makes ``rpgkit update`` cheap to run repeatedly.
+      - **Refuse to wipe a malformed config.**  If the file exists but
+        isn't valid JSON we abort with a clear error instead of
+        overwriting; the user is expected to fix it (or run with
+        ``--no-copilot-cli-mcp``).  Without this guard a stray comma
+        in the user's config would have us silently drop every
+        non-rpg-tools server.
+      - **Atomic write.**  We serialise to ``mcp-config.json.tmp``
+        first and then ``os.replace()`` into place, so a Ctrl-C or
+        crash mid-write can't leave the file half-written.
+      - **Respect user-customised entries.**  If an existing
+        ``rpg-tools`` entry uses a different ``command`` (the user has
+        intentionally pointed it elsewhere, e.g. to a dev checkout) we
+        leave it alone and ask them to use ``--no-copilot-cli-mcp``.
+      - **One-shot .bak.**  Only created on the first modification we
+        actually perform — never on no-op runs, never overwritten.
+    """
+    config_path = _COPILOT_CLI_MCP_CONFIG
+    bak_path = config_path.with_suffix(".json.bak")
+    tmp_path = config_path.with_suffix(".json.tmp")
+    desired = {
+        "type": "stdio",
+        "command": "rpgkit-mcp",
+        "args": [],
+    }
+
+    def _report_skip(detail: str) -> None:
+        if tracker:
+            tracker.skip("copilot-cli-mcp", detail)
+
+    def _report_error(detail: str) -> None:
+        if tracker:
+            tracker.error("copilot-cli-mcp", detail)
+        else:
+            console.print(
+                f"[yellow]Warning: could not register rpg-tools in "
+                f"{config_path}: {detail}[/yellow]"
+            )
+
+    def _report_done(detail: str) -> None:
+        if tracker:
+            tracker.complete("copilot-cli-mcp", detail)
+
+    try:
+        config_path.parent.mkdir(parents=True, exist_ok=True)
+
+        # ----- Parse existing file (strictly, so we can refuse to
+        # clobber a malformed user config).  An empty/missing file is
+        # fine — we treat that as "start fresh".
+        if config_path.exists():
+            raw = config_path.read_text(encoding="utf-8")
+            if raw.strip() == "":
+                existing: Dict[str, Any] = {}
+            else:
+                try:
+                    parsed = json.loads(raw)
+                except json.JSONDecodeError as exc:
+                    _report_error(
+                        f"{config_path} is not valid JSON ({exc.msg} "
+                        f"at line {exc.lineno} col {exc.colno}); refusing to "
+                        f"overwrite. Fix the file or re-run with "
+                        f"--no-copilot-cli-mcp."
+                    )
+                    return
+                if not isinstance(parsed, dict):
+                    _report_error(
+                        f"{config_path} top-level is not a JSON object; "
+                        f"refusing to overwrite. Re-run with "
+                        f"--no-copilot-cli-mcp."
+                    )
+                    return
+                existing = parsed
+        else:
+            existing = {}
+
+        servers = existing.get("mcpServers")
+        if servers is None:
+            existing["mcpServers"] = {}
+            servers = existing["mcpServers"]
+        elif not isinstance(servers, dict):
+            _report_error(
+                f"{config_path}: `mcpServers` is not a JSON object; "
+                f"refusing to overwrite. Re-run with --no-copilot-cli-mcp."
+            )
+            return
+
+        current = servers.get("rpg-tools")
+        # No-op fast path: file already contains exactly what we'd write.
+        if current == desired:
+            _report_skip(f"already up-to-date at {config_path}")
+            return
+
+        # Respect a user-customised entry — only touch entries that
+        # either don't exist or already point at our `rpgkit-mcp`
+        # console script (the latter happens on a version bump where
+        # we'd want to e.g. add new default args).
+        if (
+            isinstance(current, dict)
+            and current.get("command")
+            and current.get("command") != "rpgkit-mcp"
+        ):
+            _report_skip(
+                f"existing entry uses custom command "
+                f"{current.get('command')!r}; leaving alone "
+                f"(use --no-copilot-cli-mcp to silence)"
+            )
+            return
+
+        # We're going to write — back up the original (one-shot).
+        if config_path.exists() and not bak_path.exists():
+            try:
+                shutil.copy2(config_path, bak_path)
+            except OSError:
+                pass  # backup is best-effort
+
+        servers["rpg-tools"] = desired
+
+        # Atomic write: serialise to .tmp then rename.  ``os.replace``
+        # is atomic on POSIX and Windows.
+        try:
+            with open(tmp_path, "w", encoding="utf-8") as f:
+                json.dump(existing, f, indent=2)
+                f.write("\n")
+            os.replace(tmp_path, config_path)
+        except Exception:
+            # Clean up a stray .tmp on failure so the next run isn't
+            # confused by a leftover.
+            try:
+                if tmp_path.exists():
+                    tmp_path.unlink()
+            except OSError:
+                pass
+            raise
+
+        action = "updated" if current is not None else "registered"
+        _report_done(f"{action} at {config_path}")
+    except Exception as exc:
+        _report_error(f"failed: {exc}")
+
+
+# ---------------------------------------------------------------------------
 # Optional initial encode
 # ---------------------------------------------------------------------------
 
@@ -3488,6 +3657,18 @@ def init(
         "--no-mcp",
         help="Skip MCP server registration (rpg-tools won't be exposed to the AI agent)",
     ),
+    no_copilot_cli_mcp: bool = typer.Option(
+        False,
+        "--no-copilot-cli-mcp",
+        help=(
+            "When --ai copilot is selected, skip also registering "
+            "rpg-tools globally in ~/.copilot/mcp-config.json.  The "
+            "Copilot CLI does not read workspace .vscode/mcp.json, so "
+            "this global registration is what makes `copilot` find "
+            "rpg-tools.  Pass this flag if you manage your Copilot CLI "
+            "MCP config by hand."
+        ),
+    ),
     legacy_download: bool = typer.Option(
         False,
         "--legacy-download",
@@ -3692,6 +3873,7 @@ def init(
         ("chmod", "Ensure scripts executable"),
         ("gitignore", "Configure .gitignore"),
         ("mcp", "Configure MCP server"),
+        ("copilot-cli-mcp", "Register rpg-tools in ~/.copilot/mcp-config.json"),
         ("legacy-cleanup", "Remove obsolete persistent rules"),
         ("cleanup", "Cleanup"),
         ("git", "Initialize git repository"),
@@ -3756,6 +3938,19 @@ def init(
                 tracker.skip("mcp", "--no-mcp flag")
             else:
                 _generate_mcp_config(project_path, selected_ai, tracker=tracker)
+
+            # Global registration for Copilot CLI (which doesn't read
+            # workspace .vscode/mcp.json).  Skipped for non-copilot AIs,
+            # when --no-mcp is set, or when the user opts out explicitly.
+            if no_mcp:
+                pass
+            elif selected_ai != "copilot":
+                tracker.skip("copilot-cli-mcp", f"ai={selected_ai}")
+            elif no_copilot_cli_mcp:
+                tracker.skip("copilot-cli-mcp", "--no-copilot-cli-mcp flag")
+            else:
+                tracker.start("copilot-cli-mcp")
+                _register_copilot_cli_global_mcp(tracker=tracker)
 
             # Migrate workspaces created before C4: drop the auto-loaded
             # rpgkit-codegen.* persistent-instruction files.
@@ -4048,6 +4243,18 @@ def update(
         "--no-mcp",
         help="Skip MCP server registration (rpg-tools won't be exposed to the AI agent)",
     ),
+    no_copilot_cli_mcp: bool = typer.Option(
+        False,
+        "--no-copilot-cli-mcp",
+        help=(
+            "When --ai copilot is selected, skip also registering "
+            "rpg-tools globally in ~/.copilot/mcp-config.json.  The "
+            "Copilot CLI does not read workspace .vscode/mcp.json, so "
+            "this global registration is what makes `copilot` find "
+            "rpg-tools.  Pass this flag if you manage your Copilot CLI "
+            "MCP config by hand."
+        ),
+    ),
     legacy_download: bool = typer.Option(
         False,
         "--legacy-download",
@@ -4217,6 +4424,7 @@ def update(
         ("chmod", "Ensure scripts executable"),
         ("gitignore", "Configure .gitignore"),
         ("mcp", "Configure MCP server"),
+        ("copilot-cli-mcp", "Register rpg-tools in ~/.copilot/mcp-config.json"),
         ("legacy-cleanup", "Remove obsolete persistent rules"),
         ("hooks", "Install auto-update hooks"),
         ("cleanup", "Cleanup"),
@@ -4286,6 +4494,17 @@ def update(
                 tracker.skip("mcp", "--no-mcp flag")
             else:
                 _generate_mcp_config(project_path, selected_ai, tracker=tracker)
+
+            # Global registration for Copilot CLI (see init for rationale).
+            if no_mcp:
+                pass
+            elif selected_ai != "copilot":
+                tracker.skip("copilot-cli-mcp", f"ai={selected_ai}")
+            elif no_copilot_cli_mcp:
+                tracker.skip("copilot-cli-mcp", "--no-copilot-cli-mcp flag")
+            else:
+                tracker.start("copilot-cli-mcp")
+                _register_copilot_cli_global_mcp(tracker=tracker)
 
             # Migrate workspaces created before C4: drop the auto-loaded
             # rpgkit-codegen.* persistent-instruction files.
