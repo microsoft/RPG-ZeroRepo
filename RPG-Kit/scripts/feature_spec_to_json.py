@@ -25,6 +25,15 @@ import sys
 from pathlib import Path
 from typing import Optional
 
+# Use the canonical paths from common.paths so the output location
+# matches what downstream stages (feature_build, feature_build_validation,
+# ...) expect.  That resolves to
+# ``~/.rpgkit/workspaces/<hash>/data/feature_spec.json`` rather than the
+# workspace-local ``.rpgkit/data/feature_spec.json`` this script used
+# to compute on its own — a mismatch that previously broke the
+# feature_spec → feature_build handoff.
+from common.paths import FEATURE_SPEC_FILE
+
 
 def parse_evidence_line(line: str) -> Optional[dict]:
     """Parse an evidence reference line.
@@ -390,8 +399,10 @@ def main():
     if args.output:
         output_file = args.output
     else:
-        # Default output is in parent directory of input_dir
-        output_file = input_dir.parent / "feature_spec.json"
+        # Default to the canonical location from common.paths so
+        # downstream stages (feature_build) can find it.  The output
+        # lives in the home-side data dir.
+        output_file = FEATURE_SPEC_FILE
     
     include_evidence = not args.no_evidence
     

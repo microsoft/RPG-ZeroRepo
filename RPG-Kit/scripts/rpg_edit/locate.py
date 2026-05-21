@@ -159,7 +159,6 @@ def main():
     args = parser.parse_args()
 
     # Capture log records for post-mortem inspection of rpg_edit issues.
-    # See plans/20260508-1-rpgkit-optimization*.md § E1.
     from common.logging_setup import setup_file_logging
     setup_file_logging("rpg_edit")
 

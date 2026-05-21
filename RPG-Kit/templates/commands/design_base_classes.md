@@ -66,14 +66,11 @@ Run the script `rpgkit script check_base_classes.py` to verify the current state
 2. Execute the following command with the selected iteration count:
 
    ```bash
-   rpgkit script design_base_classes.py --max-iterations <default_or_user_defined> > .rpgkit/logs/design_base_classes.log 2>&1
+   rpgkit script design_base_classes.py --max-iterations <default_or_user_defined>
    ```
 
-   Then print the output by:
-
-   ```bash
-   cat .rpgkit/logs/design_base_classes.log
-   ```
+   The script writes a structured log automatically;
+   stdout carries the summary the next step needs.
 
 3. Upon successful completion, display:
 

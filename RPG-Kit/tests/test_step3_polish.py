@@ -432,8 +432,7 @@ def test_install_post_commit_hook_writes_script(tmp_path):
     assert "nohup" in content
     assert "setsid" not in content
     # Atomic lock via mkdir (the only POSIX-atomic exclusive-create
-    # primitive available from shell).  Pre-v4 used ``[ ! -f ]; touch``
-    # which had a 2-second race window after a commit burst.
+    # primitive available from shell).
     assert "mkdir " in content
     assert "rmdir " in content
     # Stale-lock recovery for orphaned worker runs (>60min old).

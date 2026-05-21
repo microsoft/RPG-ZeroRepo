@@ -31,7 +31,8 @@ SCRIPTS_DIR = Path(__file__).resolve().parent
 if str(SCRIPTS_DIR) not in sys.path:
     sys.path.insert(0, str(SCRIPTS_DIR))
 
-from common.paths import REPO_RPG_FILE, DEP_GRAPH_FILE, HOOK_CALLS_LOG  # noqa: E402
+from common.paths import REPO_RPG_FILE, DEP_GRAPH_FILE, RPG_HTML_FILE, HOOK_CALLS_LOG  # noqa: E402
+from common.rpg_io import safe_load_rpg  # noqa: E402
 
 
 # Shared message used by every subcommand that requires an existing
@@ -102,9 +103,12 @@ def _refresh_rpg_html(rpg_path: Path) -> dict:
 
         data = load_rpg(str(rpg_path))
         html_content = generate_html(data)
-        viz_path = rpg_path.with_suffix(".html")
-        viz_path.write_text(html_content, encoding="utf-8")
-        result["viz_path"] = str(viz_path)
+        # rpg.html is a user-facing artefact: write it to the
+        # workspace's .rpgkit/reports/ (the home-side data/ holds
+        # only machine-consumed JSON).  This mirrors run_encode.py.
+        RPG_HTML_FILE.parent.mkdir(parents=True, exist_ok=True)
+        RPG_HTML_FILE.write_text(html_content, encoding="utf-8")
+        result["viz_path"] = str(RPG_HTML_FILE)
     except Exception as exc:  # pragma: no cover — defensive
         result["viz_error"] = str(exc)
     return result
@@ -525,8 +529,10 @@ def cmd_status(rpg_path: Path, dep_graph_path: Path) -> dict:
 
     if rpg_path.exists():
         try:
-            with open(rpg_path, "r", encoding="utf-8") as f:
-                rpg_data = json.load(f)
+            # Use safe_load_rpg so a corrupted rpg.json doesn't crash
+            # the cheap status command — it'll silently restore from
+            # inner-git history when possible.
+            rpg_data = safe_load_rpg(rpg_path)
             # RPG stores features in a hierarchical tree rooted at "root".
             # Walk it lazily to count nodes without loading the full
             # rpg.service module (the status command must stay cheap).

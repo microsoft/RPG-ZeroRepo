@@ -1056,7 +1056,7 @@ class _HeartbeatLogger:
     Designed to wrap a single long-running blocking call (typically
     ``dispatch_sub_agent`` inside a global_review iteration). Exits
     cleanly via context manager — the daemon thread stops as soon as
-    ``__exit__`` runs, even when the wrapped call raises (plan E2).
+    ``__exit__`` runs, even when the wrapped call raises.
     """
 
     def __init__(self, label: str, interval_s: int = 60) -> None:
@@ -1157,7 +1157,7 @@ def global_review(
         # 3. Dispatch sub-agent (with retries for transient failures).
         #    Wrap with a heartbeat so the operator sees the iteration is
         #    still alive even if the sub-agent runs for many minutes
-        #    without producing output (plan E2).
+        #    without producing output.
         with _HeartbeatLogger(
             label=f"global_review[{iteration}/{max_iterations}]",
             interval_s=60,

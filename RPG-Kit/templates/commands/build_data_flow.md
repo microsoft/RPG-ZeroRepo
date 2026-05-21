@@ -81,14 +81,11 @@ Run the script `rpgkit script check_data_flow.py` to verify the current state.
 2. Execute the following command with the selected iteration count:
 
    ```bash
-   rpgkit script build_data_flow.py --max-iterations <default_or_user_defined> > .rpgkit/logs/build_data_flow.log 2>&1
+   rpgkit script build_data_flow.py --max-iterations <default_or_user_defined>
    ```
 
-   Then print the output by:
-
-   ```bash
-   cat .rpgkit/logs/build_data_flow.log
-   ```
+   The script writes a structured log automatically;
+   stdout carries the summary you need below.
 
 3. Upon successful completion, display:
 

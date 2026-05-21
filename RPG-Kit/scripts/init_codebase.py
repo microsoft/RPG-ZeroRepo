@@ -36,7 +36,6 @@ from common.paths import (
     REPO_RPG_FILE,
     FEATURE_BUILD_FILE,
     CODE_GEN_STATE_FILE as STATE_FILE,
-    get_scripts_dir,
     cmd_for,
     REPO_DIR,
 )
@@ -214,7 +213,7 @@ def _gitignore_has_rpgkit_block(existing: str) -> bool:
 # Agent Detection & Persistent Instructions
 # ============================================================================
 #
-# Removed in commit C4 (see plans/20260508-1-rpgkit-optimization*.md): the
+# Removed: the
 # previously-generated `repo/.claude/rules/rpgkit-codegen.md` and
 # `repo/.github/instructions/rpgkit-codegen.instructions.md` files were
 # auto-loaded by Claude Code / Copilot for **every** session, contaminating
@@ -522,14 +521,13 @@ def init_codebase(
     # IS the project repo root, so ``.claude`` is already at the right
     # location and the symlink is unnecessary (and would point at
     # ``<workspace.parent>/.claude``, i.e. outside the workspace).
-    # Block removed deliberately; do NOT reintroduce.
+    # Block removed on purpose; do not reintroduce.
 
     # Check if already initialized
     if state_path.exists():
         try:
             state = load_code_gen_state(state_path)
             if state.initialized:
-                scripts = get_scripts_dir()
                 return {
                     "success": False,
                     "error": "Codebase already initialized",
@@ -592,7 +590,6 @@ def init_codebase(
                 state.initialized = True
                 state.initialized_at = datetime.now().isoformat()
                 save_code_gen_state(state, state_path)
-        scripts = get_scripts_dir()
         return {
             "success": True,
             "message": "Repository already set up, no changes needed",

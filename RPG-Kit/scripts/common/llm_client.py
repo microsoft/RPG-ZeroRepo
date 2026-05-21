@@ -36,39 +36,24 @@ def _set_pdeathsig() -> None:
 
 
 # ----------------------------------------------------------------------------
-# AI CLI command resolution (added in rpgkit-cli 0.1.3)
+# AI CLI command resolution
 # ----------------------------------------------------------------------------
 #
-# Pre-0.1.3 each release-zip variant pre-substituted ``<AI_CLI_CMD>`` for
-# the chosen agent at packaging time, so this module just exposed the
-# literal string.  Bundle mode does not do that string-substitution dance
-# (one bundle serves every AI), so we resolve at runtime instead with a
-# P1-P4 priority chain.  See plans/01-package-bundle-and-ai-config.md §3.
+# Resolution priority:
+#   P1. LLMClient(tool="...") constructor argument
+#   P2. RPGKIT_AI_CLI_CMD env var
+#   P3. <workspace>/.rpgkit/config.toml  [rpgkit].ai_cli_cmd
+#   P4. _BAKED_IN_VALUE (release-zip builds substitute it at packaging time;
+#                        bundle builds leave the placeholder unchanged)
 #
-#   P1. LLMClient(tool="...")              — explicit constructor argument
-#   P2. RPGKIT_AI_CLI_CMD env var          — for CI / tests / ad-hoc override
-#   P3. .rpgkit/config.toml [rpgkit].ai_cli_cmd
-#   P4. Module-level baked-in value         — release-zip CI replaces the
-#                                             literal "<AI_CLI_CMD>" with the
-#                                             concrete command at packaging
-#                                             time, keeping the legacy path
-#                                             working transparently.
-#
-# Returning empty string is OK at module-import time and at LLMClient
-# construction; the error is raised lazily in :meth:`LLMClient.generate`
-# so unit tests and tools that construct an LLMClient without intending
-# to invoke the LLM continue to work.
+# An unresolved value is reported lazily by LLMClient.generate, not here,
+# so importing the module and constructing an LLMClient without calling
+# the LLM both succeed.
 
-# Sentinel value used to detect whether the release-zip CI substituted
-# the baked-in value.  Built programmatically (string concatenation)
-# so that ``sed s|<AI_CLI_CMD>|...|g`` — the CI's substitution invocation,
-# see .github/workflows/scripts/rpgkit/create-release-packages.sh — does
-# not also rewrite this line and break the comparison below.
+# Built via concatenation so the release-zip's ``sed s|<AI_CLI_CMD>|...|``
+# does not rewrite this sentinel.
 _PLACEHOLDER_LITERAL = "<" + "AI_CLI_CMD" + ">"
 
-# Module-level default — the release-zip CI replaces this exact literal
-# with the chosen agent's command at packaging time.  Bundle installs
-# leave it unchanged and rely on P2/P3 to supply the value.
 _BAKED_IN_VALUE = "<AI_CLI_CMD>"
 
 
@@ -83,7 +68,7 @@ def _load_ai_cli_cmd() -> str:
     :func:`paths._find_workspace_root`, not via the import-frozen
     :data:`paths.WORKSPACE_ROOT` constant.  This matters for long-lived
     processes that may serve more than one workspace (e.g. a future
-    global MCP server).  See plan §2.5/Z.
+    global MCP server).
     """
     # P2: env var (highest non-P1 priority — useful in tests and one-off
     # overrides without editing the workspace config).
@@ -104,8 +89,8 @@ def _load_ai_cli_cmd() -> str:
                 if cfg_val:
                     return cfg_val
     except Exception:
-        # Defensive: paths resolution, missing tomllib, or malformed TOML
-        # should never crash an LLMClient construction.  Fall through.
+        # paths resolution, missing tomllib, or malformed TOML must not
+        # crash LLMClient construction.
         pass
 
     # P4: legacy baked-in value (release-zip-substituted at build time).
@@ -241,7 +226,6 @@ class LLMClient:
         # that construct an LLMClient without intending to invoke the LLM
         # keep working.  The actual error is raised in :meth:`generate` if
         # the tool is still empty when a call is attempted.
-        # Plan §3, decision 19.
         self.tool = tool if tool is not None else _load_ai_cli_cmd()
         self.trajectory = trajectory
         self.step_id = step_id
@@ -346,7 +330,6 @@ class LLMClient:
         # ``self.tool`` so that tests and tools can build an LLMClient
         # without triggering an LLM invocation, but the moment we are
         # actually asked to call out, the configuration must be valid.
-        # Plan §3, decision 19.
         if not self.tool or self.tool == _PLACEHOLDER_LITERAL:
             raise RuntimeError(
                 "AI CLI command not configured.  Run "

@@ -53,6 +53,7 @@ from rpg import (
 
 from .config import RPGKitConfig
 from .version_control import RPGVersionControl, RPG_FILE_NAME
+from common.rpg_io import atomic_write_rpg
 
 logger = logging.getLogger(__name__)
 
@@ -333,8 +334,11 @@ class WorkflowIntegration:
         rpg_dict["repo_info"] = getattr(rpg, "repo_info", "")
         rpg_dict["excluded_files"] = getattr(rpg, "excluded_files", [])
 
-        with open(rpg_path, "w", encoding="utf-8") as fh:
-            json.dump(rpg_dict, fh, indent=2, ensure_ascii=False)
+        # Atomic write: a partial encoder run (Ctrl-C, OOM, power loss)
+        # can no longer brick the workspace with a truncated rpg.json
+        # — we write to <path>.tmp then os.replace into place.  See
+        # ``common.rpg_io.atomic_write_rpg`` for the recovery side.
+        atomic_write_rpg(Path(rpg_path), rpg_dict)
 
         result: Dict[str, Any] = {"rpg_path": rpg_path}
 

@@ -11,7 +11,7 @@ Locks in the following invariants:
   corrupts paths).
 * ``GraphQueryEngine`` handles an empty ``_code_dir_prefix`` cleanly.
 
-These tests are deliberately decoupled from the heavier
+These tests are decoupled from the heavier
 ``test_encoder_workspace_layout.py`` so they can be run on their own
 during the refactor without dragging the full encoder stack along.
 """

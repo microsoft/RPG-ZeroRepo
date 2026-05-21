@@ -72,10 +72,37 @@ rpgkit update --github-token $GITHUB_TOKEN
 | `--github-token <token>` | GitHub token for private repos or higher rate limits |
 | `--pre` | Download the latest pre-release template |
 | `--legacy-download` | Bypass the packaged assets and pull from the latest GitHub release zip (implied by `--pre`) |
-| `--pull` | Self-upgrade the CLI (auto-detects uv / pipx / pip) before syncing the workspace |
+| `--pull` | Force a self-upgrade of the CLI (auto-detects uv / pipx / pip) before syncing the workspace. Conflicts with `--no-pull`. |
+| `--no-pull` | Skip the self-upgrade and only sync workspace files. Conflicts with `--pull`. |
 | `--no-mcp` | Skip MCP server configuration |
 | `--skip-tls` | Skip SSL/TLS verification |
 | `--debug` | Show verbose diagnostic output |
+
+### Auto-upgrade behaviour
+
+Since the global-install layout, `rpgkit update` performs a **best-effort silent self-upgrade by default** when the install source is safe to refresh (git+URL or PyPI). After upgrading the CLI it re-executes itself once to continue the workspace sync with the new code. Editable installs, local-file installs, and unknown sources are skipped silently.
+
+- Pass `--pull` to force an upgrade attempt regardless of the detected source.
+- Pass `--no-pull` to skip the upgrade entirely (useful for offline or pinned environments).
+- `--pull` and `--no-pull` are mutually exclusive; passing both exits with status 2.
+- A loop guard environment variable (`RPGKIT_UPGRADE_DONE`) is set across the re-exec to guarantee at most one upgrade attempt per invocation.
+
+## `rpgkit view-graph`
+
+Open the most recent `rpg.html` visualisation for the current workspace in your default browser. Walks up from the current directory to find the workspace root, then locates `rpg.html` under `<workspace>/.rpgkit/reports/` (preferred, may be checked into git) or `~/.rpgkit/workspaces/<hash>/data/` as a fallback for encoder output not yet promoted to reports.
+
+```bash
+rpgkit view-graph
+rpgkit view-graph --no-open      # print the file URI but do not launch a browser
+```
+
+### Exit codes
+
+| Code | Meaning |
+| ---- | ------- |
+| `0` | Found `rpg.html` and (unless `--no-open`) opened it |
+| `1` | Not inside an RPG-Kit workspace |
+| `2` | Workspace found but no `rpg.html` has been generated yet (run `/rpgkit.encode` or the forward pipeline first) |
 
 ### Provisioning sources
 
@@ -86,7 +113,7 @@ Since `0.1.3`, `rpgkit init` and `rpgkit update` provision from two channels:
 | Packaged assets (bundle) | Default. Pulled from `rpgkit_cli/core_pack/` inside the installed wheel | No |
 | GitHub release zip (legacy) | `--legacy-download`, `--pre`, or `--script ps`, or when the bundle is unavailable (e.g. editable installs) | Yes |
 
-`rpgkit init` writes the choice to `.rpgkit/.source` (`bundle` or `legacy`) so subsequent `rpgkit update` invocations default to the same channel. Override with the flag of your choice at any time.
+`rpgkit init` records the chosen channel (`bundle` or `legacy`) in `~/.rpgkit/workspaces/<hash>/.meta.toml` so subsequent `rpgkit update` invocations default to the same channel. Override with the flag of your choice at any time.
 
 Verify that required tools are installed.
 

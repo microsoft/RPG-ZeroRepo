@@ -2,6 +2,8 @@
 
 This document covers RPG-Kit configuration that is useful after installation: AI assistant setup, MCP registration, auto-approval, hooks, and initial encoding.
 
+> **Data paths.** References below such as `.rpgkit/data/rpg.json` and `.rpgkit/logs/...` are logical names. Runtime files actually live under `~/.rpgkit/workspaces/<sha256(abspath)[:12]>/{data,logs}/` so they stay outside your git repo. Reports stay in the workspace at `<workspace>/.rpgkit/reports/`. The MCP server, hooks, and pipeline scripts all resolve the home-dir location automatically from the workspace root. Use `rpgkit view-graph` to open the visualisation without computing the hash; see [project-structure.md](project-structure.md) for the full layout.
+
 ## AI Assistant CLI Requirements
 
 RPG-Kit slash commands are executed by an AI coding agent. Before running `rpgkit init`, install and authenticate at least one supported AI assistant CLI.

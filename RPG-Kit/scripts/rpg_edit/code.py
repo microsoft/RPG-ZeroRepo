@@ -41,9 +41,10 @@ if str(SCRIPTS_DIR) not in sys.path:
 
 from common.paths import (  # noqa: E402
     RPG_FILE,
+    REPO_DIR,
+    RPG_EDIT_PLAN_FILE,
     DATA_DIR,
     WORKSPACE_ROOT,
-    REPO_DIR,
     cmd_for,
 )
 from common.logging_setup import setup_file_logging  # noqa: E402
@@ -646,8 +647,8 @@ def main() -> int:
         description="Apply EditPlan code_changes via SubAgent (RPG-driven)",
     )
     parser.add_argument(
-        "--plan", type=Path, required=True,
-        help="Path to rpg_edit_plan.json",
+        "--plan", type=Path, default=RPG_EDIT_PLAN_FILE,
+        help="Path to rpg_edit_plan.json (default: %(default)s)",
     )
     parser.add_argument(
         "--rpg", type=Path, default=RPG_FILE,

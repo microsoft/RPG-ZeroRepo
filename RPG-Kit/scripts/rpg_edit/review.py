@@ -34,7 +34,7 @@ SCRIPTS_DIR = Path(__file__).resolve().parent.parent
 if str(SCRIPTS_DIR) not in sys.path:
     sys.path.insert(0, str(SCRIPTS_DIR))
 
-from common.paths import REPO_DIR, cmd_for  # noqa: E402
+from common.paths import REPO_DIR, cmd_for, RPG_EDIT_PLAN_FILE, RPG_EDIT_IMPACT_FILE  # noqa: E402
 
 logger = logging.getLogger(__name__)
 
@@ -547,10 +547,10 @@ def main():
     parser = argparse.ArgumentParser(
         description="Impact-scoped review for rpg_edit changes"
     )
-    parser.add_argument("--plan", type=Path, required=True,
-                        help="Path to rpg_edit_plan.json")
-    parser.add_argument("--impact", type=Path, default=None,
-                        help="Path to rpg_edit_impact.json")
+    parser.add_argument("--plan", type=Path, default=RPG_EDIT_PLAN_FILE,
+                        help="Path to rpg_edit_plan.json (default: %(default)s)")
+    parser.add_argument("--impact", type=Path, default=RPG_EDIT_IMPACT_FILE,
+                        help="Path to rpg_edit_impact.json (default: %(default)s)")
     parser.add_argument("--repo", type=Path, default=None,
                         help="Repository root path")
     parser.add_argument("--max-iterations", type=int, default=3,
@@ -567,7 +567,6 @@ def main():
     )
 
     # Capture log records for post-mortem inspection of rpg_edit issues.
-    # See plans/20260508-1-rpgkit-optimization*.md § E1.
     from common.logging_setup import setup_file_logging
     setup_file_logging("rpg_edit")
 

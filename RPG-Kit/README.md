@@ -79,7 +79,7 @@ MCP Server: search_rpg / explore_rpg / get_node_detail / list_rpg_tree
 
 ### RPG-Kit in action
 
-Below is part of the graph visualization generated for this repository. Run `/rpgkit.encode` and open `.rpgkit/data/rpg.html` to explore the full interactive graph.
+Below is part of the graph visualization generated for this repository. Run `/rpgkit.encode` then `rpgkit view-graph` to open the full interactive graph in your browser (the underlying file is `<workspace>/.rpgkit/reports/rpg.html`).
 
 ![RPG-Kit repository graph visualization](../docs/rpgkit_visualized_graph.png)
 
@@ -126,7 +126,7 @@ cd my-project
 rpgkit update --legacy-download
 ```
 
-`rpgkit update` records the channel you chose in `.rpgkit/.source` so subsequent runs default to the same source. Your edits to `.rpgkit/config.toml` (see [`docs/configuration.md`](docs/configuration.md)) are preserved across updates.
+`rpgkit update` records the channel you chose in `~/.rpgkit/workspaces/<hash>/.meta.toml` so subsequent runs default to the same source. Your edits to `<workspace>/.rpgkit/config.toml` (see [`docs/configuration.md`](docs/configuration.md)) are preserved across updates.
 
 ## Quick Start: New Repository
 
@@ -170,7 +170,7 @@ Use this path when you want RPG-Kit to turn requirements into a new codebase.
    [Optional] /rpgkit.rpg_edit <edit instructions>
    ```
 
-RPG-Kit progressively creates `.rpgkit/data/rpg.json` and uses it to keep requirements, planning artifacts, generated code, and dependency information aligned.
+RPG-Kit progressively builds an `rpg.json` (under `~/.rpgkit/workspaces/<hash>/data/`) and uses it to keep requirements, planning artifacts, generated code, and dependency information aligned. Runtime state lives outside your workspace so your git history stays clean; only `<workspace>/.rpgkit/{config.toml,reports/}` belong in the repo.
 
 ## Quick Start: Existing Repository
 
@@ -204,7 +204,7 @@ Use this path when you already have a repository and want an AI agent to underst
    /rpgkit.rpg_edit <edit instructions>            # graph-aware code edit
    ```
 
-4. After commits, RPG-Kit hooks keep `.rpgkit/data/rpg.json`, `.rpgkit/data/dep_graph.json`, and `.rpgkit/data/rpg.html` aligned with code changes. If the hook fails or is skipped, run `/rpgkit.update_rpg`.
+4. After commits, RPG-Kit hooks keep the workspace's `rpg.json`, `dep_graph.json` (under `~/.rpgkit/workspaces/<hash>/data/`) and the user-facing `rpg.html` (under `<workspace>/.rpgkit/reports/`) aligned with code changes. If the hook fails or is skipped, run `/rpgkit.update_rpg`.
 
 ## What happens after `rpgkit init`
 
@@ -253,9 +253,9 @@ See [docs/project-structure.md](docs/project-structure.md) for the full layout a
 
 **AI assistant CLI not found:** run `rpgkit check`, install and authenticate the selected assistant CLI, then rerun `rpgkit init` or `rpgkit update`.
 
-**MCP tools report `rpg_unavailable`:** run `/rpgkit.encode` to create `.rpgkit/data/rpg.json`.
+**MCP tools report `rpg_unavailable`:** run `/rpgkit.encode` to create the workspace's `rpg.json` (under `~/.rpgkit/workspaces/<hash>/data/`).
 
-**Incremental update failed:** inspect `.rpgkit/logs/update_rpg.log`, then run `/rpgkit.update_rpg`.
+**Incremental update failed:** inspect `~/.rpgkit/workspaces/<hash>/logs/update_rpg.log`, then run `/rpgkit.update_rpg`.
 
 **Template download fails due to rate limits or private repo access:** pass `--github-token $GITHUB_TOKEN` or set `GH_TOKEN` / `GITHUB_TOKEN`.
 

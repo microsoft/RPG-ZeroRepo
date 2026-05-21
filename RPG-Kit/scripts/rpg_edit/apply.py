@@ -21,7 +21,7 @@ SCRIPTS_DIR = Path(__file__).resolve().parent.parent
 if str(SCRIPTS_DIR) not in sys.path:
     sys.path.insert(0, str(SCRIPTS_DIR))
 
-from common.paths import REPO_RPG_FILE, DEP_GRAPH_FILE, REPO_DIR  # noqa: E402
+from common.paths import REPO_RPG_FILE, DEP_GRAPH_FILE, REPO_DIR, RPG_EDIT_PLAN_FILE  # noqa: E402
 
 
 def _backup(rpg_path: Path, dep_graph_path: Path, ts: str) -> Dict[str, str]:
@@ -112,8 +112,8 @@ def apply_feature_changes(svc, changes: list) -> list:
 
 def main():
     parser = argparse.ArgumentParser(description="Apply EditPlan to RPG + code")
-    parser.add_argument("--plan", type=Path, required=True,
-                        help="Path to rpg_edit_plan.json")
+    parser.add_argument("--plan", type=Path, default=RPG_EDIT_PLAN_FILE,
+                        help="Path to rpg_edit_plan.json (default: %(default)s)")
     parser.add_argument("--rpg", type=Path,
                         default=REPO_RPG_FILE)
     parser.add_argument("--dep-graph", type=Path,
@@ -142,7 +142,6 @@ def main():
     args = parser.parse_args()
 
     # Capture log records for post-mortem inspection of rpg_edit issues.
-    # See plans/20260508-1-rpgkit-optimization*.md § E1.
     from common.logging_setup import setup_file_logging
     setup_file_logging("rpg_edit")
 

@@ -6,8 +6,6 @@ UI_POLISH, run_batch sub-agent prompts, rpg_edit visual recon) read these
 tokens to decide whether to inject web-specific guidance, GUI tooling,
 data-pipeline checks, etc.
 
-See ``plans/20260508-1-rpgkit-optimization*.md`` § B3 for the full design
-and acceptance criteria.
 
 This module is intentionally tiny — no dependency on RPG/dataflow code so
 it stays cheap to import from validation utilities.

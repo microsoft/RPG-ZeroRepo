@@ -26,6 +26,8 @@ from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 
 from rpg import RPG
+from pathlib import Path
+from common.rpg_io import atomic_write_rpg
 
 logger = logging.getLogger(__name__)
 
@@ -173,11 +175,12 @@ class RPGVersionControl:
 
         rpg = RPG.from_dict(payload["rpg"])
 
-        # Also write to the main rpg.json so it becomes the "current" RPG
+        # Also write to the main rpg.json so it becomes the "current" RPG.
+        # Atomic write: a kill mid-rollback can't leave a half-truncated
+        # rpg.json that bricks future reads.
         main_rpg_path = os.path.join(self.data_dir, RPG_FILE_NAME)
         os.makedirs(self.data_dir, exist_ok=True)
-        with open(main_rpg_path, "w", encoding="utf-8") as fh:
-            json.dump(payload["rpg"], fh, indent=2, ensure_ascii=False)
+        atomic_write_rpg(Path(main_rpg_path), payload["rpg"])
 
         logger.info(
             "Rolled back to version %d (%s)",

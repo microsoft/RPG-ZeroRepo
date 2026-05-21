@@ -96,14 +96,11 @@ Please confirm to proceed:
 Execute the following command:
 
 ```bash
-rpgkit script feature_edit.py > .rpgkit/logs/feature_edit.log 2>&1
+rpgkit script feature_edit.py
 ```
 
-Then print the output by:
-
-```bash
-cat .rpgkit/logs/feature_edit.log
-```
+The script writes a structured log automatically; stdout
+carries the summary you need below.
 
 ### Step 4: Summarize Results
 

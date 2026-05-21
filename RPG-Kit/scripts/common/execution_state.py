@@ -392,7 +392,7 @@ def _count_total_tasks_from_tasks_json(state_path: Path = STATE_FILE) -> int:
 
     Returns 0 if tasks.json doesn't exist or cannot be parsed. Used to backfill
     ``CodeGenState.total_tasks`` since nothing else writes that field after
-    ``plan_tasks`` runs (see plan A2).
+    ``plan_tasks`` runs.
 
     The tasks.json path is derived from ``state_path`` (assumed to live in
     the same ``.rpgkit/data/`` directory) so callers passing a custom
@@ -419,7 +419,7 @@ def _maybe_backfill_total_tasks(
     The field defaults to 0 because ``CodeGenState`` is constructed before
     ``plan_tasks`` produces tasks.json. Backfilling on each load keeps the
     persisted state in sync with the actual task count without requiring
-    every call site to remember to update it (see plan A2).
+    every call site to remember to update it.
     """
     if state.total_tasks > 0:
         return state
@@ -555,7 +555,7 @@ def save_code_gen_state(state: CodeGenState, state_path: Path = STATE_FILE) -> N
     # which never triggered in practice, leaving the state file at ~880 KB
     # after a single 100-batch run because every save dumps the full state.
     # Lowered to 200 KB and we keep the last 20 snapshots so debugging can
-    # still walk back a few steps without bloating the file (plan E3).
+    # still walk back a few steps without bloating the file.
     _COMPACT_THRESHOLD = 200 * 1024        # 200 KB
     _KEEP_LAST_N = 20                      # snapshots retained after compact
     try:
@@ -657,8 +657,7 @@ def skip_current_batch(batch_id: str, state_path: Path = STATE_FILE) -> bool:
     from being merged, but is not a code-quality failure. The batch_id is
     recorded in ``skipped_task_ids`` for observability, yet remains absent
     from ``completed_task_ids`` and ``failed_task_ids`` so the next
-    ``--next`` invocation re-attempts it without consuming a retry slot
-    (see plan A3).
+    ``--next`` invocation re-attempts it without consuming a retry slot.
 
     Loop guard: ``batch_prepare_counts[batch_id]`` is incremented on each
     skip; once it reaches ``_MAX_BATCH_PREPARES`` the batch is recorded

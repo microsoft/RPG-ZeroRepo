@@ -60,14 +60,11 @@ rpgkit script check_tasks.py --json
 Run the task planner:
 
 ```bash
-rpgkit script plan_tasks.py > .rpgkit/logs/plan_tasks.log 2>&1
+rpgkit script plan_tasks.py
 ```
 
-Then print the output by:
-
-```bash
-cat .rpgkit/logs/plan_tasks.log
-```
+The script writes a structured log automatically; stdout carries the
+summary you need below.
 
 This will:
 

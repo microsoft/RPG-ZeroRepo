@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Tests for DependencyGraph incremental update API (Step 2).
 
-The single most important invariant these tests guard is:
+Core invariant under test:
 
     After any sequence of ``add_file`` / ``remove_file`` / ``update_files``
     calls, the resulting DependencyGraph must be **structurally identical**

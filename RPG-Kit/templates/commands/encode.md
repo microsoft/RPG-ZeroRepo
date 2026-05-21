@@ -62,12 +62,13 @@ Inspect the `type` field in the output:
 Run the full encode script:
 
 ```bash
-rpgkit script rpg_encoder/run_encode.py --json > .rpgkit/logs/encode.log 2>&1
+rpgkit script rpg_encoder/run_encode.py --json
 ```
 
 This may take several minutes depending on repository size and LLM response times.
-Inspect the encoding result by reading the tail of the log (`tail -n 200 .rpgkit/logs/encode.log`)
-or the JSON summary written by the script.
+The script prints a JSON summary on stdout and writes a structured
+log automatically.
+Inspect the JSON `status` field to decide next steps.
 
 **If status is "success"**:
 

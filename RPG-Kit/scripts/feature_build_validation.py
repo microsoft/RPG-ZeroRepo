@@ -146,7 +146,7 @@ def validate_input_file() -> Dict[str, Any]:
             "project_notes": meta_dict.get("project_notes"),
         }
 
-        # Validate project_types / project_notes (plan B3). Soft-fail with
+        # Validate project_types / project_notes. Soft-fail with
         # an error entry so the operator regenerates feature_spec, but
         # don't prevent legacy specs (without these fields) from running
         # through downstream stages — they will simply miss the project-
@@ -167,7 +167,7 @@ def validate_input_file() -> Dict[str, Any]:
                 logger = logging.getLogger(__name__)
                 logger.warning(
                     "feature_spec.meta is missing project_types/project_notes "
-                    "(plan B3); downstream prompts will lack project-type context"
+                    "; downstream prompts will lack project-type context"
                 )
 
     if result["fields"]["functional_requirements"]:

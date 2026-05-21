@@ -12,7 +12,7 @@ pipeline:
 * :mod:`scripts.code_gen.static_checks` — lightweight pre-LLM checks
 * :mod:`scripts.code_gen.subtree_review` — LLM review of completed subtrees
 
-The package deliberately exposes **no** re-exports.  Callers import from
+The package exposes no re-exports.  Callers import from
 the specific submodule (``from code_gen.prompts import ...``) to keep
 dependency edges explicit and to avoid lying about which functions are
 really part of a stable public API.

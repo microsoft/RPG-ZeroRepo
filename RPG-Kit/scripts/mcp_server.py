@@ -75,7 +75,17 @@ def _log_tool_call(tool_name: str, params: dict, result_summary: dict, duration_
 # ---------------------------------------------------------------------------
 
 def _resolve_rpg_path() -> str:
-    """Resolve RPG file path from CLI args or default (.rpgkit/data/rpg.json)."""
+    """Resolve the RPG file path from CLI args, falling back to the default.
+
+    The default (``RPG_FILE``) is provided by
+    :mod:`common.paths`, which resolves to
+    ``~/.rpgkit/workspaces/<hash>/data/rpg.json`` for the current
+    workspace (discovered by walking up from cwd looking for
+    ``.rpgkit/config.toml``).  Callers running ``rpgkit-mcp`` from any
+    subdirectory of a workspace therefore get the right RPG file
+    automatically; ``--rpg-file`` is reserved for explicit overrides
+    (test fixtures, alternative graphs, …).
+    """
     rpg_path = str(RPG_FILE)
     args = sys.argv[1:]
     for i, arg in enumerate(args):
@@ -86,11 +96,13 @@ def _resolve_rpg_path() -> str:
 
 # Standard message returned to the AI agent when the RPG graph isn't ready
 # (e.g. ``rpgkit init`` ran, but the encoder hasn't been run yet so
-# ``.rpgkit/data/rpg.json`` doesn't exist).  Kept short + actionable so
-# the agent will relay it verbatim to the user.
+# the resolved ``rpg.json`` doesn't exist).  Kept short + actionable so
+# the agent will relay it verbatim to the user.  The hint omits the
+# concrete directory path; the actual location is reported as the
+# ``rpg_file`` field of :func:`_unavailable_payload`.
 _ENCODE_HINT = (
     "RPG graph not generated yet. Ask the user to run **`/rpgkit.encode`** "
-    "in this AI agent to build `.rpgkit/data/rpg.json`. Once it finishes, "
+    "in this AI agent to build the workspace's `rpg.json`. Once it finishes, "
     "RPG tools will start working automatically on the next call — no need "
     "to restart the MCP server."
 )
@@ -99,7 +111,7 @@ _ENCODE_HINT = (
 def _unavailable_payload(rpg_path: str, reason: str) -> str:
     """Render a uniform 'graph not available' JSON response for every tool.
 
-    The shape is deliberately identical across all 4 tools so the AI agent
+    The shape is identical across all 4 tools so the AI agent
     can reliably detect the condition (``error == "rpg_unavailable"``)
     and surface the ``next_step`` field to the user.
     """

@@ -3,21 +3,57 @@
 
 This module contains all file path constants used across RPG-Kit scripts.
 
-Directory layout (workspace == repo):
-    <workspace_root>/             ← user's source repo + RPG-Kit data
-    ├── .rpgkit/                  ← scripts, data, state (machine-local)
+Directory layout (``~/.rpgkit/`` home storage):
+
+    <workspace_root>/             ← user's source repo
+    ├── .rpgkit/                  ← minimal marker tree (in workspace)
+    │   ├── config.toml           ← team-shared AI config (committable)
+    │   └── reports/              ← user-facing artefacts (rpg.html, …)
     ├── .claude/  or  .vscode/    ← agent instructions
     ├── src/ tests/ …             ← project code (user-owned)
     └── .git/                     ← single git repo at the workspace root
 
-All paths under ``.rpgkit/`` and ``.claude/`` are relative to
-``WORKSPACE_ROOT``.  ``REPO_DIR`` is an alias for ``WORKSPACE_ROOT`` kept for
-backwards-compatibility with call sites that use "project repo root"
-phrasing; both refer to the same directory.
+    ~/.rpgkit/                                  ← user-global storage
+    └── workspaces/<hash>/
+        ├── .meta.toml                          ← channel, timestamps, version
+        ├── .git/                               ← Plan-03 inner snapshot repo
+        ├── data/                               ← rpg.json, dep_graph.json, …
+        │   └── trajectory/
+        └── logs/                               ← *.log, mcp_calls.jsonl, …
+
+Machine-local data (``data/``, ``logs/``, the inner snapshot ``.git/``)
+lives under ``~/.rpgkit/workspaces/<hash>/`` so it survives independently
+of the workspace, never gets accidentally committed, and stays scoped
+to one user.  The workspace dir keeps only the lightweight, team-shared
+files that benefit from being version-controlled alongside the code.
+
+All constants below resolve at module-import time.  ``WORKSPACE_ROOT``
+is discovered once; if you need it to track a different workspace
+later in the same process (rare), spawn a subprocess instead of
+monkey-patching the module.
+
+``REPO_DIR`` is an alias for ``WORKSPACE_ROOT`` kept for backwards
+compatibility with call sites that use "project repo root" phrasing;
+both refer to the same directory.
 """
 
 import os
 from pathlib import Path
+
+# Import the home-storage helpers.  rpgkit_cli is always installed in
+# the same Python environment as the scripts (the wheel ships the
+# scripts under ``rpgkit_cli/core_pack/scripts/``), so the import is
+# robust to where the script gets invoked from.  We keep a fallback
+# that mirrors the legacy in-workspace layout in case someone imports
+# this module from a standalone python install that doesn't have
+# rpgkit_cli on sys.path — e.g. a third-party tool dropping in for
+# inspection.
+try:
+    from rpgkit_cli import _storage as _rpgkit_storage  # type: ignore[import-not-found]
+    _HOME_STORAGE_AVAILABLE = True
+except Exception:  # pragma: no cover - defensive
+    _rpgkit_storage = None  # type: ignore[assignment]
+    _HOME_STORAGE_AVAILABLE = False
 
 
 # ============================================================================
@@ -49,8 +85,21 @@ def _find_workspace_root() -> Path:
     # parent process's environment.  This matters for git hooks, which
     # are spawned by ``git`` (cwd = repo root) from arbitrary parent
     # contexts that may have set RPGKIT_WORKSPACE long ago.
+    #
+    # Use the ``.rpgkit/config.toml`` marker (the canonical workspace
+    # signal of "this is an rpgkit workspace").  Falling back to just
+    # ``.rpgkit/`` would still work for newly-init'd workspaces, but
+    # using ``config.toml`` matches :func:`rpgkit_cli._storage
+    # .find_workspace_root_from` exactly so the MCP server and pipeline
+    # scripts agree on the boundary.
     cwd = Path.cwd().absolute()
     for cand in [cwd, *cwd.parents]:
+        if (cand / ".rpgkit" / "config.toml").is_file():
+            return cand
+        # Belt-and-braces fallback: also accept a bare ``.rpgkit/``
+        # directory.  This lets a freshly-cloned workspace whose
+        # ``config.toml`` was somehow missing still be discovered
+        # rather than silently degrading to the env-var path below.
         if (cand / ".rpgkit").is_dir():
             return cand
 
@@ -87,14 +136,12 @@ REPO_DIR = WORKSPACE_ROOT
 # ============================================================================
 #
 # Anchor SCRIPTS_DIR to ``__file__``'s parent so the constant resolves
-# correctly regardless of how the scripts were deployed:
+# correctly regardless of how the scripts were deployed.  Scripts live
+# inside the installed wheel at
+# ``<site-packages>/rpgkit_cli/core_pack/scripts/`` and are invoked via
+# ``rpgkit script <name>``.
 #
-#   * Pre-0.1.3 layout: scripts copied into ``<workspace>/.rpgkit/scripts/``.
-#   * Post-0.1.3 layout: scripts live inside the installed wheel at
-#     ``<site-packages>/rpgkit_cli/core_pack/scripts/`` and are invoked
-#     via ``rpgkit script <name>`` (see plan 02).
-#
-# In both cases the surrounding ``common/`` package is at
+# The surrounding ``common/`` package is at
 # ``SCRIPTS_DIR/common/``, so ``Path(__file__).parent.parent`` is the
 # scripts root.  Callers that need to spawn or sys.path-insert sibling
 # code (e.g. ``rpg_edit/impact.py``) get a working path automatically.
@@ -131,7 +178,7 @@ def cmd_for(script_relpath: str) -> str:
         A shell-ready string such as ``"rpgkit script run_batch.py"``.
 
     Use this for any ``next_action`` hint or error message that
-    suggests the user run a script.  After plan 02, the workspace no
+    suggests the user run a script.  The workspace no
     longer hosts a ``.rpgkit/scripts/`` copy, so the historic
     ``python3 .rpgkit/scripts/X.py`` form would fail; ``rpgkit script
     X.py`` works regardless of workspace layout.
@@ -140,12 +187,32 @@ def cmd_for(script_relpath: str) -> str:
 
 
 # ============================================================================
-# .rpgkit Directory Structure (absolute, derived from WORKSPACE_ROOT)
-# ============================================================================
+# .rpgkit Directory Structure (runtime state in user home)
+# ==========================================================================
+#
+# Layout:
+#
+#   RPGKIT_DIR    = <workspace>/.rpgkit/      (minimal marker tree: config.toml + .source)
+#   DATA_DIR      = ~/.rpgkit/workspaces/<hash>/data/
+#   LOGS_DIR      = ~/.rpgkit/workspaces/<hash>/logs/
+#   REPORTS_DIR   = <workspace>/.rpgkit/reports/   (kept in workspace by
+#                   design: small, user-facing, may be git-tracked)
+#
+# Falling back to the legacy in-workspace paths when ``_storage`` is
+# unavailable keeps this module importable from third-party tools that
+# don't ship rpgkit_cli in the same env.
 
 RPGKIT_DIR = WORKSPACE_ROOT / ".rpgkit"
-DATA_DIR = RPGKIT_DIR / "data"
-LOGS_DIR = RPGKIT_DIR / "logs"
+
+if _HOME_STORAGE_AVAILABLE and _rpgkit_storage is not None:
+    DATA_DIR = _rpgkit_storage.workspace_data_dir(WORKSPACE_ROOT)
+    LOGS_DIR = _rpgkit_storage.workspace_logs_dir(WORKSPACE_ROOT)
+    REPORTS_DIR = _rpgkit_storage.workspace_reports_dir(WORKSPACE_ROOT)
+else:
+    DATA_DIR = RPGKIT_DIR / "data"
+    LOGS_DIR = RPGKIT_DIR / "logs"
+    REPORTS_DIR = RPGKIT_DIR / "reports"
+
 COPILOT_LOGS_DIR = LOGS_DIR / "copilot"
 CLAUDE_LOGS_DIR = LOGS_DIR / "claude"
 
@@ -199,6 +266,14 @@ REPO_RPG_FILE = RPG_FILE  # Unified: both encoder and decoder use rpg.json
 DEP_GRAPH_FILE = DATA_DIR / "dep_graph.json"
 REPO_INFO_FILE = DATA_DIR / "repo_info.json"
 
+# rpg.html lives in REPORTS_DIR (workspace-side) rather than next to
+# rpg.json (home-side) because the HTML is a *user-facing* artefact -
+# something the developer opens in a browser and may want to share /
+# commit alongside the source.  Keeping it in ``.rpgkit/reports/`` also
+# means double-clicking it from a file explorer "just works" without
+# having to dig into ``~/.rpgkit/workspaces/<hash>/``.
+RPG_HTML_FILE = REPORTS_DIR / "rpg.html"
+
 
 # ============================================================================
 # Task Planning & Execution
@@ -206,6 +281,19 @@ REPO_INFO_FILE = DATA_DIR / "repo_info.json"
 
 TASKS_FILE = DATA_DIR / "tasks.json"
 CODE_GEN_STATE_FILE = DATA_DIR / "code_gen_state.jsonl"
+
+
+# ============================================================================
+# RPG Edit (surgical edit pipeline) — well-known artefact locations under
+# ``DATA_DIR``. Scripts default their ``--plan`` / ``--impact`` arguments
+# to these paths so slash-command templates don't need to know the
+# physical (home-dir) location of the workspace.
+# ============================================================================
+
+RPG_EDIT_PLAN_FILE = DATA_DIR / "rpg_edit_plan.json"
+RPG_EDIT_IMPACT_FILE = DATA_DIR / "rpg_edit_impact.json"
+RPG_EDIT_CODE_RESULT_FILE = DATA_DIR / "rpg_edit_code_result.json"
+RPG_EDIT_REVIEW_RESULT_FILE = DATA_DIR / "rpg_edit_review_result.json"
 
 
 # ============================================================================
@@ -221,7 +309,7 @@ TRAJECTORY_DIR = DATA_DIR / "trajectory"
 
 MCP_CALLS_LOG = LOGS_DIR / "mcp_calls.jsonl"
 HOOK_CALLS_LOG = LOGS_DIR / "hook_calls.jsonl"
-REPORTS_DIR = RPGKIT_DIR / "reports"
+# REPORTS_DIR is defined above (workspace-local in the new layout).
 
 
 # ============================================================================
@@ -229,7 +317,18 @@ REPORTS_DIR = RPGKIT_DIR / "reports"
 # ============================================================================
 
 def ensure_rpgkit_dir() -> Path:
-    """Ensure .rpgkit/data directory exists and return its path."""
+    """Ensure ``DATA_DIR`` exists and return its path.
+
+    In the home-storage layout, ``DATA_DIR`` lives under
+    ``~/.rpgkit/workspaces/<hash>/data/``.  We only create the leaf
+    directory here; full home-layout bootstrap (including
+    ``.meta.toml``) is the responsibility of ``rpgkit init`` /
+    ``rpgkit update``.  Calling this from a script that lands in a
+    workspace without a meta file is supported — the data dir still
+    gets created and the script can write its output — but the
+    workspace won't be properly registered until the user runs
+    ``rpgkit update`` (or ``init``).
+    """
     DATA_DIR.mkdir(parents=True, exist_ok=True)
     return DATA_DIR
 

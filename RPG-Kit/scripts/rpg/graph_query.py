@@ -21,6 +21,8 @@ from collections import defaultdict
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
+from common.rpg_io import safe_load_rpg
+
 try:
     from rapidfuzz import fuzz, process as rf_process
     _HAS_RAPIDFUZZ = True
@@ -96,10 +98,14 @@ class GraphQueryEngine:
         """Load from a single rpg.json file.
 
         Handles both embedded dep_graph and external dep_graph_file reference.
+
+        Uses :func:`common.rpg_io.safe_load_rpg` so a corrupted ``rpg.json``
+        (e.g. an encoder that was killed mid-write) is silently recovered
+        from the inner-git snapshot history rather than blocking every
+        downstream read with ``JSONDecodeError``.
         """
         rpg_dir = Path(rpg_path).resolve().parent
-        with open(rpg_path, "r", encoding="utf-8") as f:
-            rpg_data = json.load(f)
+        rpg_data = safe_load_rpg(rpg_path)
 
         # Try embedded dep_graph first, then external file
         dep_graph_data = rpg_data.get("dep_graph", {})
@@ -108,8 +114,7 @@ class GraphQueryEngine:
             if dep_graph_file:
                 dep_path = rpg_dir / dep_graph_file
                 if dep_path.is_file():
-                    with open(dep_path, "r", encoding="utf-8") as f:
-                        dep_graph_data = json.load(f)
+                    dep_graph_data = safe_load_rpg(dep_path)
                     logger.info("Loaded dep_graph from %s", dep_path)
                 else:
                     logger.warning("dep_graph_file not found: %s", dep_path)
@@ -119,11 +124,9 @@ class GraphQueryEngine:
     @classmethod
     def from_files(cls, rpg_path: str, dep_graph_path: str = "") -> "GraphQueryEngine":
         """Load from JSON files. If dep_graph_path is empty, uses embedded dep_graph."""
-        with open(rpg_path, "r", encoding="utf-8") as f:
-            rpg_data = json.load(f)
+        rpg_data = safe_load_rpg(rpg_path)
         if dep_graph_path:
-            with open(dep_graph_path, "r", encoding="utf-8") as f:
-                dep_graph_data = json.load(f)
+            dep_graph_data = safe_load_rpg(dep_graph_path)
         else:
             dep_graph_data = rpg_data.get("dep_graph", {})
         return cls(rpg_data, dep_graph_data)

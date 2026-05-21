@@ -14,4 +14,3 @@
 # as a Python module.  Callers always copy scripts into the user's
 # workspace and invoke them with ``python <workspace>/.rpgkit/scripts/<name>.py``.
 #
-# Plan: ``plans/01-package-bundle-and-ai-config.md``

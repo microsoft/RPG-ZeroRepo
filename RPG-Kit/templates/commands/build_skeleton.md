@@ -69,24 +69,19 @@ Run the script `rpgkit script check_skeleton.py` to verify the current state.
 2. Execute the following command with the selected iteration count:
 
    ```bash
-   rpgkit script build_skeleton.py --max-iterations <default_or_user_defined> > .rpgkit/logs/build_skeleton.log 2>&1
+   rpgkit script build_skeleton.py --max-iterations <default_or_user_defined>
    ```
 
-   Then print the output by:
+   The script writes a structured log automatically;
+   stdout carries the human-readable summary you need below.
 
-   ```bash
-   cat .rpgkit/logs/build_skeleton.log
+3. From the captured stdout, find the section containing:
+
+   ```text
+   SKELETON BUILDING COMPLETE
    ```
 
-3. After the command finishes, read the **entire output** from `.rpgkit/logs/build_skeleton.log`:
-
-   * Locate the section containing:
-
-     ```text
-     SKELETON BUILDING COMPLETE
-     ```
-
-   * Display the summary information in a Markdown table format showing:
+   Display the summary information in a Markdown table format showing:
      * Total components
      * Total features
      * Total files created
@@ -118,19 +113,18 @@ Run the summary script to generate a formatted report and save to file:
 rpgkit script summary_skeleton.py
 ```
 
-This saves the summary (including directory structure, component paths, and statistics) to `.rpgkit/data/skeleton_summary.txt`.
+The summary (including directory structure, component paths, and statistics) is
+printed on stdout by `summary_skeleton.py`; the script also persists it
+to the workspace's state directory for later inspection.
 
 Then prompt the user:
 
 ```text
 Skeleton has been generated.
 
-Generated files:
-  .rpgkit/data/skeleton.json        - Skeleton data (JSON format)
-  .rpgkit/data/skeleton_summary.txt - Human-readable summary
-
-To view the skeleton summary:
-  cat .rpgkit/data/skeleton_summary.txt
+Outputs (managed by the script; consumed by downstream stages):
+  skeleton.json          - Skeleton data (JSON format)
+  skeleton_summary.txt   - Human-readable summary
 
 To proceed with data flow design, run:
   /rpgkit.build_data_flow

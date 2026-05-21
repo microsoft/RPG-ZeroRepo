@@ -47,14 +47,11 @@ name: rpgkit.feature_refactor
    2. Execute the following command with the selected max iteration count (default: 10 or user-defined):
 
       ```bash
-      rpgkit script feature_refactor.py --max-iterations <default_or_user_defined_iterations> > .rpgkit/logs/feature_refactor.log 2>&1
+      rpgkit script feature_refactor.py --max-iterations <default_or_user_defined_iterations>
       ```
 
-      Then print the output by:
-
-      ```bash
-      cat .rpgkit/logs/feature_refactor.log
-      ```
+      The script writes a structured log automatically;
+      stdout carries the summary you need below.
 
    3. Analyze and summarize the information printed during script execution, and present the results in a Markdown table format.
 

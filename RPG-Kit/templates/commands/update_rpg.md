@@ -22,8 +22,9 @@ This slash command is a **manual fallback** for the few cases where the
 automatic update didn't happen, e.g.:
 
 * You committed with `git commit --no-verify` (skipping hooks).
-* The background hook errored out (network blip, LLM timeout) — check
-  `.rpgkit/logs/update_rpg.log`.
+* The background hook errored out (network blip, LLM timeout) — run
+  `rpgkit version` to locate the workspace's logs directory and tail
+  the latest `update_rpg.log` there.
 * You want to force a fresh update synchronously and see the result
   immediately instead of waiting for the async hook.
 
@@ -59,22 +60,17 @@ diff against, and suggest running `/rpgkit.encode` instead. Terminate.
 
 ### Step 2: Run the Update
 
-Make sure the log directory exists, then invoke the same script the
-post-commit hook uses. It creates and cleans up its own temporary
-worktree internally — **you do not need to manage `git worktree`
-manually**.
+Invoke the same script the post-commit hook uses. It creates and cleans
+up its own temporary worktree internally — **you do not need to manage
+`git worktree` manually**.
 
 ```bash
-mkdir -p .rpgkit/logs
-rpgkit script update_graphs.py update-rpg --json \
-    > .rpgkit/logs/update_rpg.log 2>&1
+rpgkit script update_graphs.py update-rpg --json
 ```
 
-The JSON result is the last `{...}` block in the log. Read it with:
-
-```bash
-tail -n 100 .rpgkit/logs/update_rpg.log
-```
+The full JSON result is printed on stdout (single `{...}` block). The
+script also writes a structured log automatically; you do
+not need to redirect output.
 
 ### Step 3: Display Result
 
@@ -94,7 +90,8 @@ RPG update complete!
 **If `status` is `"error"`**:
 
 * Show the `error` field.
-* Suggest `tail -n 200 .rpgkit/logs/update_rpg.log` for the full trace.
+* Tell the user to run `rpgkit version` to locate the logs directory
+  and inspect `update_rpg.log` for the full trace.
 * Common causes: LLM API misconfigured, network failure, dirty worktree
   blocking `git worktree add`.
 
@@ -107,5 +104,6 @@ Tips:
     automatic update failed or was skipped.
   - /rpgkit.encode — Run a full re-encode if the RPG seems stale or
     has drifted significantly from the codebase.
-  - .rpgkit/logs/update_rpg.log keeps the most recent run output.
+  - The latest `update_rpg.log` (path shown by `rpgkit version`) keeps
+    the most recent run output.
 ```

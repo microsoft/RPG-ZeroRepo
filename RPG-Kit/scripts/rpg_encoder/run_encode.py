@@ -25,7 +25,7 @@ _script_dir = Path(__file__).resolve().parent.parent
 if str(_script_dir) not in sys.path:
     sys.path.insert(0, str(_script_dir))
 
-from common.paths import RPG_FILE, DEP_GRAPH_FILE, WORKSPACE_ROOT, ensure_rpgkit_dir  # noqa: E402
+from common.paths import RPG_FILE, DEP_GRAPH_FILE, RPG_HTML_FILE, WORKSPACE_ROOT, ensure_rpgkit_dir  # noqa: E402
 from common.trajectory import Trajectory  # noqa: E402
 
 
@@ -164,8 +164,12 @@ def run_encode(
 
             viz_data = load_rpg(output)
             html_content = generate_html(viz_data)
-            viz_output = str(Path(output).with_suffix(".html"))
-            Path(viz_output).write_text(html_content, encoding="utf-8")
+            # rpg.html is a user-facing artefact: keep it in the
+            # workspace's .rpgkit/reports/ rather than next to the
+            # machine-side rpg.json under ~/.rpgkit/workspaces/<hash>/.
+            RPG_HTML_FILE.parent.mkdir(parents=True, exist_ok=True)
+            viz_output = str(RPG_HTML_FILE)
+            RPG_HTML_FILE.write_text(html_content, encoding="utf-8")
             traj.complete_step(step_viz.step_id, {"viz_path": viz_output})
         except Exception as viz_exc:
             logger.warning("Failed to generate visualization: %s", viz_exc)

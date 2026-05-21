@@ -17,7 +17,7 @@ SCRIPTS_DIR = Path(__file__).resolve().parent.parent
 if str(SCRIPTS_DIR) not in sys.path:
     sys.path.insert(0, str(SCRIPTS_DIR))
 
-from common.paths import REPO_RPG_FILE  # noqa: E402
+from common.paths import REPO_RPG_FILE, RPG_EDIT_IMPACT_FILE  # noqa: E402
 
 
 def analyze_impact(svc, node_ids: List[str]) -> Dict:
@@ -117,10 +117,13 @@ def main():
     parser.add_argument("--rpg", type=Path,
                         default=REPO_RPG_FILE)
     parser.add_argument("--json", action="store_true")
+    parser.add_argument("--save", action="store_true",
+                        help=f"Also write the JSON result to "
+                             f"{RPG_EDIT_IMPACT_FILE} so downstream "
+                             f"steps (review.py) can pick it up.")
     args = parser.parse_args()
 
     # Capture log records for post-mortem inspection of rpg_edit issues.
-    # See plans/20260508-1-rpgkit-optimization*.md § E1.
     from common.logging_setup import setup_file_logging
     setup_file_logging("rpg_edit")
 
@@ -129,6 +132,11 @@ def main():
     results = analyze_impact(svc, args.node_id)
 
     output = {"type": "impact_analysis", "results": results}
+    if args.save:
+        RPG_EDIT_IMPACT_FILE.parent.mkdir(parents=True, exist_ok=True)
+        RPG_EDIT_IMPACT_FILE.write_text(
+            json.dumps(output, indent=2, ensure_ascii=False)
+        )
     if args.json:
         print(json.dumps(output, indent=2, ensure_ascii=False))
     else:

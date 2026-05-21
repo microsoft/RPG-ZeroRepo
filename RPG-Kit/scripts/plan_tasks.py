@@ -675,7 +675,7 @@ All units per file (must ALL be covered exactly once):
 # ============================================================================
 
 def _format_entry_file_hint(project_types: List[str]) -> str:
-    """Render a per-project-type hint about the entry filename (plan B4).
+    """Render a per-project-type hint about the entry filename.
 
     Returns a single-line string appended to the "main.py" bullet of the
     main-entry task description. The wording stays advisory — the agent
@@ -1286,7 +1286,7 @@ package3>=3.0.0  # For feature X
 
         # Read project_types so we can hint at the right entry-file shape
         # without locking the agent into "main.py" for SERVICE/PIPELINE
-        # projects (plan B4). Failure to load is non-fatal — fall back to
+        # projects. Failure to load is non-fatal — fall back to
         # the generic guidance.
         project_types = self._load_project_types()
         entry_hint = _format_entry_file_hint(project_types)
@@ -1365,7 +1365,7 @@ if __name__ == "__main__":
 """
 
     def _load_project_types(self) -> List[str]:
-        """Load ``feature_spec.meta.project_types`` if available (plan B4).
+        """Load ``feature_spec.meta.project_types`` if available.
 
         Returns an empty list when the file is missing, malformed, or has
         no valid tokens. Callers must handle the empty case.

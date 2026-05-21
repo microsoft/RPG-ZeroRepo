@@ -712,9 +712,9 @@ class RPG:
         2) Feature-tree shape (category/subcategory/feature_group/feature)
 
         Note: ``meta.type_name`` (file/class/function/method/directory) is
-        the *code entity type*, NOT the tree-level role.  We never use it
-        to set ``node_type`` — that would mix two orthogonal concepts.
-        Instead we rely on tree structure (leaf vs non-leaf, parent type).
+        the *code entity type*, not the tree-level role.  ``node_type``
+        is derived from tree structure (leaf vs non-leaf, parent type)
+        because the two concepts are orthogonal.
         """
         if node.id == self.repo_node.id:
             return "repo"

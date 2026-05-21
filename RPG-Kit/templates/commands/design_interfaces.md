@@ -62,14 +62,11 @@ rpgkit script check_interfaces.py --json
 Run the interface designer:
 
 ```bash
-rpgkit script design_interfaces.py > .rpgkit/logs/design_interfaces.log 2>&1
+rpgkit script design_interfaces.py
 ```
 
-Then print the output by:
-
-```bash
-cat .rpgkit/logs/design_interfaces.log
-```
+The script writes a structured log automatically; stdout carries the
+summary you need below.
 
 This will:
 

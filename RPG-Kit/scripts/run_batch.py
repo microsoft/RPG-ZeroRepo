@@ -661,7 +661,7 @@ def run_batch(
                     pass
                 if merge_error == "branch_missing":
                     # Sub-agent didn't use the batch branch — skip without
-                    # consuming a retry slot (see plan A3). The helper
+                    # consuming a retry slot. The helper
                     # promotes to failed after _MAX_BATCH_PREPARES skips.
                     skipped = state_skip_batch(batch_id, state_path)
                     if skipped:
@@ -798,7 +798,7 @@ def run_batch(
                 pass
             if merge_error == "branch_missing":
                 # Sub-agent didn't use the batch branch — skip without
-                # consuming a retry slot (see plan A3). The helper
+                # consuming a retry slot. The helper
                 # promotes to failed after _MAX_BATCH_PREPARES skips.
                 skipped = state_skip_batch(batch_id, state_path)
                 if skipped:

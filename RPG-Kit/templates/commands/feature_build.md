@@ -61,13 +61,13 @@ The script automatically detects whether the output file (`feature_build.json`) 
 1. **Execute the command:**
 
    ```bash
-   rpgkit script feature_build.py \
-    --mode step1 > .rpgkit/logs/feature_build.log 2>&1
+   rpgkit script feature_build.py --mode step1
    ```
 
-   Inspect the result by reading the tail of the log
-   (`tail -n 300 .rpgkit/logs/feature_build.log`) to capture the
-   `FEATURE EXPANSION SUMMARY` section described below.
+   The script prints its full output on stdout and also writes a
+   The script writes a structured log automatically.
+   Inspect the stdout to capture the `FEATURE EXPANSION SUMMARY`
+   section described below.
 
    **Available parameters for Step 2:**
 
@@ -116,12 +116,11 @@ After the spec-driven build is complete, ask the user whether they want to expan
    a. **Get expansion direction suggestions:**
 
       ```bash
-      rpgkit script feature_build.py \
-       --mode suggest-directions > .rpgkit/logs/feature_build.log 2>&1
+      rpgkit script feature_build.py --mode suggest-directions
       ```
 
-      Read the log to obtain the JSON payload
-      (`tail -n 200 .rpgkit/logs/feature_build.log`).
+      The JSON payload is printed on stdout (and the full log is
+      written automatically).
 
    b. **Parse the JSON output** and display the directions as a numbered list to the user:
 
@@ -152,7 +151,7 @@ After the spec-driven build is complete, ask the user whether they want to expan
       ```bash
       rpgkit script feature_build.py \
        --mode step2 \
-       --direction "<normalized indices>" > .rpgkit/logs/feature_build.log 2>&1
+       --direction "<normalized indices>"
       ```
 
       For example, if the user enters `1,3,5`:
@@ -160,7 +159,7 @@ After the spec-driven build is complete, ask the user whether they want to expan
       ```bash
       rpgkit script feature_build.py \
        --mode step2 \
-       --direction "1,3,5" > .rpgkit/logs/feature_build.log 2>&1
+       --direction "1,3,5"
       ```
 
       **What happens inside the script:**
