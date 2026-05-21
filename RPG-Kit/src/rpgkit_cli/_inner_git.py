@@ -1,11 +1,28 @@
-"""Inner-git snapshotting for ``.rpgkit/``.
+"""Inner-git snapshotting for the user-home workspace directory.
 
-Plan 03 — every successful (or failed) ``rpgkit script <X>`` invocation
-auto-commits the current state of ``.rpgkit/`` to a dedicated repo at
-``.rpgkit/.git/``.  Lets users `git log` / `git diff` between pipeline
-stages without writing any extra tooling.
+Every successful (or failed) ``rpgkit script <X>`` invocation
+auto-commits the current state of the per-workspace home directory at
+``~/.rpgkit/workspaces/<hash>/`` into a dedicated git repo at
+``~/.rpgkit/workspaces/<hash>/.git/``. This lets ``git log`` and
+``git diff`` show how pipeline stages change between runs.
 
-Design choices (see plans/03-auto-snapshot-inner-git.md):
+What gets tracked:
+
+* ``data/`` — all encoder / pipeline output (rpg.json, dep_graph.json,
+  feature_*.json, …)
+* ``logs/`` (except ``logs/copilot/``) — per-stage text/JSONL logs;
+  tracking them lets users ``git log -p logs/<stage>.log`` to debug
+  pipeline regressions across snapshots.
+* ``.meta.toml`` — captures channel + CLI version at each snapshot;
+  changes only on ``rpgkit init/update``.
+
+What is NOT tracked (see :data:`_INNER_GIT_IGNORE` below):
+
+* ``logs/copilot/`` — full LLM session traces, MB-scale per run, too
+  noisy and too large to be useful in snapshot history.
+* The inner ``.git/`` itself — git's own auto-exclusion.
+
+Design choices:
 
 * No global ``git config`` writes — every commit uses per-call
   ``-c user.email`` / ``-c user.name`` so the user's identity is
@@ -25,11 +42,25 @@ never be a reason ``rpgkit script`` itself fails.
 
 from __future__ import annotations
 
+import os
 import shlex
 import subprocess
 import time
 from pathlib import Path
 from typing import Optional
+
+from . import _storage
+
+
+# Environment variables set by ``rpgkit hook <name>`` before invoking
+# any ``rpgkit script`` calls.  They flow through every subprocess so
+# the snapshot commit message can record *which* git hook fired *which*
+# user-facing commit instead of just naming the underlying script.
+#
+# Set only by :func:`rpgkit_cli.hook` -- never by manual invocations -
+# so the presence of ``RPGKIT_HOOK`` is a reliable trigger-source flag.
+_ENV_HOOK_NAME = "RPGKIT_HOOK"        # e.g. "post-commit" / "pre-commit"
+_ENV_HOOK_SHA = "RPGKIT_HOOK_SHA"     # short SHA of the user-facing commit
 
 
 # ---------------------------------------------------------------------------
@@ -58,6 +89,22 @@ def _author_args() -> list[str]:
 _SKIP_NAMES: frozenset[str] = frozenset({
     "mcp_server.py",
 })
+
+
+# Contents of the ``.gitignore`` written into the inner repo on init.
+#
+# ``logs/`` is tracked so users can run ``git log -p logs/<stage>.log``
+# to inspect how a pipeline stage's output changed between snapshots.
+#
+# ``logs/copilot/`` is excluded: it contains full LLM session traces
+# (typically MB per session) and would dominate the snapshot history.
+_INNER_GIT_IGNORE = """\
+# Managed by rpgkit-cli: do not edit.
+# Logs are tracked to support `git log -p logs/<stage>.log` debugging.
+# Exception: logs/copilot/ holds LLM session traces (large, not useful
+# in history); inspect those files directly.
+logs/copilot/
+"""
 
 
 def _basename(relpath: str) -> str:
@@ -89,9 +136,9 @@ def categorise_script(relpath: str) -> str:
     if base == "update_graphs.py":
         return "sync"
     if base == "mcp_server.py":
-        # Defensive: today this is on the skip list so we never commit
-        # an mcp_server.py invocation, but if that ever changes, tag
-        # it correctly rather than defaulting to ``decoder``.
+        # mcp_server.py is on the skip list, so this branch is unreachable
+        # today.  Kept so adjusting the skip list still produces a correct
+        # tag instead of falling through to "decoder".
         return "mcp"
     return "decoder"
 
@@ -100,26 +147,36 @@ def categorise_script(relpath: str) -> str:
 # Filesystem helpers
 # ---------------------------------------------------------------------------
 
-def _rpgkit_dir(workspace: Path) -> Path:
-    return workspace / ".rpgkit"
+def _inner_git_dir(workspace: Path) -> Path:
+    """Return the home directory used as ``git -C <dir>`` for the snapshots.
+
+    The directory is ``~/.rpgkit/workspaces/<hash>/``; the inner repo's
+    ``.git`` sits directly inside it.
+    """
+    return _storage.home_workspace_dir(workspace)
+
+
+# Backwards-compatible alias for the (now-misleading) historical name
+# used in earlier docstrings.  No external caller should rely on this;
+# it stays only to keep grep-friendly when reading older commit
+# messages and plan documents.
+_rpgkit_dir = _inner_git_dir
 
 
 def find_workspace_root(start: Optional[Path] = None) -> Optional[Path]:
-    """Walk up from ``start`` (default cwd) looking for a ``.rpgkit/`` dir.
+    """Walk up from ``start`` (default cwd) looking for a workspace marker.
 
-    Returns the directory containing ``.rpgkit/``, or ``None`` if not found.
-    Used by ``rpgkit script`` to figure out which workspace's inner git
-    repo to snapshot into when the caller's cwd is a subdirectory.
+    Returns the directory containing ``.rpgkit/config.toml`` (the
+    workspace marker), or ``None`` if not found.  Used by
+    ``rpgkit script`` to figure out which workspace's inner git repo to
+    snapshot into when the caller's cwd is a subdirectory.
     """
-    here = (start or Path.cwd()).resolve()
-    for cand in [here, *here.parents]:
-        if (cand / ".rpgkit").is_dir():
-            return cand
-    return None
+    return _storage.find_workspace_root_from(start)
 
 
 def has_inner_git(workspace: Path) -> bool:
-    return (_rpgkit_dir(workspace) / ".git").is_dir()
+    """True iff a ``.git`` directory exists under the workspace's home dir."""
+    return (_inner_git_dir(workspace) / ".git").is_dir()
 
 
 def _git_available() -> bool:
@@ -128,7 +185,7 @@ def _git_available() -> bool:
 
 
 def _run_git(workspace: Path, *args: str, check: bool = False, timeout: int = 30) -> subprocess.CompletedProcess[str]:
-    """Run ``git -C .rpgkit ...`` capturing stdout/stderr.
+    """Run ``git -C <home_dir> ...`` capturing stdout/stderr.
 
     ``check=False`` by default — callers inspect ``returncode`` themselves so
     we can silently swallow expected failures (lock, no-changes, etc.).
@@ -140,7 +197,7 @@ def _run_git(workspace: Path, *args: str, check: bool = False, timeout: int = 30
     """
     import os as _os
     env = {**_os.environ, "LC_ALL": "C", "LANG": "C"}
-    cmd = ["git", "-C", str(_rpgkit_dir(workspace))] + list(args)
+    cmd = ["git", "-C", str(_inner_git_dir(workspace))] + list(args)
     return subprocess.run(
         cmd,
         check=check,
@@ -156,18 +213,26 @@ def _run_git(workspace: Path, *args: str, check: bool = False, timeout: int = 30
 # ---------------------------------------------------------------------------
 
 def ensure_inner_git(workspace: Path, *, initial_msg: Optional[str] = None) -> bool:
-    """Create ``.rpgkit/.git`` if missing.  Returns ``True`` when newly created.
+    """Create ``~/.rpgkit/workspaces/<hash>/.git`` if missing.
 
-    Idempotent: if the repo already exists, returns ``False`` and leaves it
-    untouched.
+    Returns ``True`` when a fresh repo was created, ``False`` when it
+    already existed or when setup was skipped (git missing, home dir
+    unavailable, …).
 
-    When a fresh repo is created, an initial commit captures the current
-    state of ``.rpgkit/`` (config.toml, .source, empty data/, ...).
+    The home dir must already exist — it's the responsibility of
+    ``ensure_workspace_storage`` (called from ``rpgkit init/update``
+    earlier in the bootstrap) to create it.  We don't create it here
+    because that requires picking a ``channel`` (bundle vs legacy),
+    which is information only the caller has.
+
+    When a fresh repo is created we also drop a ``.gitignore`` that
+    excludes ``logs/`` (too noisy), then commit the current state of
+    ``data/`` + ``.meta.toml`` so ``git log`` has a starting point.
     """
-    rpgkit = _rpgkit_dir(workspace)
-    if not rpgkit.is_dir():
-        return False  # nothing to track
-    if (rpgkit / ".git").is_dir():
+    home_dir = _inner_git_dir(workspace)
+    if not home_dir.is_dir():
+        return False  # ensure_workspace_storage hasn't run yet
+    if (home_dir / ".git").is_dir():
         return False
     if not _git_available():
         return False
@@ -178,6 +243,13 @@ def ensure_inner_git(workspace: Path, *, initial_msg: Optional[str] = None) -> b
         _run_git(workspace, "init", "-q", "-b", "main", check=True)
     except Exception:
         return False
+
+    # Drop the ignore file so logs don't appear in `git status` from the
+    # very first commit.  Best-effort; failure here doesn't block.
+    try:
+        (home_dir / ".gitignore").write_text(_INNER_GIT_IGNORE, encoding="utf-8")
+    except OSError:
+        pass
 
     # Initial commit — even if empty, it gives `git log` a starting point.
     initial_msg = initial_msg or "[init] rpgkit workspace"
@@ -199,6 +271,26 @@ def _has_staged_changes(workspace: Path) -> bool:
 _LOCK_HINTS = ("index.lock", "Another git process seems")
 
 
+def _ensure_gitignore_current(workspace: Path) -> None:
+    """Rewrite the inner repo's ``.gitignore`` if it drifted from the
+    current :data:`_INNER_GIT_IGNORE`.
+
+    Called before every commit so existing inner repos that were
+    initialised under an older ignore policy (e.g. the original
+    "ignore all of ``logs/``" rule) silently upgrade on next snapshot.
+    No-op when the file is already up to date.
+    """
+    home_dir = _inner_git_dir(workspace)
+    gi = home_dir / ".gitignore"
+    try:
+        current = gi.read_text(encoding="utf-8") if gi.is_file() else ""
+        if current != _INNER_GIT_IGNORE:
+            gi.write_text(_INNER_GIT_IGNORE, encoding="utf-8")
+    except OSError:
+        # Best-effort: ignore policy is not critical enough to fail a commit.
+        pass
+
+
 def _commit_all(workspace: Path, message: str, *, allow_empty: bool = False) -> bool:
     """Stage everything and commit.  Returns True iff a commit was created.
 
@@ -208,6 +300,7 @@ def _commit_all(workspace: Path, message: str, *, allow_empty: bool = False) -> 
     silently.  The next successful commit will fold in any deferred
     changes — no data is lost.
     """
+    _ensure_gitignore_current(workspace)
     for attempt in (1, 2):
         try:
             r_add = _run_git(workspace, "add", "-A")
@@ -242,18 +335,56 @@ def _commit_all(workspace: Path, message: str, *, allow_empty: bool = False) -> 
 # ---------------------------------------------------------------------------
 
 def _build_message(script_relpath: str, args: list[str], exit_code: int) -> str:
+    """Compose the inner-git commit message for a ``rpgkit script`` call.
+
+    Two output shapes:
+
+    * **Hook-triggered** (``RPGKIT_HOOK`` is set by ``rpgkit hook``)::
+
+          [hook:post-commit @ a1b2c3d] update-rpg
+          [hook:pre-commit  @ a1b2c3d] sync --staged-only
+
+      Both the triggering hook name and the user-facing commit short
+      SHA are surfaced so ``git log`` in the inner repo reads as a
+      timeline of *user activity*, not a timeline of internal scripts.
+
+    * **Manual** (no ``RPGKIT_HOOK``)::
+
+          [decoder] feature_build.py
+          [encoder] rpg_encoder/run_encode.py --json
+          [sync]    update_graphs.py update-rpg — FAILED (exit 2)
+
+      Tagged by category (see :func:`categorise_script`) plus the full
+      script relpath - kept verbose so power-users running scripts by
+      hand can see exactly which file produced each snapshot.
+    """
+    suffix = f" — FAILED (exit {exit_code})" if exit_code != 0 else ""
+
+    hook = os.environ.get(_ENV_HOOK_NAME, "").strip()
+    if hook:
+        # Action = first positional arg (the script's subcommand, e.g.
+        # ``update-rpg``/``sync``) when present, otherwise the script
+        # stem.  Subsequent args are appended but capped so the message
+        # stays one-line friendly in ``git log --oneline``.
+        if args:
+            action = args[0]
+            extra = " ".join(shlex.quote(a) for a in args[1:])
+            extra_part = (" " + extra) if extra else ""
+        else:
+            action = _basename(script_relpath).removesuffix(".py")
+            extra_part = ""
+        if len(extra_part) > 40:
+            extra_part = extra_part[:37] + "..."
+        sha = os.environ.get(_ENV_HOOK_SHA, "").strip()
+        sha_part = f" @ {sha}" if sha and sha != "?" else ""
+        return f"[hook:{hook}{sha_part}] {action}{extra_part}{suffix}"
+
+    # Manual / interactive path -- preserve historical format.
     cat = categorise_script(script_relpath)
-    # ``shlex.quote`` keeps args with spaces / special chars unambiguous
-    # in the commit log: ``[decoder] X.py 'some path'`` rather than
-    # ``[decoder] X.py some path``.
     quoted = " ".join(shlex.quote(a) for a in args)
     args_part = (" " + quoted).rstrip() if quoted else ""
-    # Cap args length so a giant args string doesn't make commit messages unreadable.
     if len(args_part) > 80:
         args_part = args_part[:77] + "..."
-    suffix = ""
-    if exit_code != 0:
-        suffix = f" — FAILED (exit {exit_code})"
     return f"[{cat}] {script_relpath}{args_part}{suffix}"
 
 

@@ -19,16 +19,14 @@ legacy GitHub-release-zip download path.
 
 Design notes
 ------------
-- We deliberately use :func:`importlib.resources.files` rather than
-  ``__file__`` arithmetic so that future packaging formats (zip-imports,
+- Uses :func:`importlib.resources.files` rather than ``__file__``
+  arithmetic so non-filesystem packaging formats (zip-imports,
   in-memory loaders) keep working.
 - The returned path is a *filesystem* path (not a Traversable) because
   the consumers (``shutil.copytree`` etc.) need real paths.  This works
   for the default wheel layout; if we ever ship as a zipapp this code
   will need ``as_file()`` contexts.
 - All functions are pure / side-effect-free.  No mutation of the bundle.
-
-Plan: ``plans/01-package-bundle-and-ai-config.md``
 """
 
 from __future__ import annotations

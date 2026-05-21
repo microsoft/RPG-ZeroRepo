@@ -6,8 +6,8 @@ Currently provides:
   ``sys.path`` so that the bundled ``scripts/`` directory is importable,
   then hands off to ``mcp_server.main()``.
 
-This module is deliberately tiny and stdout-silent — MCP uses stdio as
-its transport, so writing anything to stdout from import-time code would
+This module stays small and stdout-silent because MCP uses stdio as
+its transport: anything written to stdout from import-time code would
 corrupt the JSON-RPC stream.  All diagnostics go to stderr.
 """
 
