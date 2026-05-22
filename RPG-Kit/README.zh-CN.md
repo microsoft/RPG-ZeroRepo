@@ -8,6 +8,7 @@
   <a href="README.hi-IN.md">हिन्दी</a>
 </p>
 
+
 ## 让编码智能体先规划，再编辑
 
 编码智能体擅长局部编辑，但仓库级任务如果缺少稳定的规划结构往往会失败：需求漂移、架构决策丢失、多文件生成前后不一致、更新可能错过隐藏依赖。
@@ -22,11 +23,11 @@ RPG-Kit 为 Claude Code 和 GitHub Copilot 提供一个面向仓库级编码的*
 
 ### 选择你的工作流
 
-| 目标 | 工作流 | 从这里开始 |
-|---|---|---|
-| 从需求构建一个新仓库 | Build 工作流（requirements → RPG → code） | [`快速开始：新仓库`](#快速开始新仓库) |
-| 理解一个已有仓库 | Understand 工作流（repository → RPG → search/explore） | [`快速开始：已有仓库`](#快速开始已有仓库) |
-| 更新一个已有仓库 | Update 工作流（change request → affected RPG nodes → edit plan → code/RPG update） | [`快速开始：已有仓库`](#快速开始已有仓库) |
+| 目标                 | 工作流                                                       | 从这里开始                                |
+| -------------------- | ------------------------------------------------------------ | ----------------------------------------- |
+| 从需求构建一个新仓库 | Build 工作流（requirements → RPG → code）                    | [`快速开始：新仓库`](#快速开始新仓库)     |
+| 理解一个已有仓库     | Understand 工作流（repository → RPG → search/explore）       | [`快速开始：已有仓库`](#快速开始已有仓库) |
+| 更新一个已有仓库     | Update 工作流（change request → affected RPG nodes → edit plan → code/RPG update） | [`快速开始：已有仓库`](#快速开始已有仓库) |
 
 ### 详细流水线
 
@@ -34,6 +35,7 @@ RPG-Kit 为 Claude Code 和 GitHub Copilot 提供一个面向仓库级编码的*
 
 <details>
 <summary>完整的命令级工作流图</summary>
+
 
 ```text
 Forward Direction: Requirements → RPG → Code
@@ -79,7 +81,7 @@ MCP Server: search_rpg / explore_rpg / get_node_detail / list_rpg_tree
 
 ### RPG-Kit 实际效果
 
-下图是为本仓库生成的图可视化的一部分。运行 `/rpgkit.encode`，然后打开 `.rpgkit/data/rpg.html` 浏览完整的交互式图。
+下图是为本仓库生成的图可视化的一部分。运行 `/rpgkit.encode`，然后打开 `.rpgkit/reports/rpg.html` 浏览完整的交互式图。
 
 ![RPG-Kit repository graph visualization](../docs/rpgkit_visualized_graph.png)
 
@@ -90,7 +92,7 @@ MCP Server: search_rpg / explore_rpg / get_node_detail / list_rpg_tree
 - Python 3.12+
 - [uv](https://docs.astral.sh/uv/)
 - Git
-- 一个已安装并完成身份验证的 AI 编码智能体 CLI：[GitHub Copilot](https://docs.github.com/en/copilot) 或 [Claude Code](https://docs.anthropic.com/en/docs/claude-code/setup)
+- 一个已安装并完成身份验证的 Coding Agent CLI：[GitHub Copilot](https://docs.github.com/en/copilot) 或 [Claude Code](https://docs.anthropic.com/en/docs/claude-code/setup)
 
 ### 安装 RPG-Kit
 
@@ -122,7 +124,6 @@ uvx --from "git+https://github.com/microsoft/RPG-ZeroRepo.git#subdirectory=RPG-K
    ```bash
    rpgkit init my-project --ai claude --script sh
    rpgkit init my-project --ai copilot
-   rpgkit init my-project --github-token $GITHUB_TOKEN
    ```
 
 2. **[可选]** 把你的需求文档放在 `my-project/docs/`。
@@ -145,7 +146,9 @@ uvx --from "git+https://github.com/microsoft/RPG-ZeroRepo.git#subdirectory=RPG-K
    [Optional] /rpgkit.rpg_edit <edit instructions>
    ```
 
-RPG-Kit 会渐进式地创建 `.rpgkit/data/rpg.json`，并用它把需求、规划产物、生成的代码和依赖信息保持对齐。
+   注意：copilot不支持自定义命令，需要先 /agent 切换到指定agent，然后输入 start 以开始运行
+
+RPG-Kit 会渐进式地在 home-side 运行时目录（`~/.rpgkit/workspaces/<hash>/data/rpg.json`）里创建 `rpg.json`，并用它把需求、规划产物、生成的代码和依赖信息保持对齐。你的工作区源文件不会被污染。
 
 ## 快速开始：已有仓库
 
@@ -158,9 +161,8 @@ RPG-Kit 会渐进式地创建 `.rpgkit/data/rpg.json`，并用它把需求、规
 
    ```bash
    mkdir my-project
-   cp -r existing-repo/ my-project/
-   cd my-project
-   rpgkit init . --encode
+   cd existing-repo/
+   rpgkit init . --encode # --encode 会根据当前的代码生成rpg
    ```
 
    如果你想跳过非空目录的确认提示：
@@ -171,7 +173,7 @@ RPG-Kit 会渐进式地创建 `.rpgkit/data/rpg.json`，并用它把需求、规
 
 2. 在仓库里启动你的 AI 编码智能体。
 
-3. 通过 MCP 工具和 slash 命令使用生成的 RPG：
+3. 【可选】通过 MCP 工具和 slash 命令使用生成的 RPG，以下命令只在手动运行时需要：
 
    ```text
    /rpgkit.encode                                  # 需要时重建完整 RPG
@@ -179,37 +181,39 @@ RPG-Kit 会渐进式地创建 `.rpgkit/data/rpg.json`，并用它把需求、规
    /rpgkit.rpg_edit <edit instructions>            # 图感知的代码编辑
    ```
 
-4. 提交后，RPG-Kit hook 会把 `.rpgkit/data/rpg.json`、`.rpgkit/data/dep_graph.json` 和 `.rpgkit/data/rpg.html` 与代码变更保持对齐。如果 hook 失败或被跳过，运行 `/rpgkit.update_rpg`。
+4. 每次 commit 后，RPG-Kit 安装的 git hook 会自动调用 `rpgkit hook <name>` 调度器，更新RPG，与代码变更保持对齐。如果 hook 失败或被跳过，可以手动运行 `/rpgkit.update_rpg`。
 
 ## `rpgkit init` 之后会发生什么
 
-`rpgkit init` 不会修改你的源文件。它会在你的代码旁边添加命令定义、运行时脚本、MCP 配置和生成的图数据。
+`rpgkit init` 不会修改你的源文件，**也不会在你的工作区写入运行时状态**。它只在你的工作区添加命令定义、MCP 配置和 hooks，所有 RPG-Kit 的运行时数据（脚本、产物、日志、报告）都放在 home-side 目录 `~/.rpgkit/workspaces/<hash>/` 下，由工作区绝对路径派生的 hash 隔离。
 
 ```text
 my-project/
 ├── docs/                 # /rpgkit.feature_spec 的可选需求文档
 ├── .github/ or .claude/  # AI 助手的命令定义和设置
 ├── .vscode/              # 适用时的 Copilot/VS Code MCP 配置
-└── .rpgkit/              # RPG-Kit 运行时
-    ├── scripts/          # 流水线脚本和支持包
-    ├── data/             # 生成的产物，包括 rpg.json 和 dep_graph.json
-    ├── logs/             # 各阶段执行日志
-    └── reports/          # 生成时的审查与诊断报告
+├── .rpgkit/              # 包含生成的报告 和 配置文件
 ```
 
 完整的目录布局和数据文件参考见 [docs/project-structure.md](docs/project-structure.md)。
 
 ## 支持的平台
 
-| 平台                | Claude Code | GitHub Copilot | Codex |
-| ------------------- | ----------- | -------------- | ----- |
-| CLI 使用            | ✅          | ✅ (No MCP)    | ⌛    |
-| VS Code 扩展使用    | ✅          | ✅             | ⌛    |
+**Coding Agent 支持**：
 
-| 脚本 | Linux | Windows | Mac |
-| ---- | ----- | ------- | --- |
-| sh   | ✅    | ⌛      | ⌛  |
-| ps   | N/A   | ⌛      | ⌛  |
+| Agent          | CLI 使用 | VS Code 扩展使用 |
+| -------------- | -------- | ---------------- |
+| Claude Code    | ✅        | ✅                |
+| GitHub Copilot | ✅        | ✅                |
+| Codex          | ⌛        | ⌛                |
+
+**操作系统支持**：
+
+| 操作系统 | 状态 |
+| -------- | ---- |
+| Linux    | ✅    |
+| macOS    | ⌛    |
+| Windows  | ⌛    |
 
 ## 文档
 
@@ -227,12 +231,6 @@ my-project/
 ## 故障排查
 
 **找不到 AI 助手 CLI**：运行 `rpgkit check`，安装并完成所选助手 CLI 的身份验证，然后重新运行 `rpgkit init` 或 `rpgkit update`。
-
-**MCP 工具报告 `rpg_unavailable`**：运行 `/rpgkit.encode` 来创建 `.rpgkit/data/rpg.json`。
-
-**增量更新失败**：检查 `.rpgkit/logs/update_rpg.log`，然后运行 `/rpgkit.update_rpg`。
-
-**因为速率限制或私有仓库访问导致模板下载失败**：传递 `--github-token $GITHUB_TOKEN`，或设置 `GH_TOKEN` / `GITHUB_TOKEN`。
 
 ## 许可证
 
