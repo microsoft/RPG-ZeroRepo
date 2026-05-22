@@ -2,8 +2,8 @@
 
 **RPG-ZeroRepo turns Repository Planning Graphs into a control layer for long-horizon AI coding agents.**
 
-[![Paper 1: arXiv:2509.16198](https://img.shields.io/badge/Paper%201-arXiv%3A2509.16198-b31a1b)](https://arxiv.org/abs/2509.16198)
-[![Paper 2: arXiv:2602.02084](https://img.shields.io/badge/Paper%202-arXiv%3A2602.02084-b31a1b)](https://arxiv.org/abs/2602.02084)
+[![RPG-ZeroRepo: arXiv:2509.16198](https://img.shields.io/badge/Paper%201-arXiv%3A2509.16198-b31a1b)](https://arxiv.org/abs/2509.16198)
+[![RPG-Encoder: arXiv:2602.02084](https://img.shields.io/badge/Paper%202-arXiv%3A2602.02084-b31a1b)](https://arxiv.org/abs/2602.02084)
 [![ICLR 2026](https://img.shields.io/badge/ICLR-2026-blue.svg)](https://arxiv.org/abs/2509.16198)
 [![ICML 2026](https://img.shields.io/badge/ICML-2026-blue.svg)](https://arxiv.org/abs/2602.02084)
 [![Python 3.11+](https://img.shields.io/badge/python-3.11+-blue.svg)](https://www.python.org/downloads/)
@@ -21,11 +21,13 @@ The repository also includes the research code: **[ZeroRepo](#zerorepo-requireme
 
 ## News
 
-- [2026-05-15] 🔥 **RPG-Kit** is now open source for Claude Code and GitHub Copilot. It uses Repository Planning Graphs as a control layer for long-horizon coding agents, including planning, multi-file generation, repository understanding, and graph-aware updates.
+- [2026-05-15] 🚀 **RPG-Kit** is now open source for Claude Code and GitHub Copilot. It uses Repository Planning Graphs as a control layer for long-horizon coding agents, including planning, multi-file generation, repository understanding, and graph-aware updates.
 - [2026-05-01] 🎉 **RPG-Encoder** ([*Closing the Loop: Universal Repository Representation with RPG-Encoder*](https://arxiv.org/abs/2602.02084)) has been accepted to **ICML 2026**.
-- [2026-03-02] 🔥 We have open-sourced the **EpiCoder Feature Tree** at [Hugging Face](https://huggingface.co/datasets/microsoft/EpiCoder-meta-features), providing structured knowledge for repository planning in **ZeroRepo**.
-- [2026-02-27] 🔥 We released the code for [RPG-Encoder](zerorepo/rpg_encoder/) and [RepoCraft](repocraft/).
-- [2026-01-26] 🔥 [RPG-ZeroRepo](https://arxiv.org/abs/2509.16198) was accepted as a poster at ICLR 2026.
+- [2026-03-02] 🚀 We have open-sourced the **EpiCoder Feature Tree** at [Hugging Face](https://huggingface.co/datasets/microsoft/EpiCoder-meta-features), providing structured knowledge for repository planning in **ZeroRepo**.
+- [2026-02-27] 🚀 We released the code for [RPG-Encoder](zerorepo/rpg_encoder/) and [RepoCraft](repocraft/).
+- [2026-02-02] 🔥 Our paper "[Closing the Loop: Universal Repository Representation with RPG-Encoder](https://arxiv.org/abs/2602.02084)" has been released on arXiv.
+- [2026-01-26] 🎉 [RPG-ZeroRepo](https://arxiv.org/abs/2509.16198) was accepted as a poster at ICLR 2026.
+- [2025-09-19] 🔥 Our paper "[RPG: A Repository Planning Graph for Unified and Scalable Codebase Generation](https://arxiv.org/abs/2509.16198)" has been released on arXiv.
 
 ---
 

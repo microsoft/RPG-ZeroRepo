@@ -156,6 +156,11 @@ function Build-Variant {
     $specDir = Join-Path $baseDir ".rpgkit"
     New-Item -ItemType Directory -Path $specDir -Force | Out-Null
     
+    if (Test-Path "pyproject.toml") {
+        Copy-Item -Path "pyproject.toml" -Destination (Join-Path $specDir "pyproject.toml") -Force
+        Write-Host "Copied pyproject.toml -> .rpgkit"
+    }
+
     # Copy memory directory
     if (Test-Path "memory") {
         Copy-Item -Path "memory" -Destination $specDir -Recurse -Force

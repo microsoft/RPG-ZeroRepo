@@ -18,6 +18,7 @@ if [[ $# -ne 1 ]]; then
   exit 1
 fi
 NEW_VERSION="$1"
+PYTHON_BIN="${PYTHON:-python3}"
 if [[ ! $NEW_VERSION =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-.+)?$ ]]; then
   echo "Version must look like v0.0.0 or v0.0.0-dev.1" >&2
   exit 1
@@ -87,7 +88,7 @@ EOF
 
 create_archive() {
   local source_dir=$1 archive_path=$2
-  python - "$source_dir" "$archive_path" <<'PY'
+  "$PYTHON_BIN" - "$source_dir" "$archive_path" <<'PY'
 from pathlib import Path
 import sys
 import zipfile
@@ -113,7 +114,9 @@ build_variant() {
   
   # Create empty data directory for runtime output
   mkdir -p "$SPEC_DIR/data"
-  
+
+  [[ -f pyproject.toml ]] && { cp pyproject.toml "$SPEC_DIR/pyproject.toml"; echo "Copied pyproject.toml -> .rpgkit"; }
+
   [[ -d memory ]] && { cp -r memory "$SPEC_DIR/"; echo "Copied memory -> .rpgkit"; }
   
   # Only copy the relevant script variant directory

@@ -420,3 +420,4 @@ FodyWeavers.xsd
 # RPG-Kit release artifacts
 RPG-Kit/.genreleases/
 release_notes.md
+workspace/
