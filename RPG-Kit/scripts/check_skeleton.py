@@ -385,7 +385,15 @@ def main() -> None:
         action="store_true",
         help="Include detailed file list and all feature mismatches"
     )
-    
+    parser.add_argument(
+        "--json",
+        action="store_true",
+        help=(
+            "Accepted for compatibility with the unified check_*.py contract used by "
+            "plan.py; this script already prints JSON unconditionally."
+        ),
+    )
+
     args = parser.parse_args()
     
     result = inspect_state()

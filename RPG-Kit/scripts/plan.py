@@ -144,11 +144,14 @@ def _script_argv(invoker: list[str], script_name: str) -> list[str]:
 def _run_check(invoker: list[str], script_name: str) -> dict[str, Any]:
     """Run a check_*.py script and parse its JSON stdout.
 
-    The check scripts print exactly one JSON object on stdout.  We
-    capture it without printing to the parent terminal so the user
-    is not flooded by 5 raw JSON blobs during probing.
+    The check scripts print exactly one JSON object on stdout when
+    invoked with ``--json``.  We capture it without printing to the
+    parent terminal so the user is not flooded by 5 raw JSON blobs
+    during probing.  ``--json`` is the unified contract across all
+    ``check_*.py`` scripts; ``check_skeleton.py`` accepts it as a
+    no-op for compatibility.
     """
-    argv = _script_argv(invoker, script_name)
+    argv = [*_script_argv(invoker, script_name), "--json"]
     try:
         proc = subprocess.run(
             argv,
