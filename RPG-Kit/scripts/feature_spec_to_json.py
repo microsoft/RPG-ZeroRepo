@@ -406,7 +406,7 @@ def main():
     
     include_evidence = not args.no_evidence
     
-    print(f"Parsing feature specification from: {input_dir}")
+    print(f"Parsing feature specification from: {input_dir.name}")
     print(f"Include evidence: {include_evidence}")
     
     try:
@@ -417,8 +417,9 @@ def main():
         with open(output_file, "w", encoding="utf-8") as f:
             json.dump(spec, f, indent=2, ensure_ascii=False)
         
-        # Print summary
-        print(f"\nOutput written to: {output_file}")
+        # Print summary — use only the file name so stdout stays
+        # workspace-independent; the agent cannot access home-side paths.
+        print(f"\nOutput written to: {output_file.name}")
         print(f"  - Repository: {spec.get('repository_name', 'N/A')}")
         print(f"  - Background items: {len(spec.get('background_and_overview', []))}")
         print(f"  - NFR items: {len(spec.get('non_functional_requirements', []))}")

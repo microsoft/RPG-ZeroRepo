@@ -1599,7 +1599,7 @@ def main():
         with open(args.output, 'w', encoding='utf-8') as f:
             json.dump(result, f, indent=2)
         
-        print(f"\n   [OK] Tasks saved to: {args.output}")
+        print(f"\n   [OK] Tasks saved to: {args.output.name}")
         
         # Complete trajectory
         if trajectory:

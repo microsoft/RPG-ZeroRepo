@@ -521,7 +521,7 @@ def main():
 
         logger.info(f"[OK] Base classes saved to: {output_path}")
         designer.print_summary(result)
-        print(f"\n[OK] Base classes saved to: {output_path}")
+        print(f"\n[OK] Base classes saved to: {output_path.name}")
 
         # Update RPG with base classes
         if result.get("success", True):
@@ -540,7 +540,7 @@ def main():
                 "data_structure_files": len(result.get("data_structures", [])),
                 "data_structure_names": result.get("data_structure_names", []),
             })
-            print(f"[OK] Trajectory saved to: {trajectory.trajectory_file}")
+            print(f"[OK] Trajectory saved to: {trajectory.trajectory_file.name}")
         
         return 0
         

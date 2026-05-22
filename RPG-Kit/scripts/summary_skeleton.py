@@ -438,7 +438,7 @@ def main() -> int:
         with open(output_path, "w", encoding="utf-8") as f:
             generate_summary(skeleton_data, use_color=False, output=f)
         
-        print(f"Summary saved to: {output_path}")
+        print(f"Summary saved to: {output_path.name}")
     
     return 0
 

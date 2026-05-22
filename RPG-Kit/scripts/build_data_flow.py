@@ -106,9 +106,9 @@ def update_rpg_with_data_flow(data_flow_data: Dict[str, Any], rpg_path: Path):
     
     svc.save(rpg_path)
     if added > 0:
-        print(f"[OK] Added {added} data flow edges to: {rpg_path}")
+        print(f"[OK] Added {added} data flow edges to: {rpg_path.name}")
     else:
-        print(f"No new data flow edges to add to: {rpg_path}")
+        print(f"No new data flow edges to add to: {rpg_path.name}")
 
 
 # ============================================================================
@@ -354,7 +354,7 @@ def main():
 
         logger.info(f"[OK] Data flow saved to: {output_path}")
         builder.print_summary(result)
-        print(f"\n[OK] Data flow saved to: {output_path}")
+        print(f"\n[OK] Data flow saved to: {output_path.name}")
 
         # Add data flow edges to repo_rpg.json
         update_rpg_with_data_flow(result, Path(args.repo_rpg))
@@ -370,7 +370,7 @@ def main():
                 "components": len(result.get("components", [])),
                 "edges": len(result.get("data_flow", []))
             })
-            print(f"[OK] Trajectory saved to: {trajectory.trajectory_file}")
+            print(f"[OK] Trajectory saved to: {trajectory.trajectory_file.name}")
         
         return 0
         

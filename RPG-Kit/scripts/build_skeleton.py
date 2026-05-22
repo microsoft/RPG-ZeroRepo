@@ -200,7 +200,7 @@ class SkeletonBuilder:
             
             # Save updated RPG (with directory assignments)
             self.rpg.save_json(str(REPO_RPG_FILE), indent=2)
-            print(f"   [OK] Updated RPG saved to: {REPO_RPG_FILE}")
+            print(f"   [OK] Updated RPG saved to: {REPO_RPG_FILE.name}")
 
             self._print_summary()
 
@@ -226,7 +226,7 @@ class SkeletonBuilder:
             print(f"     - Total nodes: {stats['total_nodes']}")
             print(f"     - Node types: {dict(stats['node_types'])}")
             print(f"     - Level distribution: {dict(stats['levels'])}")
-            print(f"   [OK] RPG saved to: {REPO_RPG_FILE}")
+            print(f"   [OK] RPG saved to: {REPO_RPG_FILE.name}")
 
             return True
 
@@ -688,11 +688,11 @@ def main():
             json.dump(result, f, indent=2, ensure_ascii=False)
 
         logger.info(f"[OK] Skeleton saved to: {output_path}")
-        print(f"\n[OK] Skeleton saved to: {output_path}")
+        print(f"\n[OK] Skeleton saved to: {output_path.name}")
 
         # Save RPG as well
         if REPO_RPG_FILE.exists():
-            print(f"[OK] RPG saved to: {REPO_RPG_FILE}")
+            print(f"[OK] RPG saved to: {REPO_RPG_FILE.name}")
 
         # Mark trajectory as complete
         if trajectory:
@@ -701,7 +701,7 @@ def main():
                 "assigned_features": builder.stats["assigned_features"],
                 "total_files": builder.stats["total_files"]
             })
-            print(f"[OK] Trajectory saved to: {trajectory.trajectory_file}")
+            print(f"[OK] Trajectory saved to: {trajectory.trajectory_file.name}")
 
         return 0
 

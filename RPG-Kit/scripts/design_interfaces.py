@@ -1208,7 +1208,7 @@ def main():
 
         logger.info(f"[OK] Interfaces saved to: {output_path}")
         designer.print_summary(result)
-        print(f"\n[OK] Interfaces saved to: {output_path}")
+        print(f"\n[OK] Interfaces saved to: {output_path.name}")
 
         # RPG update is now handled inside InterfaceDesigner.build() via InterfacesStore
 
@@ -1233,7 +1233,7 @@ def main():
                 "invocation_edges": len(enhanced_data_flow.get("invocation_edges", [])),
                 "reference_edges": len(enhanced_data_flow.get("reference_edges", []))
             })
-            print(f"[OK] Trajectory saved to: {trajectory.trajectory_file}")
+            print(f"[OK] Trajectory saved to: {trajectory.trajectory_file.name}")
         
         return 0
         
