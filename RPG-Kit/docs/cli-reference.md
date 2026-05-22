@@ -72,8 +72,7 @@ rpgkit update --github-token $GITHUB_TOKEN
 | `--github-token <token>` | GitHub token for private repos or higher rate limits |
 | `--pre` | Download the latest pre-release template |
 | `--legacy-download` | Bypass the packaged assets and pull from the latest GitHub release zip (implied by `--pre`) |
-| `--pull` | Force a self-upgrade of the CLI (auto-detects uv / pipx / pip) before syncing the workspace. Conflicts with `--no-pull`. |
-| `--no-pull` | Skip the self-upgrade and only sync workspace files. Conflicts with `--pull`. |
+| `--no-upgrade` | Skip the default-on CLI self-upgrade and only sync workspace files. |
 | `--no-mcp` | Skip MCP server configuration |
 | `--skip-tls` | Skip SSL/TLS verification |
 | `--debug` | Show verbose diagnostic output |
@@ -82,9 +81,7 @@ rpgkit update --github-token $GITHUB_TOKEN
 
 Since the global-install layout, `rpgkit update` performs a **best-effort silent self-upgrade by default** when the install source is safe to refresh (git+URL or PyPI). After upgrading the CLI it re-executes itself once to continue the workspace sync with the new code. Editable installs, local-file installs, and unknown sources are skipped silently.
 
-- Pass `--pull` to force an upgrade attempt regardless of the detected source.
-- Pass `--no-pull` to skip the upgrade entirely (useful for offline or pinned environments).
-- `--pull` and `--no-pull` are mutually exclusive; passing both exits with status 2.
+- Pass `--no-upgrade` to skip the upgrade entirely (useful for offline or pinned environments).
 - A loop guard environment variable (`RPGKIT_UPGRADE_DONE`) is set across the re-exec to guarantee at most one upgrade attempt per invocation.
 
 ### Provisioning sources

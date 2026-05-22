@@ -427,8 +427,8 @@ def _detect_install_method() -> str:
     """Best-effort detection of how ``rpgkit-cli`` was installed.
 
     Returns one of ``"uv"``, ``"pipx"``, ``"pip-user"``, ``"pip-system"``,
-    ``"editable"``, ``"unknown"``.  Used by ``rpgkit update --pull`` to
-    pick the right upgrade command.
+    ``"editable"``, ``"unknown"``.  Used by ``rpgkit update`` to pick the
+    right self-upgrade command.
     """
     try:
         # Do not call ``.resolve()`` here.  The python
@@ -447,8 +447,8 @@ def _detect_install_method() -> str:
 
     # IMPORTANT: editable detection must run FIRST.  An editable install
     # placed inside a uv-managed venv would otherwise be reported as
-    # "uv" and ``rpgkit update --pull`` would try to upgrade from the
-    # registry instead of asking the user to `git pull` their checkout.
+    # "uv" and ``rpgkit update`` would try to upgrade from the
+    # registry instead of leaving the local checkout alone.
     try:
         import importlib.metadata as _im
 
@@ -4369,20 +4369,11 @@ def update(
             "the CLI you have installed.  Implied by --pre."
         ),
     ),
-    pull: bool = typer.Option(
+    no_upgrade: bool = typer.Option(
         False,
-        "--pull",
+        "--no-upgrade",
         help=(
-            "Force the pre-update CLI upgrade even when auto-detection "
-            "would have skipped it (e.g. an editable / local-path "
-            "install).  Mutually exclusive with --no-pull."
-        ),
-    ),
-    no_pull: bool = typer.Option(
-        False,
-        "--no-pull",
-        help=(
-            "Skip the default-on CLI upgrade step.  Use when offline, "
+            "Skip the default-on CLI self-upgrade step.  Use when offline, "
             "on a version-pinned CI runner, or when you've just "
             "installed the CLI manually."
         ),
@@ -4493,11 +4484,8 @@ def update(
     #   * the install source is remote (git URL or PyPI), meaning the
     #     user isn't actively developing the CLI from a local checkout.
     #
-    # ``--no-pull`` skips this step (offline / pinned CI / freshly
-    # re-installed manually).  ``--pull`` forces it even for sources
-    # we'd otherwise skip (local / editable / unknown) — useful when a
-    # power user really does want the registry build to overwrite
-    # their local install.
+    # ``--no-upgrade`` skips this step (offline / pinned CI / freshly
+    # re-installed manually).
     #
     # After a successful upgrade we ``os.execvp`` the (now-upgraded)
     # rpgkit binary so the rest of update runs against the freshly
@@ -4509,12 +4497,6 @@ def update(
     # upgrade attempt unconditionally so an idempotent ``uv tool
     # upgrade`` (which returns 0 even when there's nothing to upgrade)
     # doesn't loop forever.
-    if pull and no_pull:
-        console.print(
-            "[red]error:[/red] --pull and --no-pull are mutually exclusive"
-        )
-        raise typer.Exit(2)
-
     _UPGRADE_DONE_ENV = "RPGKIT_UPGRADE_DONE"
     already_upgraded = bool(os.environ.get(_UPGRADE_DONE_ENV))
 
@@ -4525,33 +4507,23 @@ def update(
     if already_upgraded:
         do_upgrade = False
         skip_reason = ""  # silent — internal marker, not user-visible
-    elif no_pull:
+    elif no_upgrade:
         do_upgrade = False
-        skip_reason = "--no-pull"
-    elif pull:
-        do_upgrade = cmd is not None
+        skip_reason = "--no-upgrade"
+    elif cmd is None:
+        do_upgrade = False
         skip_reason = (
-            f"--pull but no upgrade command for install method '{method}'"
-            if cmd is None else ""
+            f"install method '{method}' has no auto-upgrade path "
+            f"(upgrade manually)"
+        )
+    elif source not in _AUTO_UPGRADE_SOURCES:
+        do_upgrade = False
+        skip_reason = (
+            f"local/dev install (source={source!r}); skipping auto-upgrade."
         )
     else:
-        # Default-on policy: upgrade only when both the install method
-        # and the install source say it's safe.
-        if cmd is None:
-            do_upgrade = False
-            skip_reason = (
-                f"install method '{method}' has no auto-upgrade path "
-                f"(use --pull to force, or upgrade manually)"
-            )
-        elif source not in _AUTO_UPGRADE_SOURCES:
-            do_upgrade = False
-            skip_reason = (
-                f"local/dev install (source={source!r}); skipping "
-                f"auto-upgrade. Use --pull to force."
-            )
-        else:
-            do_upgrade = True
-            skip_reason = ""
+        do_upgrade = True
+        skip_reason = ""
 
     if do_upgrade:
         console.print(
@@ -4580,11 +4552,10 @@ def update(
 
         if rc == 0:
             # Re-exec the upgraded binary so the rest of update runs
-            # against the freshly-installed code + assets.  Strip
-            # ``--pull`` (no longer needed) but keep every other flag.
-            # Set the loop-guard env var so the re-exec'd process
-            # doesn't immediately try to upgrade again.
-            new_argv = [a for a in sys.argv if a != "--pull"]
+            # against the freshly-installed code + assets.  Set the
+            # loop-guard env var so the re-exec'd process doesn't
+            # immediately try to upgrade again.
+            new_argv = list(sys.argv)
             rpgkit_bin = shutil.which("rpgkit") or new_argv[0]
             console.print(
                 "[cyan]CLI upgrade complete; re-exec'ing to apply "
@@ -4610,10 +4581,10 @@ def update(
                 f"continuing with currently installed version.[/yellow]"
             )
     elif skip_reason:
-        # Surface the reason only when the user explicitly asked via
-        # --pull but we couldn't help; the default-on skip path stays
+        # Surface the reason only when the user explicitly opted out;
+        # the default-on skip paths (editable, no upgrade cmd) stay
         # quiet for the 99% case where nothing to do.
-        if pull or skip_reason == "--no-pull":
+        if skip_reason == "--no-upgrade":
             console.print(f"[dim]update: skipping CLI upgrade ({skip_reason}).[/dim]")
 
     # Build step tracker
