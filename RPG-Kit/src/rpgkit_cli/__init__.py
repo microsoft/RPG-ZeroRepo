@@ -65,6 +65,23 @@ _FALLBACK_REPO_NAME = "RPG-ZeroRepo"
 _RPGKIT_RELEASE_TAG_PREFIX = "rpgkit-v"
 
 
+# ---------------------------------------------------------------------------
+# DEPRECATED: GitHub release-zip provisioning helpers.
+#
+# As of v0.1.4 ``rpgkit init`` / ``rpgkit update`` are bundle-only and no
+# longer fetch templates from GitHub releases at runtime — users upgrade
+# the CLI itself to pick up newer prompts.  The helpers below
+# (``_parse_github_owner_repo``, ``_github_token``,
+# ``_github_auth_headers``, ``_parse_rate_limit_headers``,
+# ``_format_rate_limit_error``, ``_is_private_repo``,
+# ``_get_asset_download_url``, ``_fetch_latest_rpgkit_release``,
+# ``download_template_from_github``, ``_download_and_extract_release_zip``)
+# are kept temporarily so the change is reversible and so any third-party
+# callers don't break on upgrade.  They are slated for removal in v0.2.0
+# along with the ``httpx`` dependency they bring in.
+# ---------------------------------------------------------------------------
+
+
 def _parse_github_owner_repo(url: str) -> Tuple[str, str] | None:
     """Extract (owner, repo) from a GitHub remote URL.
 
@@ -3183,74 +3200,35 @@ def download_and_extract_template(
     tracker: StepTracker | None = None,
     client: httpx.Client = None,
     debug: bool = False,
+    # DEPRECATED params (kept for source-compat; CLI no longer passes
+    # them as of v0.1.4 and they are slated for removal in v0.2.0).
     github_token: str = None,
     pre: bool = False,
     legacy_download: bool = False,
 ) -> Path:
     """Provision the workspace with scripts + command templates.
 
-    Two provisioning sources are supported:
+    Bundle-only as of v0.1.4: templates are always sourced from the
+    packaged assets shipped inside ``rpgkit_cli/core_pack/``.  To pick
+    up newer prompts the user upgrades the CLI itself (``uv tool
+    upgrade rpgkit-cli`` etc.), which ``rpgkit update`` does
+    automatically by default.
 
-    * **Bundle (default)** — copy from packaged assets shipped inside
-      ``rpgkit_cli`` (no network).  Used whenever :func:`_assets.available`
-      is True and ``legacy_download`` is False.
-    * **Legacy release zip** — original behaviour: query GitHub API for
-      the latest matching release, download the per-AI/script-type zip,
-      and extract it.  Activated by ``legacy_download=True`` or when the
-      bundle is unavailable (editable installs, etc.).
-
-    On ``--script ps`` the bundle path is rejected and the legacy path is
-    required.
+    The ``github_token`` / ``pre`` / ``legacy_download`` parameters and
+    the underlying ``_download_and_extract_release_zip`` path are kept
+    for now as dead code so the change is reversible, but they are no
+    longer reachable from the CLI surface.
 
     Returns ``project_path``.  Uses the supplied :class:`StepTracker`
     to report progress when provided.
     """
-    from . import _assets
-
-    # ---- Decide provisioning source ----
-    use_bundle = (not legacy_download) and _assets.available()
-
-    # Bundle currently ships only POSIX-shell-flavoured scripts (today
-    # the scripts/ tree has no bash/ or powershell/ subdirs, so the
-    # CI's per-shell partitioning is vestigial.
-    # When the user explicitly asks for PowerShell, fall back to the
-    # legacy zip path so that future PowerShell variants in releases
-    # keep working.  The notice is emitted through the tracker (when
-    # present) so it is actually visible during init/update.
-    if use_bundle and script_type == "ps":
-        use_bundle = False
-        notice = (
-            "--script ps: falling back to release-zip download "
-            "(bundle ships POSIX-shell-oriented scripts only)"
-        )
-        if tracker:
-            tracker.add("ps-fallback", "PowerShell fallback")
-            tracker.skip("ps-fallback", notice)
-        elif verbose:
-            console.print(f"[yellow]{notice}[/yellow]")
-
-    if use_bundle:
-        return _install_from_bundle(
-            project_path,
-            ai_assistant,
-            script_type,
-            is_current_dir,
-            verbose=verbose,
-            tracker=tracker,
-        )
-
-    # Fall through to the original legacy zip path below.
-    return _download_and_extract_release_zip(
+    return _install_from_bundle(
         project_path,
         ai_assistant,
         script_type,
         is_current_dir,
         verbose=verbose,
         tracker=tracker,
-        client=client,
-        debug=debug,
-        github_token=github_token,
-        pre=pre,
     )
 
 
@@ -3382,6 +3360,9 @@ def _materialise_commands_for_agent(
             (dest / f"rpgkit.{src.stem}.md").write_text(_read_body(src), encoding="utf-8")
 
 
+# DEPRECATED: legacy release-zip provisioning path — no longer reachable
+# from the CLI as of v0.1.4 (see top-of-file DEPRECATED block).  Slated for
+# removal in v0.2.0.
 def _download_and_extract_release_zip(
     project_path: Path,
     ai_assistant: str,
@@ -3732,27 +3713,10 @@ def init(
         "--force",
         help="Force merge/overwrite when using --here (skip confirmation)",
     ),
-    skip_tls: bool = typer.Option(
-        False, "--skip-tls", help="Skip SSL/TLS verification (not recommended)"
-    ),
     debug: bool = typer.Option(
         False,
         "--debug",
-        help="Show verbose diagnostic output for network and extraction failures",
-    ),
-    github_token: str = typer.Option(
-        None,
-        "--github-token",
-        help="GitHub token to use for API requests (or set GH_TOKEN or GITHUB_TOKEN environment variable)",
-    ),
-    pre: bool = typer.Option(
-        False,
-        "--pre",
-        help=(
-            "Download the latest pre-release (dev build) from GitHub. "
-            "Implies --legacy-download since bundle mode has no notion "
-            "of pre-release builds."
-        ),
+        help="Show verbose diagnostic output",
     ),
     no_mcp: bool = typer.Option(
         False,
@@ -3769,16 +3733,6 @@ def init(
             "this global registration is what makes `copilot` find "
             "rpg-tools.  Pass this flag if you manage your Copilot CLI "
             "MCP config by hand."
-        ),
-    ),
-    legacy_download: bool = typer.Option(
-        False,
-        "--legacy-download",
-        help=(
-            "Bypass the packaged assets (bundle) and download the latest "
-            "release zip from GitHub instead.  Use when you need prompts "
-            "newer than the installed CLI release ships, or when bundle "
-            "mode misbehaves.  Implied by --pre."
         ),
     ),
     encode: Optional[bool] = typer.Option(
@@ -3809,8 +3763,8 @@ def init(
     This command will:
     1. Check that required tools are installed (git is optional)
     2. Let you choose your AI assistant
-    3. Download the appropriate template from GitHub
-    4. Extract the template to a new project directory or current directory
+    3. Install command templates from the packaged bundle
+    4. Place them into a new project directory or current directory
     5. Initialize a fresh git repository (if not --no-git and no existing repo)
     6. Optionally set up AI assistant commands
 
@@ -3940,9 +3894,20 @@ def init(
                 f"[red]Error:[/red] Invalid script type '{script_type}'. Choose from: {', '.join(SCRIPT_TYPE_CHOICES.keys())}"
             )
             raise typer.Exit(1)
+        # PowerShell support is planned but not yet wired into the
+        # bundled templates / pipeline scripts.  Reject explicit
+        # --script ps with a friendly message so users aren't surprised
+        # by missing files later.
+        if script_type == "ps":
+            console.print(
+                "[yellow]PowerShell (--script ps) is not yet supported and will "
+                "be added in a future release. Please use --script sh for now.[/yellow]"
+            )
+            raise typer.Exit(1)
         selected_script = script_type
     else:
-        default_script = "ps" if os.name == "nt" else "sh"
+        # Default to sh on every platform until PowerShell templates land.
+        default_script = "sh"
 
         if sys.stdin.isatty():
             selected_script = select_with_arrows(
@@ -3967,7 +3932,7 @@ def init(
     tracker.add("script-select", "Select script type")
     tracker.complete("script-select", selected_script)
     for key, label in [
-        ("fetch", "Fetch latest pre-release" if pre else "Fetch latest release"),
+        ("fetch", "Install bundled templates"),
         ("download", "Download template"),
         ("extract", "Extract template"),
         ("zip-list", "Archive contents"),
@@ -3992,15 +3957,6 @@ def init(
     ) as live:
         tracker.attach_refresh(lambda: live.update(tracker.render()))
         try:
-            verify = not skip_tls
-            local_ssl_context = ssl_context if verify else False
-            local_client = httpx.Client(verify=local_ssl_context)
-
-            # --pre implies --legacy-download (bundle has no notion of
-            # pre-release builds; the user is asking for newer prompts
-            # than the installed CLI release ships).
-            effective_legacy = legacy_download or pre
-
             download_and_extract_template(
                 project_path,
                 selected_ai,
@@ -4008,11 +3964,7 @@ def init(
                 here,
                 verbose=False,
                 tracker=tracker,
-                client=local_client,
                 debug=debug,
-                github_token=github_token,
-                pre=pre,
-                legacy_download=effective_legacy,
             )
 
             # .rpgkit/.source is written by whichever provisioning path
@@ -4291,7 +4243,7 @@ def init(
             ver = _pkg_version("rpgkit-cli")
         except PackageNotFoundError:
             ver = "dev"
-        channel = "legacy" if legacy_download else "bundle"
+        channel = "bundle"
         script_label = script_type if script_type else "sh"
         ai_label = selected_ai if selected_ai else "?"
         if _inner_git.ensure_inner_git(
@@ -4321,27 +4273,10 @@ def update(
     script_type: str = typer.Option(
         None, "--script", help="Script type to use: sh or ps"
     ),
-    skip_tls: bool = typer.Option(
-        False, "--skip-tls", help="Skip SSL/TLS verification (not recommended)"
-    ),
     debug: bool = typer.Option(
         False,
         "--debug",
-        help="Show verbose diagnostic output for network and extraction failures",
-    ),
-    github_token: str = typer.Option(
-        None,
-        "--github-token",
-        help="GitHub token to use for API requests (or set GH_TOKEN or GITHUB_TOKEN environment variable)",
-    ),
-    pre: bool = typer.Option(
-        False,
-        "--pre",
-        help=(
-            "Download the latest pre-release (dev build) from GitHub. "
-            "Implies --legacy-download since bundle mode has no notion "
-            "of pre-release builds."
-        ),
+        help="Show verbose diagnostic output",
     ),
     no_mcp: bool = typer.Option(
         False,
@@ -4358,15 +4293,6 @@ def update(
             "this global registration is what makes `copilot` find "
             "rpg-tools.  Pass this flag if you manage your Copilot CLI "
             "MCP config by hand."
-        ),
-    ),
-    legacy_download: bool = typer.Option(
-        False,
-        "--legacy-download",
-        help=(
-            "Bypass packaged assets and re-sync from the latest GitHub "
-            "release zip.  Use when prompts in a release are newer than "
-            "the CLI you have installed.  Implied by --pre."
         ),
     ),
     no_upgrade: bool = typer.Option(
@@ -4402,8 +4328,7 @@ def update(
     Examples:
         rpgkit update
         rpgkit update --ai claude
-        rpgkit update --pre
-        rpgkit update --github-token $GITHUB_TOKEN
+        rpgkit update --no-upgrade
     """
     show_banner()
 
@@ -4455,9 +4380,20 @@ def update(
                 f"Choose from: {', '.join(SCRIPT_TYPE_CHOICES.keys())}"
             )
             raise typer.Exit(1)
+        # PowerShell support is planned but not yet wired into the
+        # bundled templates / pipeline scripts.  Reject explicit
+        # --script ps with a friendly message so users aren't surprised
+        # by missing files later.
+        if script_type == "ps":
+            console.print(
+                "[yellow]PowerShell (--script ps) is not yet supported and will "
+                "be added in a future release. Please use --script sh for now.[/yellow]"
+            )
+            raise typer.Exit(1)
         selected_script = script_type
     else:
-        default_script = "ps" if os.name == "nt" else "sh"
+        # Default to sh on every platform until PowerShell templates land.
+        default_script = "sh"
         if sys.stdin.isatty():
             selected_script = select_with_arrows(
                 SCRIPT_TYPE_CHOICES,
@@ -4597,7 +4533,7 @@ def update(
     tracker.add("script-select", "Select script type")
     tracker.complete("script-select", selected_script)
     for key, label in [
-        ("fetch", "Fetch latest pre-release" if pre else "Fetch latest release"),
+        ("fetch", "Install bundled templates"),
         ("download", "Download template"),
         ("extract", "Extract template"),
         ("zip-list", "Archive contents"),
@@ -4618,20 +4554,6 @@ def update(
     ) as live:
         tracker.attach_refresh(lambda: live.update(tracker.render()))
         try:
-            verify = not skip_tls
-            local_ssl_context = ssl_context if verify else False
-            local_client = httpx.Client(verify=local_ssl_context)
-
-            prior_source = _read_source_marker(project_path)
-            # Bundle is the default.  Three things can flip us to legacy:
-            #   1. user passes --legacy-download explicitly
-            #   2. user passes --pre (no notion of bundle pre-releases)
-            #   3. workspace was previously provisioned from legacy and
-            #      user has not overridden the channel
-            effective_legacy = (
-                legacy_download or pre or prior_source == _SOURCE_LEGACY
-            )
-
             download_and_extract_template(
                 project_path,
                 selected_ai,
@@ -4639,11 +4561,7 @@ def update(
                 True,  # is_current_dir — always merge/overwrite for update
                 verbose=False,
                 tracker=tracker,
-                client=local_client,
                 debug=debug,
-                github_token=github_token,
-                pre=pre,
-                legacy_download=effective_legacy,
             )
 
             # .rpgkit/.source is written by whichever provisioning path

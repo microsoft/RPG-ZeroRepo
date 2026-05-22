@@ -44,7 +44,7 @@ When a pipeline script (or a hook, or the MCP server) needs to invoke the AI CLI
 | P1 | `LLMClient(tool="...")` constructor argument | Programmatic override (rare) |
 | P2 | `RPGKIT_AI_CLI_CMD` environment variable | CI runs, one-off experiments |
 | P3 | `.rpgkit/config.toml` `[rpgkit].ai_cli_cmd` | Normal default (per workspace) |
-| P4 | Release-zip baked-in literal | Workspaces provisioned with `--legacy-download` |
+| P4 | Release-zip baked-in literal | Legacy workspaces provisioned before v0.1.4 |
 
 If all four resolve to empty, the next `LLMClient.generate()` call raises a `RuntimeError` instructing the user to run `rpgkit init` or set the env var.
 
@@ -218,29 +218,11 @@ Run `rpgkit update` from the project root to refresh scripts, command definition
 ```bash
 rpgkit update
 rpgkit update --ai claude
-rpgkit update --pre
+rpgkit update --no-upgrade
 rpgkit update --no-mcp
 ```
 
 `rpgkit update` auto-detects the existing assistant configuration when possible.
-
-## Network and Release Options
-
-```bash
-rpgkit init my-project --github-token $GITHUB_TOKEN
-rpgkit init my-project --pre
-rpgkit init my-project --skip-tls
-rpgkit init my-project --debug
-```
-
-| Option | Description |
-| ------ | ----------- |
-| `--github-token <token>` | Uses a GitHub token for API requests, useful for private repos or rate limits |
-| `--pre` | Downloads the latest pre-release template instead of the latest stable release |
-| `--skip-tls` | Skips SSL/TLS verification; use only for constrained environments |
-| `--debug` | Prints verbose diagnostic output for network and extraction failures |
-
-`GH_TOKEN` and `GITHUB_TOKEN` are also recognized for GitHub API requests.
 
 ## Troubleshooting
 
@@ -285,14 +267,14 @@ If the graph is corrupted or too stale, run `/rpgkit.encode` for a full rebuild.
 
 ### Template download hits rate limits or private repo access errors
 
-Use a token:
+As of v0.1.4 `rpgkit init` and `rpgkit update` no longer fetch templates
+from GitHub releases — templates are bundled inside the installed
+`rpgkit-cli` wheel, so this class of error should no longer occur during
+provisioning.  To pick up newer templates, upgrade the CLI itself:
 
 ```bash
-rpgkit init my-project --github-token $GITHUB_TOKEN
+uv tool upgrade rpgkit-cli
 ```
 
-or set an environment variable:
-
-```bash
-export GH_TOKEN=your_token
-```
+`rpgkit update` does this automatically by default; pass `--no-upgrade`
+to opt out.

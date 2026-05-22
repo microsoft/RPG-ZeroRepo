@@ -17,16 +17,12 @@ rpgkit init . [options]
 | Option | Description |
 | ------ | ----------- |
 | `--ai <agent>` | AI assistant: `copilot` or `claude` |
-| `--script <type>` | Script type: `sh` (POSIX) or `ps` (PowerShell) |
+| `--script <type>` | Script type: `sh` (POSIX). `ps` (PowerShell) is not yet supported and will be added in a future release. |
 | `--here` | Initialize in current directory |
 | `--force` | Skip confirmation for non-empty current directory |
 | `--no-git` | Skip git initialization |
 | `--no-mcp` | Skip MCP server configuration |
 | `--ignore-agent-tools` | Skip checks for AI agent CLI tools |
-| `--github-token <token>` | GitHub token for private repos or higher rate limits |
-| `--pre` | Download the latest pre-release template |
-| `--legacy-download` | Bypass the packaged assets and pull templates from the latest GitHub release zip (implied by `--pre`) |
-| `--skip-tls` | Skip SSL/TLS verification |
 | `--encode/--no-encode` | Run or skip initial RPG encoding at the end of init |
 | `--debug` | Show verbose diagnostic output |
 
@@ -48,7 +44,6 @@ rpgkit init . --force
 rpgkit init . --encode
 rpgkit init . --force --encode
 rpgkit init --here --ai copilot
-rpgkit init --here --github-token $GITHUB_TOKEN
 ```
 
 ## `rpgkit update`
@@ -58,9 +53,8 @@ Update RPG-Kit template files, scripts, command definitions, MCP configuration, 
 ```bash
 rpgkit update
 rpgkit update --ai claude
-rpgkit update --pre
 rpgkit update --no-mcp
-rpgkit update --github-token $GITHUB_TOKEN
+rpgkit update --no-upgrade
 ```
 
 ### Options
@@ -68,13 +62,9 @@ rpgkit update --github-token $GITHUB_TOKEN
 | Option | Description |
 | ------ | ----------- |
 | `--ai <agent>` | AI assistant, auto-detected if not specified |
-| `--script <type>` | Script type: `sh` (POSIX) or `ps` (PowerShell) |
-| `--github-token <token>` | GitHub token for private repos or higher rate limits |
-| `--pre` | Download the latest pre-release template |
-| `--legacy-download` | Bypass the packaged assets and pull from the latest GitHub release zip (implied by `--pre`) |
+| `--script <type>` | Script type: `sh` (POSIX). `ps` (PowerShell) is not yet supported and will be added in a future release. |
 | `--no-upgrade` | Skip the default-on CLI self-upgrade and only sync workspace files. |
 | `--no-mcp` | Skip MCP server configuration |
-| `--skip-tls` | Skip SSL/TLS verification |
 | `--debug` | Show verbose diagnostic output |
 
 ### Auto-upgrade behaviour
@@ -86,22 +76,29 @@ Since the global-install layout, `rpgkit update` performs a **best-effort silent
 
 ### Provisioning sources
 
-Since `0.1.3`, `rpgkit init` and `rpgkit update` provision from two channels:
+As of `0.1.4`, `rpgkit init` and `rpgkit update` provision exclusively
+from the **packaged assets bundle** shipped inside the installed
+`rpgkit-cli` wheel (under `rpgkit_cli/core_pack/`).  No network access
+is required at provisioning time.
 
-| Channel | When used | Network needed |
-| ------- | --------- | -------------- |
-| Packaged assets (bundle) | Default. Pulled from `rpgkit_cli/core_pack/` inside the installed wheel | No |
-| GitHub release zip (legacy) | `--legacy-download`, `--pre`, or `--script ps`, or when the bundle is unavailable (e.g. editable installs) | Yes |
+To pick up newer prompts and templates, upgrade the CLI itself
+(e.g. `uv tool upgrade rpgkit-cli`).  `rpgkit update` does this
+automatically by default (see *Auto-upgrade behaviour* above); pass
+`--no-upgrade` to opt out.
 
-`rpgkit init` records the chosen channel (`bundle` or `legacy`) in `~/.rpgkit/workspaces/<workspace-id>/.meta.toml` so subsequent `rpgkit update` invocations default to the same channel. Override with the flag of your choice at any time.
+## `rpgkit check`
 
-Verify that required tools are installed.
+Verify that the local environment has the tools RPG-Kit relies on.
 
 ```bash
 rpgkit check
 ```
 
-Run this after installation to confirm Python, Git, uv, and the selected AI assistant CLI are available.
+Probes for Git, the supported AI assistant CLIs (GitHub Copilot,
+Claude Code), and optional editors (VS Code / VS Code Insiders), and
+prints a tree of which ones are available.  Run this after
+installation to confirm the environment is ready, or whenever a
+pipeline step complains about a missing tool.
 
 ## `rpgkit version`
 
@@ -152,21 +149,3 @@ A companion console script, `rpgkit-mcp`, is the MCP server entry
 point and is what `.mcp.json` / `.vscode/mcp.json` register as the
 `rpg-tools` command — no absolute paths in the config, no per-machine
 edits.
-
-## Network and Release Options
-
-```bash
-rpgkit init my-project --github-token $GITHUB_TOKEN
-rpgkit init my-project --pre
-rpgkit init my-project --skip-tls
-rpgkit init my-project --debug
-```
-
-| Option | Description |
-| ------ | ----------- |
-| `--github-token <token>` | Uses a GitHub token for API requests, useful for private repos or rate limits |
-| `--pre` | Downloads the latest pre-release template instead of the latest stable release |
-| `--skip-tls` | Skips SSL/TLS verification; use only for constrained environments |
-| `--debug` | Prints verbose diagnostic output for network and extraction failures |
-
-`GH_TOKEN` and `GITHUB_TOKEN` are also recognized for GitHub API requests.
