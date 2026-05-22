@@ -24,7 +24,7 @@ def mcp_main() -> None:
     os.environ.setdefault("PYTHONDONTWRITEBYTECODE", "1")
 
     scripts_dir = _assets.scripts_dir()
-    if scripts_dir is None or not scripts_dir.is_dir():
+    if not scripts_dir.is_dir():
         sys.stderr.write(
             "rpgkit-mcp: packaged scripts directory unavailable. "
             "Try reinstalling: `uv tool install rpgkit-cli --force`.\n"

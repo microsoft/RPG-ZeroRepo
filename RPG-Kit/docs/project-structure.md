@@ -81,7 +81,7 @@ Command definitions are installed into the AI-agent-specific folder. Normal user
 | User-facing HTML reports (`rpg.html`, …) | `<workspace>/.rpgkit/reports/` |
 | Agent command definitions | `<workspace>/.claude/` or `<workspace>/.github/` |
 | MCP / VS Code config | `<workspace>/.vscode/` |
-| Git hooks (`pre-commit`, `post-commit`, `post-merge`) | `<workspace>/.git/hooks/` |
+| Git hooks (`post-commit`, `post-merge`) | `<workspace>/.git/hooks/` |
 | Generated data (`rpg.json`, `dep_graph.json`, …) | `~/.rpgkit/workspaces/<hash>/data/` |
 | Per-stage logs | `~/.rpgkit/workspaces/<hash>/logs/` |
 | Inner-git snapshot repo | `~/.rpgkit/workspaces/<hash>/.git/` |

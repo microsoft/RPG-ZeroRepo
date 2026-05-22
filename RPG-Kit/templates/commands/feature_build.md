@@ -65,9 +65,8 @@ The script automatically detects whether the output file (`feature_build.json`) 
    ```
 
    The script prints its full output on stdout and also writes a
-   The script writes a structured log automatically.
-   Inspect the stdout to capture the `FEATURE EXPANSION SUMMARY`
-   section described below.
+   structured log automatically. Inspect the stdout to capture the
+   `FEATURE EXPANSION SUMMARY` section described below.
 
    **Available parameters for Step 2:**
 

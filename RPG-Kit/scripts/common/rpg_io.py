@@ -208,7 +208,15 @@ def _try_restore_from_inner_git(
         return None
 
     # Force English git messages (consistent with _inner_git.py).
-    env = {**os.environ, "LC_ALL": "C", "LANG": "C"}
+    # Strip any inherited ``GIT_*`` vars (e.g. ``GIT_DIR``,
+    # ``GIT_INDEX_FILE``) that would point ``git`` at the **outer**
+    # repository when this recovery runs inside a hook context.  This
+    # mirrors the env-sanitisation done in ``rpgkit_cli._inner_git._run_git``.
+    env = {k: v for k, v in os.environ.items()
+           if k not in ("GIT_INDEX_FILE", "GIT_DIR",
+                        "GIT_WORK_TREE", "GIT_OBJECT_DIRECTORY")}
+    env["LC_ALL"] = "C"
+    env["LANG"] = "C"
 
     # Walk linear history (most recent first).  ``--follow`` keeps
     # working when a script ever renames data files in the future.

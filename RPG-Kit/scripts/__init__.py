@@ -11,6 +11,7 @@
 # At runtime ``scripts/`` is NOT imported as ``rpgkit_cli.scripts``
 # — the wheel's ``force-include`` rewrites the install target to
 # ``rpgkit_cli/core_pack/scripts/``, and that path is also not imported
-# as a Python module.  Callers always copy scripts into the user's
-# workspace and invoke them with ``python <workspace>/.rpgkit/scripts/<name>.py``.
+# as a Python module.  Scripts are executed directly from the packaged
+# location via the ``rpgkit script <name>`` dispatcher, which resolves
+# them through ``rpgkit_cli._assets.scripts_dir()``.
 #

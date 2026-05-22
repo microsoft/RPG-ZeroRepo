@@ -133,6 +133,26 @@ class TestFindWorkspaceRoot:
         monkeypatch.chdir(sub)
         assert _storage.find_workspace_root_from() == workspace.resolve()
 
+    def test_skips_stale_marker_with_mismatched_meta(
+        self, fake_home: Path, workspace: Path
+    ) -> None:
+        """A ``.meta.toml`` whose ``workspace_path`` doesn't match the
+        marker's directory is treated as stale (e.g. dir was moved or
+        renamed) and the walker keeps climbing rather than misrouting."""
+        self._mark(workspace)
+        # Forge meta recording a *different* absolute path under
+        # ``~/.rpgkit/workspaces/<hash>/.meta.toml``.
+        meta_path = _storage.workspace_meta_path(workspace)
+        meta_path.parent.mkdir(parents=True, exist_ok=True)
+        meta_path.write_text(
+            'channel = "bundle"\n'
+            f'workspace_path = "{workspace.parent / "elsewhere"}"\n'
+            'rpgkit_cli_version_at_init = "0.1.4"\n'
+            'rpgkit_cli_version_last_seen = "0.1.4"\n'
+            'initialised_at = "2026-01-01T00:00:00+00:00"\n'
+        )
+        assert _storage.find_workspace_root_from(workspace) is None
+
 
 # ---------------------------------------------------------------------------
 # .meta.toml read / write

@@ -196,24 +196,18 @@ def workspace_reports_dir(workspace_path: Path) -> Path:
 def _is_live_workspace_root(root: Path) -> bool:
     """Return True iff a candidate workspace root is still live.
 
-    A bare ``.rpgkit/config.toml`` isn't sufficient on its own: when
-    a user deletes (or moves) a workspace, the marker file may linger
-    on a parent directory whose home-side storage no longer matches.
-    Without this guard, :func:`find_workspace_root_from` would happily
-    climb into the stale parent and silently misroute reads/writes
-    (e.g. a freshly-stripped subdir would inherit the grandparent's
-    inner-git history).
+    A bare ``.rpgkit/config.toml`` is enough for a *fresh* workspace
+    (the marker may be planted before any home-side state is written),
+    so the marker alone is treated as live until proven stale.
 
-    The check is intentionally minimal and side-effect-free:
-
-    1. ``~/.rpgkit/workspaces/<hash>/`` exists — guards against
-       "home-side pruned" scenarios.
-    2. If ``.meta.toml`` exists, ``workspace_path`` matches ``root`` —
-       guards against "directory was moved/renamed" scenarios where
-       the stale marker still points at the old absolute path.
+    Staleness is detected only when ``.meta.toml`` is present: a moved
+    or renamed workspace records its original absolute path there, and
+    if that recorded path no longer matches the candidate directory the
+    marker is treated as stale.  This guards :func:`find_workspace_root_from`
+    against climbing into a renamed parent and misrouting reads/writes,
+    while still allowing brand-new (marker-only) workspaces to be
+    discovered before they have any home-side state.
     """
-    if not home_workspace_dir(root).is_dir():
-        return False
     meta = read_meta(root)
     if meta is not None:
         recorded = meta.get("workspace_path")
@@ -227,10 +221,11 @@ def find_workspace_root_from(start: Optional[Path] = None) -> Optional[Path]:
 
     A directory qualifies as a workspace if it contains
     ``.rpgkit/config.toml`` (see :data:`WORKSPACE_MARKER_RELPATH`)
-    **and** passes :func:`_is_live_workspace_root` — i.e. its home-side
-    storage still exists and the recorded path matches.  Stale markers
-    on parent directories are skipped, so the walker continues climbing
-    rather than misrouting into a different workspace's state.
+    **and** passes :func:`_is_live_workspace_root` — i.e. either it
+    has no ``.meta.toml`` (fresh workspace), or the recorded
+    ``workspace_path`` in meta still matches.  Stale (moved/renamed)
+    markers on parent directories are skipped, so the walker continues
+    climbing rather than misrouting into a different workspace's state.
 
     Returns the **resolved** path of the workspace root, or ``None``
     when no live marker is found before reaching the filesystem root.
