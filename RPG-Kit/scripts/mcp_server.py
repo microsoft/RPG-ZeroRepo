@@ -193,7 +193,7 @@ def create_mcp_server(rpg_file: str):
             "Program Graph (RPG) for the current workspace \u2014 a "
             "pre-computed, queryable index of the codebase built by "
             "`/rpgkit.encode` and kept in sync with HEAD by a "
-            "pre-commit hook.\n\n"
+            "post-commit hook.\n\n"
             "What the RPG knows about this repository:\n"
             "  \u2022 The feature hierarchy: functional areas \u2192 "
             "feature groups \u2192 individual features, each linked to "

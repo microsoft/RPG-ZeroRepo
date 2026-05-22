@@ -2652,46 +2652,48 @@ def _install_hook_snippet(
     return True
 
 
-def _install_git_pre_commit_hook(project_path: Path) -> bool:
-    """Install the RPG incremental-sync command into ``pre-commit``.
+def _uninstall_git_pre_commit_hook(project_path: Path) -> bool:
+    """Remove any previously-installed RPG-Kit ``pre-commit`` block.
 
-    Returns ``True`` when the hook is active on disk, ``False`` only
-    when no git checkout was found at all.
+    Pre-commit was retired in favour of ``post-commit`` only: the
+    pre-commit sync ran ``--staged-only`` and was immediately followed
+    by the full post-commit sync, so its output had a ~1 sec lifetime
+    and added latency to every ``git commit`` for no observable benefit.
+    Existing workspaces upgraded via ``rpgkit init`` / ``rpgkit update``
+    have their pre-commit block stripped here; user-authored hook
+    content (and other tools' blocks such as husky / pre-commit /
+    lefthook) is preserved untouched.
 
-    The hook passes ``--staged-only`` so only files the user
-    ``git add``'d contribute to the diff — working-tree-but-not-staged
-    changes are out of scope for the imminent commit.
-
-    The hook invokes the globally-installed ``rpgkit`` CLI rather than
-    a workspace-local script copy.  A PATH fallback prepends
-    ``$HOME/.local/bin`` (uv tool install's default bin dir) so the
-    hook works when triggered from GUI editors (VS Code / IntelliJ
-    source-control panels) whose process environment may not include
-    the user's shell PATH.
+    Returns ``True`` when the workspace had a hooks dir to clean,
+    ``False`` only when no git checkout was found at all.
     """
     hooks_dir = _resolve_git_hooks_dir(project_path)
     if hooks_dir is None:
         return False
 
-    # Level-1 hook: shell stub delegates everything to ``rpgkit hook``
-    # so path resolution / logging / locking live in one Python place.
-    # Legacy shapes (pre-Level-1) are stripped on upgrade.
-    marker = "# RPG-Kit: pre-commit dispatcher"
-    body = (
-        f"{marker}\n"
-        f"{_HOOK_PATH_FALLBACK}\n"
-        f"rpgkit hook pre-commit 2>/dev/null || true"
+    hook_path = hooks_dir / "pre-commit"
+    if not hook_path.is_file():
+        return True
+
+    existing = hook_path.read_text(encoding="utf-8")
+    legacy = (
+        ("# RPG-Kit: pre-commit dispatcher", 3),
+        ("# RPG-Kit: full RPG sync on commit", 2),
+        ("# RPG-Kit: incremental RPG sync on commit", 3),
     )
-    return _install_hook_snippet(
-        hooks_dir,
-        "pre-commit",
-        "pre-commit",
-        body,
-        legacy_blocks=(
-            ("# RPG-Kit: full RPG sync on commit", 2),
-            ("# RPG-Kit: incremental RPG sync on commit", 3),
-        ),
-    )
+    cleaned = _strip_hook_block(existing, "pre-commit", legacy).rstrip("\n")
+
+    # If nothing user-authored remains, delete the hook file so git
+    # falls back to its default no-hook behaviour.
+    if not cleaned.strip() or cleaned.strip() == "#!/bin/sh":
+        try:
+            hook_path.unlink()
+        except OSError:
+            pass
+    else:
+        hook_path.write_text(cleaned + "\n", encoding="utf-8")
+        hook_path.chmod(0o755)
+    return True
 
 
 def _install_git_post_merge_hook(project_path: Path) -> bool:
@@ -2866,12 +2868,13 @@ def _install_hooks(
       ``.vscode/tasks.json`` that runs the same status command on
       workspace open — VS Code's closest analogue to a SessionStart
       hook for GitHub Copilot.
-    - All:     appends an RPG incremental sync (``update_graphs.py sync``)
-      to ``.git/hooks/pre-commit`` AND ``.git/hooks/post-merge``.
-      The pre-commit hook uses ``--staged-only`` so it sees only what's
-      about to be committed; the post-merge hook (fired after
-      ``git pull`` / ``git merge``) considers the whole working tree
-      so teammate-incoming changes get picked up immediately.
+    - All:     installs an RPG sync trigger on ``.git/hooks/post-commit``
+      (fired after every successful commit) AND ``.git/hooks/post-merge``
+      (fired after ``git pull`` / ``git merge`` so teammate-incoming
+      changes get picked up immediately). Any legacy ``pre-commit``
+      block from earlier releases is stripped on upgrade — the design
+      now relies on post-commit only, so commit latency stays low and
+      the inner-git history is cleaner.
       Complements the MCP server already registered in
       ``.mcp.json`` / ``.vscode/mcp.json``.
     """
@@ -2884,8 +2887,8 @@ def _install_hooks(
             _install_copilot_hooks(project_path)
             installed.append("copilot")
 
-        if _install_git_pre_commit_hook(project_path):
-            installed.append("git:pre-commit")
+        # Strip any leftover pre-commit block from older installs.
+        _uninstall_git_pre_commit_hook(project_path)
         if _install_git_post_commit_hook(project_path):
             installed.append("git:post-commit")
         if _install_git_post_merge_hook(project_path):
@@ -5114,7 +5117,7 @@ def _hook_spawn_background(
     hidden=True,
     help="Internal git-hook dispatcher (called from .git/hooks/*).",
 )
-def hook(name: str = typer.Argument(..., help="Hook name: pre-commit | post-commit | post-merge")) -> None:
+def hook(name: str = typer.Argument(..., help="Hook name: post-commit | post-merge")) -> None:
     """Dispatch from ``.git/hooks/<name>`` to the matching Python handler.
 
     Resolves the current workspace via the standard cwd-walk, attaches
@@ -5122,6 +5125,12 @@ def hook(name: str = typer.Argument(..., help="Hook name: pre-commit | post-comm
     and runs the per-hook orchestration.  Every failure path is
     swallowed (logged, never raised) so a misbehaving hook never blocks
     the user's git operation.
+
+    Supported hooks: ``post-commit`` and ``post-merge``. The dispatcher
+    also accepts ``pre-commit`` as a deliberate no-op for backward
+    compatibility — old workspaces whose hook file still calls
+    ``rpgkit hook pre-commit`` should be cleaned up on the next
+    ``rpgkit init`` / ``rpgkit update`` run, which strips the block.
 
     All ``rpgkit script`` subprocess invocations inherit two env vars:
 
@@ -5132,9 +5141,8 @@ def hook(name: str = typer.Argument(..., help="Hook name: pre-commit | post-comm
     (:func:`rpgkit_cli._inner_git._build_message`) so ``git log`` in the
     home-side repo reads as a timeline of *user activity*, e.g.::
 
-        [hook:post-commit @ a1b2c3d] update-rpg
         [hook:post-commit @ a1b2c3d] sync
-        [hook:pre-commit  @ 9f8e7d6] sync --staged-only
+        [hook:post-merge  @ 9f8e7d6] sync
     """
     from . import _storage
 
@@ -5162,11 +5170,10 @@ def hook(name: str = typer.Argument(..., help="Hook name: pre-commit | post-comm
         _hook_log_line(log_path, f"== {name} fired @ {sha} (ws={ws})")
 
         if name == "pre-commit":
-            _hook_run_foreground(
-                ws, log_path, env,
-                ["update_graphs.py", "sync", "--staged-only"],
-                "sync-staged",
-            )
+            # Retired: pre-commit is now a deliberate no-op for backward
+            # compatibility with workspaces whose stub hasn't been
+            # stripped yet. Just log and exit success so git proceeds.
+            _hook_log_line(log_path, "pre-commit hook is a no-op (retired)")
         elif name == "post-merge":
             _hook_run_foreground(
                 ws, log_path, env,
