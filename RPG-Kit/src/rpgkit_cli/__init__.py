@@ -4871,8 +4871,42 @@ def script(
     env = os.environ.copy()
     env.setdefault("PYTHONDONTWRITEBYTECODE", "1")
 
-    cmd = [sys.executable, str(path), *ctx.args]
-    proc = subprocess.run(cmd, env=env)
+    # Tee stdout to a per-stage log file so the workspace has a persistent
+    # record of every script invocation.  The log path is resolved from
+    # _storage at run time; if the home-side dir doesn't exist yet (e.g.
+    # rpgkit init hasn't run), skip silently — no log is better than
+    # crashing.
+    log_path: Optional[Path] = None
+    from . import _inner_git as _ig
+    ws_root = _ig.find_workspace_root()
+    if ws_root is not None:
+        from . import _storage
+        logs_dir = _storage.workspace_logs_dir(ws_root)
+        if logs_dir.is_dir():
+            script_stem = path.stem  # e.g. "feature_build"
+            log_path = logs_dir / f"{script_stem}.log"
+
+    if log_path is not None:
+        log_fh = open(log_path, "a", encoding="utf-8")
+        cmd = [sys.executable, str(path), *ctx.args]
+        proc = subprocess.run(
+            cmd, env=env,
+            stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+        )
+        # Write captured output to both terminal and log file.
+        output = proc.stdout or b""
+        sys.stdout.buffer.write(output)
+        sys.stdout.buffer.flush()
+        try:
+            log_fh.write(output.decode("utf-8", errors="replace"))
+            log_fh.flush()
+        except OSError:
+            pass
+        finally:
+            log_fh.close()
+    else:
+        cmd = [sys.executable, str(path), *ctx.args]
+        proc = subprocess.run(cmd, env=env)
 
     # Snapshot the current state of .rpgkit/ into the inner git
     # repo so users can `git log` / `git diff` between pipeline stages.
