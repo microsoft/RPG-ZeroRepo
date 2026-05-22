@@ -600,9 +600,7 @@ def _format_status_for_agent(status: dict) -> str:
     For Claude Code ``SessionStart`` hooks, stdout is injected verbatim
     into the agent's context.  For VS Code tasks running on folderOpen,
     the user sees this text in a terminal; Copilot can read it on
-    request.  The text intentionally mirrors the ``code-review-graph``
-    pattern: state what's available + a short list of MCP tools to
-    prefer over raw file scans.
+    request.
     """
     lines = []
     rpg_broken = "rpg_error" in status

@@ -64,7 +64,7 @@ Starting from the global-install layout, all runtime state lives under your home
 
 Reports (`rpg.html`, review HTML, …) stay **inside** the workspace at `<workspace>/.rpgkit/reports/` because they are small, user-facing artefacts that benefit from sitting next to the code (and may be committed).
 
-The hash is computed as `sha256(os.path.realpath(workspace_path))[:12]`, so moving or renaming the workspace yields a different home directory. To open the RPG visualisation without remembering the hash, run [`rpgkit view-graph`](cli-reference.md) from anywhere inside the workspace.
+The hash is computed as `sha256(os.path.realpath(workspace_path))[:12]`, so moving or renaming the workspace yields a different home directory. Run `rpgkit version` from inside the workspace to see the resolved paths (the **Data**, **Logs**, and **Inner git** lines).
 
 > Pipeline scripts (formerly materialised into `.rpgkit/scripts/`) now live inside the installed `rpgkit-cli` wheel under `rpgkit_cli/core_pack/scripts/` and are invoked via the global [`rpgkit script <name>`](cli-reference.md) command. They are no longer copied into each workspace, so `rpgkit init` produces a much smaller footprint and a single source of truth per CLI install.
 

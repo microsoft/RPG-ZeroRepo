@@ -87,23 +87,6 @@ Since the global-install layout, `rpgkit update` performs a **best-effort silent
 - `--pull` and `--no-pull` are mutually exclusive; passing both exits with status 2.
 - A loop guard environment variable (`RPGKIT_UPGRADE_DONE`) is set across the re-exec to guarantee at most one upgrade attempt per invocation.
 
-## `rpgkit view-graph`
-
-Open the most recent `rpg.html` visualisation for the current workspace in your default browser. Walks up from the current directory to find the workspace root, then locates `rpg.html` under `<workspace>/.rpgkit/reports/` (preferred, may be checked into git) or `~/.rpgkit/workspaces/<hash>/data/` as a fallback for encoder output not yet promoted to reports.
-
-```bash
-rpgkit view-graph
-rpgkit view-graph --no-open      # print the file URI but do not launch a browser
-```
-
-### Exit codes
-
-| Code | Meaning |
-| ---- | ------- |
-| `0` | Found `rpg.html` and (unless `--no-open`) opened it |
-| `1` | Not inside an RPG-Kit workspace |
-| `2` | Workspace found but no `rpg.html` has been generated yet (run `/rpgkit.encode` or the forward pipeline first) |
-
 ### Provisioning sources
 
 Since `0.1.3`, `rpgkit init` and `rpgkit update` provision from two channels:
