@@ -79,7 +79,7 @@ MCP Server: search_rpg / explore_rpg / get_node_detail / list_rpg_tree
 
 ### RPG-Kit वास्तविक उपयोग में
 
-नीचे दी गई छवि इस रिपॉज़िटरी के लिए जनरेट किए गए ग्राफ़ विज़ुअलाइज़ेशन का एक भाग है। `/rpgkit.encode` चलाएँ और पूर्ण इंटरैक्टिव ग्राफ़ देखने के लिए `.rpgkit/data/rpg.html` खोलें।
+नीचे दी गई छवि इस रिपॉज़िटरी के लिए जनरेट किए गए ग्राफ़ विज़ुअलाइज़ेशन का एक भाग है। `/rpgkit.encode` चलाने के बाद, पूर्ण इंटरैक्टिव ग्राफ़ देखने के लिए `<workspace>/.rpgkit/reports/rpg.html` खोलें। वर्तमान वर्कस्पेस के हल किए गए पथ देखने के लिए `rpgkit version` चलाएँ।
 
 ![RPG-Kit repository graph visualization](../docs/rpgkit_visualized_graph.png)
 
@@ -103,6 +103,8 @@ rpgkit check
 uvx --from "git+https://github.com/microsoft/RPG-ZeroRepo.git#subdirectory=RPG-Kit" rpgkit init <project-name>
 ```
 
+`0.1.3` से, wheel pipeline scripts और slash-command templates को packaged assets के रूप में शामिल करता है, इसलिए `rpgkit init` ऑफ़लाइन वातावरणों (जैसे air-gapped या corporate proxy वातावरण) में भी काम करता है।
+
 ## Quick Start: नई रिपॉज़िटरी
 
 जब आप RPG-Kit से आवश्यकताओं को एक नए कोडबेस में बदलवाना चाहते हैं, तब इस मार्ग का उपयोग करें।
@@ -122,7 +124,6 @@ uvx --from "git+https://github.com/microsoft/RPG-ZeroRepo.git#subdirectory=RPG-K
    ```bash
    rpgkit init my-project --ai claude --script sh
    rpgkit init my-project --ai copilot
-   rpgkit init my-project --github-token $GITHUB_TOKEN
    ```
 
 2. **[वैकल्पिक]** अपने आवश्यकता दस्तावेज़ `my-project/docs/` में रखें।
@@ -145,7 +146,13 @@ uvx --from "git+https://github.com/microsoft/RPG-ZeroRepo.git#subdirectory=RPG-K
    [Optional] /rpgkit.rpg_edit <edit instructions>
    ```
 
-RPG-Kit क्रमिक रूप से `.rpgkit/data/rpg.json` बनाता है और इसका उपयोग आवश्यकताओं, प्लानिंग आउटपुट, जनरेटेड कोड और dependency जानकारी को संरेखित रखने के लिए करता है।
+> [!IMPORTANT]
+> **हर Coding Agent का इनवोकेशन थोड़ा अलग होता है**:
+>
+> - **Claude Code**: चैट में सीधे `/rpgkit.feature_spec ...` टाइप करें — slash command पहचाने जाते हैं और संबंधित workflow ट्रिगर हो जाता है।
+> - **GitHub Copilot CLI**: slash command समर्थित नहीं हैं (कस्टम agent समर्थित हैं), इसलिए पहले `/agent rpgkit.feature_spec` से लक्ष्य agent पर स्विच करें, फिर `start` टाइप करके इसका अंतर्निहित workflow चलाएँ।
+
+RPG-Kit क्रमिक रूप से `~/.rpgkit/workspaces/<hash>/data/rpg.json` बनाता है और इसका उपयोग आवश्यकताओं, प्लानिंग आउटपुट, जनरेटेड कोड और dependency जानकारी को संरेखित रखने के लिए करता है। आपके वर्कस्पेस की स्रोत फ़ाइलें दूषित नहीं होंगी।
 
 ## Quick Start: मौजूदा रिपॉज़िटरी
 
@@ -157,10 +164,8 @@ RPG-Kit क्रमिक रूप से `.rpgkit/data/rpg.json` बनात
 1. रिपॉज़िटरी रूट में RPG-Kit को आरंभीकृत करें और प्रारंभिक ग्राफ़ बनाएँ:
 
    ```bash
-   mkdir my-project
-   cp -r existing-repo/ my-project/
-   cd my-project
-   rpgkit init . --encode
+   cd existing-repo/
+   rpgkit init . --encode    # --encode वर्तमान कोड से RPG उत्पन्न करता है
    ```
 
    यदि आप गैर-खाली निर्देशिका के लिए पुष्टि संकेत को छोड़ना चाहते हैं:
@@ -171,7 +176,7 @@ RPG-Kit क्रमिक रूप से `.rpgkit/data/rpg.json` बनात
 
 2. रिपॉज़िटरी में अपना AI कोडिंग एजेंट लॉन्च करें।
 
-3. MCP टूल्स और स्लैश कमांड्स के माध्यम से जनरेटेड RPG का उपयोग करें:
+3. **[वैकल्पिक]** MCP टूल्स और स्लैश कमांड्स के माध्यम से जनरेटेड RPG का उपयोग करें। नीचे दिए गए कमांड केवल मैन्युअल रूप से चलाने पर आवश्यक हैं:
 
    ```text
    /rpgkit.encode                                  # आवश्यकता पड़ने पर पूर्ण RPG को पुनर्निर्मित करें
@@ -179,37 +184,53 @@ RPG-Kit क्रमिक रूप से `.rpgkit/data/rpg.json` बनात
    /rpgkit.rpg_edit <edit instructions>            # ग्राफ़-जागरूक कोड संपादन
    ```
 
-4. कमिट के बाद, RPG-Kit hooks `.rpgkit/data/rpg.json`, `.rpgkit/data/dep_graph.json` और `.rpgkit/data/rpg.html` को कोड परिवर्तनों के साथ संरेखित रखते हैं। यदि hook विफल हो जाता है या छोड़ दिया जाता है, तो `/rpgkit.update_rpg` चलाएँ।
+4. हर commit के बाद, RPG-Kit द्वारा इंस्टॉल किया गया git hook स्वचालित रूप से `rpgkit hook <name>` dispatcher को कॉल करता है, RPG को अपडेट करता है और उसे कोड परिवर्तनों के साथ संरेखित रखता है। यदि hook विफल हो जाता है या छोड़ दिया जाता है, तो `/rpgkit.update_rpg` मैन्युअल रूप से चलाएँ।
 
 ## `rpgkit init` के बाद क्या होता है
 
-`rpgkit init` आपकी स्रोत फ़ाइलों को संशोधित नहीं करता है। यह आपके कोड के साथ-साथ कमांड परिभाषाएँ, रनटाइम स्क्रिप्ट्स, MCP कॉन्फ़िगरेशन और जनरेटेड ग्राफ़ डेटा जोड़ता है।
+`rpgkit init` आपकी स्रोत फ़ाइलों को संशोधित नहीं करता है, **और आपके वर्कस्पेस में रनटाइम स्टेट नहीं लिखता है**। यह आपके वर्कस्पेस में केवल command definitions, MCP कॉन्फ़िगरेशन और hooks जोड़ता है। RPG-Kit का रनटाइम डेटा (outputs और logs) home-side निर्देशिका `~/.rpgkit/workspaces/<hash>/` के अंतर्गत रखा जाता है, जो वर्कस्पेस के absolute path से जनित hash द्वारा अलग किया जाता है।
 
 ```text
 my-project/
 ├── docs/                 # /rpgkit.feature_spec के लिए वैकल्पिक आवश्यकता दस्तावेज़
-├── .github/ or .claude/  # AI सहायक कमांड परिभाषाएँ और सेटिंग्स
+├── .github/ or .claude/  # Coding Agent कमांड परिभाषाएँ और सेटिंग्स
 ├── .vscode/              # लागू होने पर Copilot/VS Code MCP कॉन्फ़िगरेशन
-└── .rpgkit/              # RPG-Kit रनटाइम
-    ├── scripts/          # पाइपलाइन स्क्रिप्ट्स और सहायक पैकेज
-    ├── data/             # जनरेटेड आउटपुट, जिसमें rpg.json और dep_graph.json शामिल हैं
-    ├── logs/             # प्रति-चरण निष्पादन लॉग
-    └── reports/          # जनरेट होने पर समीक्षा और निदान रिपोर्ट
+├── .rpgkit/              # जनरेटेड रिपोर्ट और कॉन्फ़िगरेशन फ़ाइलें
+└── .git/hooks/           # rpgkit init द्वारा इंस्टॉल किए गए post-commit / post-merge (प्रत्येक hook केवल एक पंक्ति: `rpgkit hook <name>`)
 ```
 
 पूर्ण लेआउट और डेटा फ़ाइल संदर्भ के लिए [docs/project-structure.md](docs/project-structure.md) देखें।
 
+## RPG-Kit अपडेट करें
+
+```bash
+uv tool install rpgkit-cli \
+   --from "git+https://github.com/microsoft/RPG-ZeroRepo.git#subdirectory=RPG-Kit" \
+   --force \
+   --reinstall
+
+# किसी मौजूदा वर्कस्पेस को अपडेट करें
+cd <your-workspace>
+rpgkit update
+```
+
 ## समर्थित प्लेटफ़ॉर्म्स
 
-| प्लेटफ़ॉर्म              | Claude Code | GitHub Copilot | Codex |
-| ------------------------ | ----------- | -------------- | ----- |
-| CLI उपयोग                | ✅          | ✅ (No MCP)    | ⌛    |
-| VS Code एक्सटेंशन उपयोग  | ✅          | ✅             | ⌛    |
+**Coding Agent समर्थन**:
 
-| स्क्रिप्ट | Linux | Windows | Mac |
-| --------- | ----- | ------- | --- |
-| sh        | ✅    | ⌛      | ⌛  |
-| ps        | N/A   | ⌛      | ⌛  |
+| Agent          | CLI उपयोग | VS Code एक्सटेंशन उपयोग |
+| -------------- | --------- | ----------------------- |
+| Claude Code    | ✅        | ✅                      |
+| GitHub Copilot | ✅        | ✅                      |
+| Codex          | ⌛        | ⌛                      |
+
+**ऑपरेटिंग सिस्टम समर्थन**:
+
+| ऑपरेटिंग सिस्टम | स्थिति |
+| ---------------- | ------ |
+| Linux            | ✅     |
+| macOS            | ⌛     |
+| Windows          | ⌛     |
 
 ## दस्तावेज़ीकरण
 
@@ -227,12 +248,6 @@ my-project/
 ## समस्या-निवारण
 
 **AI सहायक CLI नहीं मिला:** `rpgkit check` चलाएँ, चयनित सहायक CLI को इंस्टॉल और प्रमाणित करें, फिर `rpgkit init` या `rpgkit update` पुनः चलाएँ।
-
-**MCP टूल्स `rpg_unavailable` की रिपोर्ट करते हैं:** `.rpgkit/data/rpg.json` बनाने के लिए `/rpgkit.encode` चलाएँ।
-
-**वृद्धिशील अपडेट विफल:** `.rpgkit/logs/update_rpg.log` की जाँच करें, फिर `/rpgkit.update_rpg` चलाएँ।
-
-**रेट लिमिट्स या निजी रिपॉज़िटरी एक्सेस के कारण टेम्पलेट डाउनलोड विफल:** `--github-token $GITHUB_TOKEN` पास करें या `GH_TOKEN` / `GITHUB_TOKEN` सेट करें।
 
 ## लाइसेंस
 

@@ -79,7 +79,7 @@ MCP Server: search_rpg / explore_rpg / get_node_detail / list_rpg_tree
 
 ### RPG-Kit in action
 
-Below is part of the graph visualization generated for this repository. Run `/rpgkit.encode` then `rpgkit view-graph` to open the full interactive graph in your browser (the underlying file is `<workspace>/.rpgkit/reports/rpg.html`).
+Below is part of the graph visualization generated for this repository. After running `/rpgkit.encode`, you can open `<workspace>/.rpgkit/reports/rpg.html` to browse the full interactive graph. Run `rpgkit version` to see the resolved paths for the current workspace.
 
 ![RPG-Kit repository graph visualization](../docs/rpgkit_visualized_graph.png)
 
@@ -103,30 +103,7 @@ rpgkit check
 uvx --from "git+https://github.com/microsoft/RPG-ZeroRepo.git#subdirectory=RPG-Kit" rpgkit init <project-name>
 ```
 
-Since `0.1.3` the wheel ships the pipeline scripts and slash-command templates as packaged assets, so `rpgkit init` works offline (air-gapped, corporate proxy, etc.). To force the older GitHub-release-zip download path — e.g. to grab prompts newer than the installed CLI — pass `--legacy-download`.
-
-### Updating RPG-Kit
-
-Two flavours of update exist; pick the one that matches what you want to change.
-
-```bash
-# (A) Refresh THIS workspace from the currently-installed CLI version
-#     (offline, fast, idempotent)
-cd my-project
-rpgkit update
-
-# (B) Upgrade the CLI itself, then refresh THIS workspace
-#     (network — uv / pipx / pip is auto-detected)
-cd my-project
-rpgkit update --pull
-
-# (C) Bypass the bundled assets and pull from the latest GitHub release zip
-#     (useful when a prompt fix has shipped but the CLI release has not yet)
-cd my-project
-rpgkit update --legacy-download
-```
-
-`rpgkit update` records the channel you chose in `~/.rpgkit/workspaces/<hash>/.meta.toml` so subsequent runs default to the same source. Your edits to `<workspace>/.rpgkit/config.toml` (see [`docs/configuration.md`](docs/configuration.md)) are preserved across updates.
+Since `0.1.3`, the wheel ships the pipeline scripts and slash-command templates as packaged assets, so `rpgkit init` works offline (for example in air-gapped or corporate proxy environments).
 
 ## Quick Start: New Repository
 
@@ -147,7 +124,6 @@ Use this path when you want RPG-Kit to turn requirements into a new codebase.
    ```bash
    rpgkit init my-project --ai claude --script sh
    rpgkit init my-project --ai copilot
-   rpgkit init my-project --github-token $GITHUB_TOKEN
    ```
 
 2. **[Optional]** place your requirement documents in `my-project/docs/`.
@@ -170,7 +146,13 @@ Use this path when you want RPG-Kit to turn requirements into a new codebase.
    [Optional] /rpgkit.rpg_edit <edit instructions>
    ```
 
-RPG-Kit progressively builds an `rpg.json` (under `~/.rpgkit/workspaces/<hash>/data/`) and uses it to keep requirements, planning artifacts, generated code, and dependency information aligned. Runtime state lives outside your workspace so your git history stays clean; only `<workspace>/.rpgkit/{config.toml,reports/}` belong in the repo.
+> [!IMPORTANT]
+> **Coding Agents are invoked slightly differently**:
+>
+> - **Claude Code**: type `/rpgkit.feature_spec ...` directly in the chat — slash commands are recognised and dispatch the matching workflow.
+> - **GitHub Copilot CLI**: slash commands are not supported (custom agents are), so first run `/agent rpgkit.feature_spec` to switch to the target agent, then type `start` to run its built-in workflow.
+
+RPG-Kit progressively builds `rpg.json` in the home-side runtime directory (`~/.rpgkit/workspaces/<hash>/data/rpg.json`) and uses it to keep requirements, planning artifacts, generated code, and dependency information aligned. Your workspace source files are not polluted.
 
 ## Quick Start: Existing Repository
 
@@ -182,10 +164,8 @@ Use this path when you already have a repository and want an AI agent to underst
 1. Initialize RPG-Kit in the repository root and build the initial graph:
 
    ```bash
-   mkdir my-project
-   cp -r existing-repo/ my-project/
-   cd my-project
-   rpgkit init . --encode
+   cd existing-repo/
+   rpgkit init . --encode    # --encode builds the RPG from the current code
    ```
 
    If you want to skip the confirmation prompt for a non-empty directory:
@@ -196,7 +176,7 @@ Use this path when you already have a repository and want an AI agent to underst
 
 2. Launch your AI coding agent in the repository.
 
-3. Use the generated RPG through MCP tools and slash commands:
+3. **[Optional]** Use the generated RPG through MCP tools and slash commands. The following commands are only needed when run manually:
 
    ```text
    /rpgkit.encode                                  # rebuild the full RPG when needed
@@ -204,37 +184,53 @@ Use this path when you already have a repository and want an AI agent to underst
    /rpgkit.rpg_edit <edit instructions>            # graph-aware code edit
    ```
 
-4. After commits, RPG-Kit hooks keep the workspace's `rpg.json`, `dep_graph.json` (under `~/.rpgkit/workspaces/<hash>/data/`) and the user-facing `rpg.html` (under `<workspace>/.rpgkit/reports/`) aligned with code changes. If the hook fails or is skipped, run `/rpgkit.update_rpg`.
+4. After each commit, the git hook installed by RPG-Kit automatically calls the `rpgkit hook <name>` dispatcher to update the RPG and keep it aligned with code changes. If the hook fails or is skipped, run `/rpgkit.update_rpg` manually.
 
 ## What happens after `rpgkit init`
 
-`rpgkit init` does not modify your source files. It adds command definitions, runtime scripts, MCP configuration, and generated graph data alongside your code.
+`rpgkit init` does not modify your source files, **and it does not write runtime state into your workspace**. It only adds command definitions, MCP configuration, and hooks to your workspace. RPG-Kit runtime data (artifacts and logs) lives under the home-side directory `~/.rpgkit/workspaces/<hash>/`, isolated by a hash derived from the workspace's absolute path.
 
 ```text
 my-project/
 ├── docs/                 # Optional requirement docs for /rpgkit.feature_spec
-├── .github/ or .claude/  # AI assistant command definitions and settings
+├── .github/ or .claude/  # Coding Agent command definitions and settings
 ├── .vscode/              # Copilot/VS Code MCP configuration when applicable
-└── .rpgkit/              # RPG-Kit runtime
-    ├── scripts/          # Pipeline scripts and support packages
-    ├── data/             # Generated artifacts, including rpg.json and dep_graph.json
-    ├── logs/             # Per-stage execution logs
-    └── reports/          # Review and diagnostic reports when generated
+├── .rpgkit/              # Generated reports and configuration files
+└── .git/hooks/           # post-commit / post-merge installed by rpgkit init (each hook is one line: `rpgkit hook <name>`)
 ```
 
 See [docs/project-structure.md](docs/project-structure.md) for the full layout and data file reference.
 
+## Updating RPG-Kit
+
+```bash
+uv tool install rpgkit-cli \
+   --from "git+https://github.com/microsoft/RPG-ZeroRepo.git#subdirectory=RPG-Kit" \
+   --force \
+   --reinstall
+
+# Update an existing workspace
+cd <your-workspace>
+rpgkit update
+```
+
 ## Supported Platforms
 
-| Platform                | Claude Code | GitHub Copilot | Codex |
-| ----------------------- | ----------- | -------------- | ----- |
-| CLI usage               | ✅          | ✅ (No MCP)    | ⌛    |
-| VS Code extension usage | ✅          | ✅             | ⌛    |
+**Coding Agent support**:
 
-| Script | Linux | Windows | Mac |
-| ------ | ----- | ------- | --- |
-| sh     | ✅    | ⌛      | ⌛  |
-| ps     | N/A   | ⌛      | ⌛  |
+| Agent          | CLI usage | VS Code extension usage |
+| -------------- | --------- | ----------------------- |
+| Claude Code    | ✅        | ✅                      |
+| GitHub Copilot | ✅        | ✅                      |
+| Codex          | ⌛        | ⌛                      |
+
+**Operating system support**:
+
+| Operating system | Status |
+| ---------------- | ------ |
+| Linux            | ✅     |
+| macOS            | ⌛     |
+| Windows          | ⌛     |
 
 ## Documentation
 
@@ -252,12 +248,6 @@ See [docs/project-structure.md](docs/project-structure.md) for the full layout a
 ## Troubleshooting
 
 **AI assistant CLI not found:** run `rpgkit check`, install and authenticate the selected assistant CLI, then rerun `rpgkit init` or `rpgkit update`.
-
-**MCP tools report `rpg_unavailable`:** run `/rpgkit.encode` to create the workspace's `rpg.json` (under `~/.rpgkit/workspaces/<hash>/data/`).
-
-**Incremental update failed:** inspect `~/.rpgkit/workspaces/<hash>/logs/update_rpg.log`, then run `/rpgkit.update_rpg`.
-
-**Template download fails due to rate limits or private repo access:** pass `--github-token $GITHUB_TOKEN` or set `GH_TOKEN` / `GITHUB_TOKEN`.
 
 ## License
 

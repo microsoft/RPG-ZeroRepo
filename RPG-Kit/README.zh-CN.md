@@ -8,7 +8,6 @@
   <a href="README.hi-IN.md">हिन्दी</a>
 </p>
 
-
 ## 让编码智能体先规划，再编辑
 
 编码智能体擅长局部编辑，但仓库级任务如果缺少稳定的规划结构往往会失败：需求漂移、架构决策丢失、多文件生成前后不一致、更新可能错过隐藏依赖。
@@ -35,7 +34,6 @@ RPG-Kit 为 Claude Code 和 GitHub Copilot 提供一个面向仓库级编码的*
 
 <details>
 <summary>完整的命令级工作流图</summary>
-
 
 ```text
 Forward Direction: Requirements → RPG → Code
@@ -81,7 +79,7 @@ MCP Server: search_rpg / explore_rpg / get_node_detail / list_rpg_tree
 
 ### RPG-Kit 实际效果
 
-下图是为本仓库生成的图可视化的一部分。运行 `/rpgkit.encode`，然后打开 `.rpgkit/reports/rpg.html` 浏览完整的交互式图。
+下图是为本仓库生成的图可视化的一部分。运行 `/rpgkit.encode` 后，可以打开 `<workspace>/.rpgkit/reports/rpg.html` 浏览完整的交互式图。运行 `rpgkit version` 可以看到当前工作区的具体路径。
 
 ![RPG-Kit repository graph visualization](../docs/rpgkit_visualized_graph.png)
 
@@ -104,6 +102,8 @@ rpgkit check
 # 一次性使用
 uvx --from "git+https://github.com/microsoft/RPG-ZeroRepo.git#subdirectory=RPG-Kit" rpgkit init <project-name>
 ```
+
+从 `0.1.3` 开始，wheel 会把 pipeline scripts 和 slash-command templates 作为打包资源一起发布，因此 `rpgkit init` 可以离线工作（例如 air-gapped 环境、公司代理环境等）。
 
 ## 快速开始：新仓库
 
@@ -146,7 +146,11 @@ uvx --from "git+https://github.com/microsoft/RPG-ZeroRepo.git#subdirectory=RPG-K
    [Optional] /rpgkit.rpg_edit <edit instructions>
    ```
 
-   注意：copilot不支持自定义命令，需要先 /agent 切换到指定agent，然后输入 start 以开始运行
+> [!IMPORTANT]
+> **不同 Coding Agent 的调用方式略有不同**：
+>
+> - **Claude Code**：直接在对话中输入 `/rpgkit.feature_spec ...`，slash command 会被识别并触发对应 workflow。
+> - **GitHub Copilot CLI**：不支持 slash command（但支持自定义 agent），需要先 `/agent rpgkit.feature_spec` 切换到目标 agent，然后输入 `start` 让它执行内置的 workflow。
 
 RPG-Kit 会渐进式地在 home-side 运行时目录（`~/.rpgkit/workspaces/<hash>/data/rpg.json`）里创建 `rpg.json`，并用它把需求、规划产物、生成的代码和依赖信息保持对齐。你的工作区源文件不会被污染。
 
@@ -160,9 +164,8 @@ RPG-Kit 会渐进式地在 home-side 运行时目录（`~/.rpgkit/workspaces/<ha
 1. 在仓库根目录初始化 RPG-Kit 并构建初始图：
 
    ```bash
-   mkdir my-project
    cd existing-repo/
-   rpgkit init . --encode # --encode 会根据当前的代码生成rpg
+   rpgkit init . --encode # --encode 会根据当前的代码生成 RPG
    ```
 
    如果你想跳过非空目录的确认提示：
@@ -181,21 +184,35 @@ RPG-Kit 会渐进式地在 home-side 运行时目录（`~/.rpgkit/workspaces/<ha
    /rpgkit.rpg_edit <edit instructions>            # 图感知的代码编辑
    ```
 
-4. 每次 commit 后，RPG-Kit 安装的 git hook 会自动调用 `rpgkit hook <name>` 调度器，更新RPG，与代码变更保持对齐。如果 hook 失败或被跳过，可以手动运行 `/rpgkit.update_rpg`。
+4. 每次 commit 后，RPG-Kit 安装的 git hook 会自动调用 `rpgkit hook <name>` 调度器，更新 RPG，与代码变更保持对齐。如果 hook 失败或被跳过，可以手动运行 `/rpgkit.update_rpg`。
 
 ## `rpgkit init` 之后会发生什么
 
-`rpgkit init` 不会修改你的源文件，**也不会在你的工作区写入运行时状态**。它只在你的工作区添加命令定义、MCP 配置和 hooks，所有 RPG-Kit 的运行时数据（脚本、产物、日志、报告）都放在 home-side 目录 `~/.rpgkit/workspaces/<hash>/` 下，由工作区绝对路径派生的 hash 隔离。
+`rpgkit init` 不会修改你的源文件，**也不会在你的工作区写入运行时状态**。它只在你的工作区添加命令定义、MCP 配置和 hooks，所有 RPG-Kit 的运行时数据（产物、日志）都放在 home-side 目录 `~/.rpgkit/workspaces/<hash>/` 下，由工作区绝对路径派生的 hash 隔离。
 
 ```text
 my-project/
 ├── docs/                 # /rpgkit.feature_spec 的可选需求文档
 ├── .github/ or .claude/  # AI 助手的命令定义和设置
 ├── .vscode/              # 适用时的 Copilot/VS Code MCP 配置
-├── .rpgkit/              # 包含生成的报告 和 配置文件
+├── .rpgkit/              # 包含生成的报告和配置文件
+└── .git/hooks/           # rpgkit init 装的 post-commit / post-merge（每个 hook 仅一行：`rpgkit hook <name>`）
 ```
 
 完整的目录布局和数据文件参考见 [docs/project-structure.md](docs/project-structure.md)。
+
+## 更新 RPG-Kit
+
+```bash
+uv tool install rpgkit-cli \
+  --from "git+https://github.com/microsoft/RPG-ZeroRepo.git#subdirectory=RPG-Kit" \
+  --force \
+  --reinstall
+
+# 对已有工作区进行更新
+cd <your-workspace>
+rpgkit update
+```
 
 ## 支持的平台
 

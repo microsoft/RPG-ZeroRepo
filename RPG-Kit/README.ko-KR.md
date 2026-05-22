@@ -79,7 +79,7 @@ MCP Server: search_rpg / explore_rpg / get_node_detail / list_rpg_tree
 
 ### RPG-Kit 실제 사용 예
 
-아래 이미지는 이 저장소에서 생성된 그래프 시각화의 일부입니다. `/rpgkit.encode` 를 실행하고 `.rpgkit/data/rpg.html` 을 열면 전체 인터랙티브 그래프를 탐색할 수 있습니다.
+아래 이미지는 이 저장소에서 생성된 그래프 시각화의 일부입니다. `/rpgkit.encode` 를 실행한 후 `<workspace>/.rpgkit/reports/rpg.html` 을 열면 전체 인터랙티브 그래프를 탐색할 수 있습니다. 현재 워크스페이스의 해결된 경로를 보려면 `rpgkit version` 을 실행하세요.
 
 ![RPG-Kit repository graph visualization](../docs/rpgkit_visualized_graph.png)
 
@@ -103,6 +103,8 @@ rpgkit check
 uvx --from "git+https://github.com/microsoft/RPG-ZeroRepo.git#subdirectory=RPG-Kit" rpgkit init <project-name>
 ```
 
+`0.1.3` 부터 wheel은 pipeline scripts와 slash-command templates를 packaged assets로 함께 제공하므로, `rpgkit init` 은 오프라인 환경(air-gapped 환경, 회사 프록시 환경 등)에서도 동작합니다.
+
 ## Quick Start: 새 저장소
 
 요구사항을 새 코드베이스로 만들고 싶을 때 이 경로를 사용하세요.
@@ -122,7 +124,6 @@ uvx --from "git+https://github.com/microsoft/RPG-ZeroRepo.git#subdirectory=RPG-K
    ```bash
    rpgkit init my-project --ai claude --script sh
    rpgkit init my-project --ai copilot
-   rpgkit init my-project --github-token $GITHUB_TOKEN
    ```
 
 2. **[선택]** 요구사항 문서를 `my-project/docs/` 에 둡니다.
@@ -145,7 +146,13 @@ uvx --from "git+https://github.com/microsoft/RPG-ZeroRepo.git#subdirectory=RPG-K
    [Optional] /rpgkit.rpg_edit <edit instructions>
    ```
 
-RPG-Kit은 `.rpgkit/data/rpg.json` 을 점진적으로 생성하고, 이를 사용해 요구사항, 계획 산출물, 생성된 코드, 의존성 정보를 정합 상태로 유지합니다.
+> [!IMPORTANT]
+> **Coding Agent마다 호출 방식이 조금씩 다릅니다**:
+>
+> - **Claude Code**: 채팅에 직접 `/rpgkit.feature_spec ...` 을 입력하면 slash command가 인식되어 해당 workflow가 트리거됩니다.
+> - **GitHub Copilot CLI**: slash command는 지원하지 않으나(커스텀 agent는 지원), 먼저 `/agent rpgkit.feature_spec` 으로 대상 agent로 전환한 다음 `start` 를 입력해 내장된 workflow를 실행합니다.
+
+RPG-Kit은 `~/.rpgkit/workspaces/<hash>/data/rpg.json` 을 점진적으로 생성하고, 이를 사용해 요구사항, 계획 산출물, 생성된 코드, 의존성 정보를 정합 상태로 유지합니다. 워크스페이스의 소스 파일은 오염되지 않습니다.
 
 ## Quick Start: 기존 저장소
 
@@ -157,10 +164,8 @@ RPG-Kit은 `.rpgkit/data/rpg.json` 을 점진적으로 생성하고, 이를 사�
 1. 저장소 루트에서 RPG-Kit을 초기화하고 초기 그래프를 생성합니다:
 
    ```bash
-   mkdir my-project
-   cp -r existing-repo/ my-project/
-   cd my-project
-   rpgkit init . --encode
+   cd existing-repo/
+   rpgkit init . --encode    # --encode 는 현재 코드로부터 RPG를 생성합니다
    ```
 
    비어 있지 않은 디렉터리에 대한 확인 프롬프트를 건너뛰려면:
@@ -171,7 +176,7 @@ RPG-Kit은 `.rpgkit/data/rpg.json` 을 점진적으로 생성하고, 이를 사�
 
 2. 저장소에서 AI 코딩 에이전트를 실행합니다.
 
-3. MCP 도구와 슬래시 커맨드를 통해 생성된 RPG를 사용합니다:
+3. **[선택]** MCP 도구와 슬래시 커맨드를 통해 생성된 RPG를 사용합니다. 아래 명령은 수동으로 실행할 때만 필요합니다:
 
    ```text
    /rpgkit.encode                                  # 필요할 때 전체 RPG 재구축
@@ -179,37 +184,53 @@ RPG-Kit은 `.rpgkit/data/rpg.json` 을 점진적으로 생성하고, 이를 사�
    /rpgkit.rpg_edit <edit instructions>            # 그래프 인식 코드 편집
    ```
 
-4. 커밋 후, RPG-Kit 훅이 `.rpgkit/data/rpg.json`, `.rpgkit/data/dep_graph.json`, `.rpgkit/data/rpg.html` 을 코드 변경에 맞춰 동기화합니다. 훅이 실패하거나 건너뛰어진 경우 `/rpgkit.update_rpg` 를 실행하세요.
+4. 각 commit 후, RPG-Kit이 설치한 git hook이 `rpgkit hook <name>` 디스패처를 자동으로 호출해 RPG를 업데이트하고 코드 변경과 정합된 상태로 유지합니다. hook이 실패하거나 건너뛰어진 경우 `/rpgkit.update_rpg` 를 수동으로 실행하세요.
 
 ## `rpgkit init` 이후 일어나는 일
 
-`rpgkit init` 은 소스 파일을 수정하지 않습니다. 코드 옆에 커맨드 정의, 런타임 스크립트, MCP 구성, 생성된 그래프 데이터를 추가합니다.
+`rpgkit init` 은 소스 파일을 수정하지 않습니다. 또한 **워크스페이스에 런타임 상태를 기록하지도 않습니다**. 워크스페이스에는 command 정의, MCP 구성, hooks만 추가합니다. RPG-Kit의 런타임 데이터(산출물, 로그)는 home-side 디렉터리 `~/.rpgkit/workspaces/<hash>/` 아래에 배치되며, 워크스페이스 절대 경로에서 파생된 hash로 격리됩니다.
 
 ```text
 my-project/
 ├── docs/                 # /rpgkit.feature_spec 용 선택적 요구사항 문서
-├── .github/ or .claude/  # AI 어시스턴트 커맨드 정의 및 설정
+├── .github/ or .claude/  # Coding Agent 커맨드 정의 및 설정
 ├── .vscode/              # 해당하는 경우 Copilot/VS Code MCP 구성
-└── .rpgkit/              # RPG-Kit 런타임
-    ├── scripts/          # 파이프라인 스크립트와 지원 패키지
-    ├── data/             # 생성된 산출물 (rpg.json과 dep_graph.json 포함)
-    ├── logs/             # 단계별 실행 로그
-    └── reports/          # 생성 시의 리뷰 및 진단 리포트
+├── .rpgkit/              # 생성된 리포트와 설정 파일
+└── .git/hooks/           # rpgkit init 이 설치하는 post-commit / post-merge (각 hook은 단 한 줄: `rpgkit hook <name>`)
 ```
 
 전체 레이아웃과 데이터 파일 참조는 [docs/project-structure.md](docs/project-structure.md) 를 참조하세요.
 
+## RPG-Kit 업데이트
+
+```bash
+uv tool install rpgkit-cli \
+   --from "git+https://github.com/microsoft/RPG-ZeroRepo.git#subdirectory=RPG-Kit" \
+   --force \
+   --reinstall
+
+# 기존 워크스페이스 업데이트
+cd <your-workspace>
+rpgkit update
+```
+
 ## 지원 플랫폼
 
-| 플랫폼              | Claude Code | GitHub Copilot | Codex |
-| ------------------- | ----------- | -------------- | ----- |
-| CLI 사용            | ✅          | ✅ (No MCP)    | ⌛    |
-| VS Code 확장 사용   | ✅          | ✅             | ⌛    |
+**Coding Agent 지원**:
 
-| 스크립트 | Linux | Windows | Mac |
-| -------- | ----- | ------- | --- |
-| sh       | ✅    | ⌛      | ⌛  |
-| ps       | N/A   | ⌛      | ⌛  |
+| Agent          | CLI 사용 | VS Code 확장 사용 |
+| -------------- | -------- | ----------------- |
+| Claude Code    | ✅        | ✅                 |
+| GitHub Copilot | ✅        | ✅                 |
+| Codex          | ⌛        | ⌛                 |
+
+**운영 체제 지원**:
+
+| 운영 체제 | 상태 |
+| --------- | ---- |
+| Linux     | ✅    |
+| macOS     | ⌛    |
+| Windows   | ⌛    |
 
 ## 문서
 
@@ -227,12 +248,6 @@ my-project/
 ## 트러블슈팅
 
 **AI 어시스턴트 CLI를 찾을 수 없음:** `rpgkit check` 를 실행하고, 선택한 어시스턴트 CLI를 설치 및 인증한 다음 `rpgkit init` 또는 `rpgkit update` 를 다시 실행하세요.
-
-**MCP 도구가 `rpg_unavailable` 을 보고함:** `/rpgkit.encode` 를 실행해 `.rpgkit/data/rpg.json` 을 생성하세요.
-
-**증분 업데이트 실패:** `.rpgkit/logs/update_rpg.log` 를 확인한 다음 `/rpgkit.update_rpg` 를 실행하세요.
-
-**속도 제한 또는 비공개 저장소 접근 권한으로 인해 템플릿 다운로드 실패:** `--github-token $GITHUB_TOKEN` 을 전달하거나 `GH_TOKEN` / `GITHUB_TOKEN` 을 설정하세요.
 
 ## 라이선스
 
