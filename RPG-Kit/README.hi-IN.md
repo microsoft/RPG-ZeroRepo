@@ -152,7 +152,7 @@ uvx --from "git+https://github.com/microsoft/RPG-ZeroRepo.git#subdirectory=RPG-K
 > - **Claude Code**: चैट में सीधे `/rpgkit.feature_spec ...` टाइप करें — slash command पहचाने जाते हैं और संबंधित workflow ट्रिगर हो जाता है।
 > - **GitHub Copilot CLI**: slash command समर्थित नहीं हैं (कस्टम agent समर्थित हैं), इसलिए पहले `/agent rpgkit.feature_spec` से लक्ष्य agent पर स्विच करें, फिर `start` टाइप करके इसका अंतर्निहित workflow चलाएँ।
 
-RPG-Kit क्रमिक रूप से `~/.rpgkit/workspaces/<hash>/data/rpg.json` बनाता है और इसका उपयोग आवश्यकताओं, प्लानिंग आउटपुट, जनरेटेड कोड और dependency जानकारी को संरेखित रखने के लिए करता है। आपके वर्कस्पेस की स्रोत फ़ाइलें दूषित नहीं होंगी।
+RPG-Kit क्रमिक रूप से `~/.rpgkit/workspaces/<workspace-id>/data/rpg.json` बनाता है और इसका उपयोग आवश्यकताओं, प्लानिंग आउटपुट, जनरेटेड कोड और dependency जानकारी को संरेखित रखने के लिए करता है। आपके वर्कस्पेस की स्रोत फ़़ाइलें दूषित नहीं होंगी।
 
 ## Quick Start: मौजूदा रिपॉज़िटरी
 
@@ -188,7 +188,7 @@ RPG-Kit क्रमिक रूप से `~/.rpgkit/workspaces/<hash>/data/rp
 
 ## `rpgkit init` के बाद क्या होता है
 
-`rpgkit init` आपकी स्रोत फ़ाइलों को संशोधित नहीं करता है, **और आपके वर्कस्पेस में रनटाइम स्टेट नहीं लिखता है**। यह आपके वर्कस्पेस में केवल command definitions, MCP कॉन्फ़िगरेशन और hooks जोड़ता है। RPG-Kit का रनटाइम डेटा (outputs और logs) home-side निर्देशिका `~/.rpgkit/workspaces/<hash>/` के अंतर्गत रखा जाता है, जो वर्कस्पेस के absolute path से जनित hash द्वारा अलग किया जाता है।
+`rpgkit init` आपकी स्रोत फ़़ाइलों को संशोधित नहीं करता है, **और आपके वर्कस्पेस में रनटाइम स्टेट नहीं लिखता है**। यह आपके वर्कस्पेस में केवल command definitions, MCP कॉन्फ़़िगरेशन और hooks जोड़ता है। RPG-Kit का रनटाइम डेटा (outputs और logs) home-side निर्देशिका `~/.rpgkit/workspaces/<workspace-id>/` के अंतर्गत रखा जाता है, जहाँ `<workspace-id>` वर्कस्पेस के absolute path से जनित एक पठनीय slug है (उदाहरण: `home-hys-projects-myrepo`)।
 
 ```text
 my-project/

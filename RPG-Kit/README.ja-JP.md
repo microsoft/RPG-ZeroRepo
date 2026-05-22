@@ -152,7 +152,7 @@ uvx --from "git+https://github.com/microsoft/RPG-ZeroRepo.git#subdirectory=RPG-K
 > - **Claude Code**：チャットにそのまま `/rpgkit.feature_spec ...` と入力します。slash command が認識され、対応する workflow がトリガーされます。
 > - **GitHub Copilot CLI**：slash command はサポートされません（カスタム agent はサポート）。まず `/agent rpgkit.feature_spec` で目的の agent に切り替え、その後 `start` と入力して内蔵の workflow を実行します。
 
-RPG-Kit は `~/.rpgkit/workspaces/<hash>/data/rpg.json` を段階的に作成し、それを使って要件・計画成果物・生成コード・依存情報を整合した状態に保ちます。ワークスペースのソースファイルは汚染されません。
+RPG-Kit は `~/.rpgkit/workspaces/<workspace-id>/data/rpg.json` を段階的に作成し、それを使って要件・計画成果物・生成コード・依存情報を整合した状態に保ちます。ワークスペースのソースファイルは汚染されません。
 
 ## クイックスタート: 既存リポジトリ
 
@@ -188,7 +188,7 @@ RPG-Kit は `~/.rpgkit/workspaces/<hash>/data/rpg.json` を段階的に作成し
 
 ## `rpgkit init` の後に起きること
 
-`rpgkit init` はソースファイルを変更しません。また、**ワークスペースにランタイム状態を書き込みません**。ワークスペースには command 定義、MCP 設定、および hooks のみを追加します。RPG-Kit のランタイムデータ（成果物、ログ）は home-side ディレクトリ `~/.rpgkit/workspaces/<hash>/` 下に配置され、ワークスペースの絶対パスから派生した hash で隔離されます。
+`rpgkit init` はソースファイルを変更しません。また、**ワークスペースにランタイム状態を書き込みません**。ワークスペースには command 定義、MCP 設定、および hooks のみを追加します。RPG-Kit のランタイムデータ（成果物、ログ）は home-side ディレクトリ `~/.rpgkit/workspaces/<workspace-id>/` 下に配置されます。`<workspace-id>` はワークスペースの絶対パスから導出される可読な slug です（例: `home-hys-projects-myrepo`）。
 
 ```text
 my-project/

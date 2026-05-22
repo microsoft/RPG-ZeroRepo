@@ -96,7 +96,7 @@ Since `0.1.3`, `rpgkit init` and `rpgkit update` provision from two channels:
 | Packaged assets (bundle) | Default. Pulled from `rpgkit_cli/core_pack/` inside the installed wheel | No |
 | GitHub release zip (legacy) | `--legacy-download`, `--pre`, or `--script ps`, or when the bundle is unavailable (e.g. editable installs) | Yes |
 
-`rpgkit init` records the chosen channel (`bundle` or `legacy`) in `~/.rpgkit/workspaces/<hash>/.meta.toml` so subsequent `rpgkit update` invocations default to the same channel. Override with the flag of your choice at any time.
+`rpgkit init` records the chosen channel (`bundle` or `legacy`) in `~/.rpgkit/workspaces/<workspace-id>/.meta.toml` so subsequent `rpgkit update` invocations default to the same channel. Override with the flag of your choice at any time.
 
 Verify that required tools are installed.
 

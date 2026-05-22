@@ -14,7 +14,7 @@ Directory layout (``~/.rpgkit/`` home storage):
     └── .git/                     ← single git repo at the workspace root
 
     ~/.rpgkit/                                  ← user-global storage
-    └── workspaces/<hash>/
+    └── workspaces/<workspace-id>/
         ├── .meta.toml                          ← channel, timestamps, version
         ├── .git/                               ← Plan-03 inner snapshot repo
         ├── data/                               ← rpg.json, dep_graph.json, …
@@ -22,7 +22,7 @@ Directory layout (``~/.rpgkit/`` home storage):
         └── logs/                               ← *.log, mcp_calls.jsonl, …
 
 Machine-local data (``data/``, ``logs/``, the inner snapshot ``.git/``)
-lives under ``~/.rpgkit/workspaces/<hash>/`` so it survives independently
+lives under ``~/.rpgkit/workspaces/<workspace-id>/`` so it survives independently
 of the workspace, never gets accidentally committed, and stays scoped
 to one user.  The workspace dir keeps only the lightweight, team-shared
 files that benefit from being version-controlled alongside the code.
@@ -193,8 +193,8 @@ def cmd_for(script_relpath: str) -> str:
 # Layout:
 #
 #   RPGKIT_DIR    = <workspace>/.rpgkit/      (minimal marker tree: config.toml + .source)
-#   DATA_DIR      = ~/.rpgkit/workspaces/<hash>/data/
-#   LOGS_DIR      = ~/.rpgkit/workspaces/<hash>/logs/
+#   DATA_DIR      = ~/.rpgkit/workspaces/<workspace-id>/data/
+#   LOGS_DIR      = ~/.rpgkit/workspaces/<workspace-id>/logs/
 #   REPORTS_DIR   = <workspace>/.rpgkit/reports/   (kept in workspace by
 #                   design: small, user-facing, may be git-tracked)
 #
@@ -271,7 +271,7 @@ REPO_INFO_FILE = DATA_DIR / "repo_info.json"
 # something the developer opens in a browser and may want to share /
 # commit alongside the source.  Keeping it in ``.rpgkit/reports/`` also
 # means double-clicking it from a file explorer "just works" without
-# having to dig into ``~/.rpgkit/workspaces/<hash>/``.
+# having to dig into ``~/.rpgkit/workspaces/<workspace-id>/``.
 RPG_HTML_FILE = REPORTS_DIR / "rpg.html"
 
 
@@ -320,7 +320,7 @@ def ensure_rpgkit_dir() -> Path:
     """Ensure ``DATA_DIR`` exists and return its path.
 
     In the home-storage layout, ``DATA_DIR`` lives under
-    ``~/.rpgkit/workspaces/<hash>/data/``.  We only create the leaf
+    ``~/.rpgkit/workspaces/<workspace-id>/data/``.  We only create the leaf
     directory here; full home-layout bootstrap (including
     ``.meta.toml``) is the responsibility of ``rpgkit init`` /
     ``rpgkit update``.  Calling this from a script that lands in a

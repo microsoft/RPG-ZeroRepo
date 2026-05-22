@@ -4,7 +4,7 @@ Replaces the legacy ``workspace/.rpgkit/{data,logs,.git}`` layout with a
 centralised one rooted at ``~/.rpgkit/``:
 
     ~/.rpgkit/
-        workspaces/<hash>/
+        workspaces/<workspace-id>/
             .meta.toml          {workspace_path, channel, created_at, last_seen_at}
             .git/               inner git snapshot repo
             data/               rpg.json, dep_graph.json
@@ -19,15 +19,30 @@ The workspace itself retains only two minimal items::
 Workspace identity
 ------------------
 
-Each workspace is identified by the SHA-256 hash (first 12 hex chars) of
-its **resolved absolute path**.  Hash collisions are detected at read
-time by comparing ``workspace_path`` recorded in ``.meta.toml``; a
-mismatch produces a clear error rather than silently mixing two
-workspaces' data.
+Each workspace is identified by a **path-derived slug** (the resolved
+absolute path with non-alphanumeric runs collapsed to ``-``).  Short
+paths produce a readable id like ``home-hys-projects-myrepo``; paths
+whose slug would exceed 200 characters are truncated and given a
+6-character base36 SHA-256 suffix so the id fits comfortably under
+POSIX ``NAME_MAX`` (255).  Same shape as Claude Code's
+``~/.claude/projects/`` directory naming, with two improvements: no
+leading dash, and a deterministic overflow strategy instead of relying
+on the OS to error out.
 
-Why a hash and not a path-based directory tree?  A flat hash gives every
-workspace a fixed-length key that's safe to use as a directory name on
-all filesystems, regardless of the original path's depth or characters.
+Slug collisions are theoretically possible (e.g. ``/foo/bar`` and
+``/foo-bar`` both slug to ``foo-bar``); they are detected at read time
+by comparing ``workspace_path`` recorded in ``.meta.toml``; a
+collision aborts cleanly rather than silently overwriting state.
+
+Why a readable slug and not a flat hash?  Users routinely browse
+``~/.rpgkit/workspaces/`` to find logs, delete stale state, or sanity-
+check which workspace a process is talking to; a slug makes that ten
+times easier than an opaque hex hash.  We accept a small (negligible
+in practice) collision risk in exchange.
+
+For backward compatibility, when no slug-named directory exists,
+:func:`home_workspace_dir` falls back to the pre-0.1.4 12-char hex
+hash layout if one is present on disk.
 
 Resolution
 ----------
@@ -41,8 +56,8 @@ directory automatically.
 Public surface
 --------------
 
-* :func:`workspace_id` - the 12-char hash for a workspace path.
-* :func:`home_workspace_dir` - ``~/.rpgkit/workspaces/<hash>/``.
+* :func:`workspace_id` - the slug (or slug+hash suffix) for a workspace path.
+* :func:`home_workspace_dir` - ``~/.rpgkit/workspaces/<workspace_id>/``.
 * :func:`workspace_data_dir`, :func:`workspace_logs_dir`,
   :func:`workspace_inner_git_dir`, :func:`workspace_reports_dir` -
   convenience wrappers for the four canonical subdirectories.
@@ -59,7 +74,7 @@ Design constraints
 * No symlinks are created in the workspace (avoids Windows headaches
   and accidental backup-tool double-counting).
 * All path inputs are run through :py:meth:`Path.resolve` so symlinked
-  workspace roots map to a single canonical hash.
+  workspace roots map to a single canonical id.
 * All filesystem mutations are best-effort idempotent so re-running
   ``rpgkit init`` or ``rpgkit update`` is safe.
 """
@@ -67,6 +82,7 @@ from __future__ import annotations
 
 import hashlib
 import os
+import re
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, Optional
@@ -106,7 +122,7 @@ _VALID_CHANNELS = (CHANNEL_BUNDLE, CHANNEL_LEGACY)
 
 
 # ---------------------------------------------------------------------------
-# Hash + path resolution
+# Workspace ID + path resolution
 # ---------------------------------------------------------------------------
 
 def _resolve(path: Path) -> Path:
@@ -120,18 +136,93 @@ def _resolve(path: Path) -> Path:
     return Path(path).resolve()
 
 
-def workspace_id(workspace_path: Path) -> str:
-    """Compute the 12-character workspace identifier for ``workspace_path``.
+# Tunables for :func:`workspace_id`.  Picked so the worst-case id
+# (truncated slug + ``-`` + 6 base36 chars) stays under ``NAME_MAX``
+# (255 on Linux/macOS, 255 UTF-16 code units on Windows NTFS) with
+# plenty of headroom for downstream nested paths.
+_SLUG_MAX_LEN = 200
+_HASH_SUFFIX_LEN = 6
+_LEGACY_HASH_LEN = 12
 
-    The identifier is deterministic on a given machine: the same
-    resolved absolute path always yields the same hash.  Different
-    paths (including different clones of the same git repo) yield
-    different hashes — this is intentional so each clone has independent
-    state.
+#: Pattern used by :func:`_slugify` to collapse non-alphanumeric runs.
+_NON_ALNUM_RE = re.compile(r"[^a-zA-Z0-9]+")
+
+#: Pattern matching the pre-0.1.4 legacy id format (12 lowercase hex chars).
+_LEGACY_HASH_RE = re.compile(r"^[0-9a-f]{12}$")
+
+#: Base36 alphabet used for the overflow hash suffix.  Matches Claude
+#: Code's convention for ``~/.claude/projects/`` and packs ~5 bits per
+#: char (36**6 ≈ 2.2e9 — collision probability negligible at our scale).
+_BASE36_ALPHABET = "0123456789abcdefghijklmnopqrstuvwxyz"
+
+
+def _slugify_path(workspace_path: Path) -> str:
+    """Return the slug (no hash) for a resolved workspace path.
+
+    Algorithm: replace every run of non-alphanumeric chars with ``-``,
+    strip leading/trailing ``-``, lowercase.  Result is always safe to
+    use as a directory name on every filesystem we target.
+
+    Examples:
+        ``/home/hys/projects/rpgkit`` -> ``home-hys-projects-rpgkit``
+        ``C:\\Users\\foo\\bar``       -> ``c-users-foo-bar``
+        ``/``                         -> ``root``
     """
     canonical = str(_resolve(workspace_path))
-    digest = hashlib.sha256(canonical.encode("utf-8")).hexdigest()
-    return digest[:12]
+    slug = _NON_ALNUM_RE.sub("-", canonical).strip("-").lower()
+    return slug or "root"
+
+
+def _base36_hash(workspace_path: Path) -> str:
+    """Return the 6-char base36 SHA-256 prefix used for overflow ids."""
+    canonical = str(_resolve(workspace_path))
+    digest = hashlib.sha256(canonical.encode("utf-8")).digest()
+    n = int.from_bytes(digest[: _HASH_SUFFIX_LEN], "big")
+    out = []
+    for _ in range(_HASH_SUFFIX_LEN):
+        out.append(_BASE36_ALPHABET[n % 36])
+        n //= 36
+    return "".join(reversed(out))
+
+
+def _legacy_workspace_id(workspace_path: Path) -> str:
+    """Compute the pre-0.1.4 workspace id (SHA-256 first 12 hex chars).
+
+    Only used by :func:`home_workspace_dir` as a backward-compat probe
+    so users who upgraded across the slug-naming change keep finding
+    their existing on-disk state.
+    """
+    canonical = str(_resolve(workspace_path))
+    return hashlib.sha256(canonical.encode("utf-8")).hexdigest()[:_LEGACY_HASH_LEN]
+
+
+def workspace_id(workspace_path: Path) -> str:
+    """Compute the workspace identifier for ``workspace_path``.
+
+    Two formats:
+
+    * **Short (preferred)** — when the path slug is ≤ 200 chars, use
+      the slug verbatim, e.g. ``home-hys-projects-rpgkit``.  Readable
+      at a glance; lets users browse ``~/.rpgkit/workspaces/`` and
+      identify their projects without cross-referencing a hash table.
+    * **Truncated (overflow)** — when the slug exceeds the budget,
+      keep the first ~193 chars and append ``-<hash6>`` where
+      ``hash6`` is a 6-character base36 SHA-256 prefix.  Guarantees
+      uniqueness across arbitrarily long paths while staying under
+      ``NAME_MAX`` (255).
+
+    The identifier is deterministic on a given machine: the same
+    resolved absolute path always yields the same id.  Different
+    paths (including different clones of the same git repo) yield
+    different ids — this is intentional so each clone has independent
+    state.
+    """
+    slug = _slugify_path(workspace_path)
+    if len(slug) <= _SLUG_MAX_LEN:
+        return slug
+    # Reserve room for ``-`` + hash suffix.
+    head = slug[: _SLUG_MAX_LEN - _HASH_SUFFIX_LEN - 1].rstrip("-")
+    return f"{head}-{_base36_hash(workspace_path)}"
 
 
 # ---------------------------------------------------------------------------
@@ -150,10 +241,24 @@ def home_root() -> Path:
 def home_workspace_dir(workspace_path: Path) -> Path:
     """Return the home directory assigned to ``workspace_path``.
 
-    This is ``~/.rpgkit/workspaces/<hash>/`` for whichever hash the path
-    resolves to.  The directory may or may not exist on disk.
+    Normally this is ``~/.rpgkit/workspaces/<workspace_id>/`` using the
+    slug-based id from :func:`workspace_id`.
+
+    Backward compatibility: if a directory under the **legacy** 12-char
+    hex id already exists on disk (created by rpgkit < 0.1.4) and no
+    slug-named directory exists for the same path, the legacy directory
+    is returned so the user keeps reaching their existing state after
+    upgrading.  New workspaces always use the slug-based layout.
+
+    The directory may or may not exist on disk.
     """
-    return home_root() / workspace_id(workspace_path)
+    new_dir = home_root() / workspace_id(workspace_path)
+    if new_dir.exists():
+        return new_dir
+    legacy_dir = home_root() / _legacy_workspace_id(workspace_path)
+    if legacy_dir.exists():
+        return legacy_dir
+    return new_dir
 
 
 def workspace_data_dir(workspace_path: Path) -> Path:
@@ -391,7 +496,7 @@ def ensure_workspace_storage(
 
     Creates::
 
-        ~/.rpgkit/workspaces/<hash>/
+        ~/.rpgkit/workspaces/<workspace-id>/
             data/
             logs/
 
@@ -406,7 +511,7 @@ def ensure_workspace_storage(
     seed an initial commit message.
 
     Returns:
-        The home workspace directory (``~/.rpgkit/workspaces/<hash>/``).
+        The home workspace directory (``~/.rpgkit/workspaces/<workspace-id>/``).
     """
     resolved = _resolve(workspace_path)
     home_dir = home_workspace_dir(resolved)

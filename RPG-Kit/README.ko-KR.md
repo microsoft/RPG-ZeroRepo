@@ -152,7 +152,7 @@ uvx --from "git+https://github.com/microsoft/RPG-ZeroRepo.git#subdirectory=RPG-K
 > - **Claude Code**: 채팅에 직접 `/rpgkit.feature_spec ...` 을 입력하면 slash command가 인식되어 해당 workflow가 트리거됩니다.
 > - **GitHub Copilot CLI**: slash command는 지원하지 않으나(커스텀 agent는 지원), 먼저 `/agent rpgkit.feature_spec` 으로 대상 agent로 전환한 다음 `start` 를 입력해 내장된 workflow를 실행합니다.
 
-RPG-Kit은 `~/.rpgkit/workspaces/<hash>/data/rpg.json` 을 점진적으로 생성하고, 이를 사용해 요구사항, 계획 산출물, 생성된 코드, 의존성 정보를 정합 상태로 유지합니다. 워크스페이스의 소스 파일은 오염되지 않습니다.
+RPG-Kit은 `~/.rpgkit/workspaces/<workspace-id>/data/rpg.json` 을 점진적으로 생성하고, 이를 사용해 요구사항, 계획 산출물, 생성된 코드, 의존성 정보를 정합 상태로 유지합니다. 워크스페이스의 소스 파일은 오염되지 않습니다.
 
 ## Quick Start: 기존 저장소
 
@@ -188,7 +188,7 @@ RPG-Kit은 `~/.rpgkit/workspaces/<hash>/data/rpg.json` 을 점진적으로 생�
 
 ## `rpgkit init` 이후 일어나는 일
 
-`rpgkit init` 은 소스 파일을 수정하지 않습니다. 또한 **워크스페이스에 런타임 상태를 기록하지도 않습니다**. 워크스페이스에는 command 정의, MCP 구성, hooks만 추가합니다. RPG-Kit의 런타임 데이터(산출물, 로그)는 home-side 디렉터리 `~/.rpgkit/workspaces/<hash>/` 아래에 배치되며, 워크스페이스 절대 경로에서 파생된 hash로 격리됩니다.
+`rpgkit init` 은 소스 파일을 수정하지 않습니다. 또한 **워크스페이스에 런타임 상태를 기록하지도 않습니다**. 워크스페이스에는 command 정의, MCP 구성, hooks만 추가합니다. RPG-Kit의 런타임 데이터(산출물, 로그)는 home-side 디렉터리 `~/.rpgkit/workspaces/<workspace-id>/` 아래에 배치되며, `<workspace-id>` 는 워크스페이스의 절대 경로에서 파생된 가독성 있는 slug입니다 (예: `home-hys-projects-myrepo`).
 
 ```text
 my-project/

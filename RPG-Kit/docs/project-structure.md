@@ -6,7 +6,7 @@ RPG-Kit installs alongside your project code: the directory you run `rpgkit init
 
 - `rpgkit init my-project` creates `my-project/` containing both your source code (`src/`, `tests/`, `docs/`) and RPG-Kit's in-workspace configuration files (`.rpgkit/config.toml`, `.claude/`, `.github/`, `.vscode/`, depending on the selected agent).
 - `rpgkit init --here` inside an existing git repository adds RPG-Kit on top of the existing code without moving the repository.
-- A single `.git` repository tracks user-owned code and any RPG-Kit files the user chooses to commit. **Runtime data, logs, and the inner-git snapshot repo all live outside the workspace** under `~/.rpgkit/workspaces/<hash>/`, so generated artefacts don't pollute your repo or accidentally get committed. Only a small set of user-facing files (`.rpgkit/config.toml`, `.rpgkit/reports/*.html`) stay inside the workspace.
+- A single `.git` repository tracks user-owned code and any RPG-Kit files the user chooses to commit. **Runtime data, logs, and the inner-git snapshot repo all live outside the workspace** under `~/.rpgkit/workspaces/<workspace-id>/`, so generated artefacts don't pollute your repo or accidentally get committed. Only a small set of user-facing files (`.rpgkit/config.toml`, `.rpgkit/reports/*.html`) stay inside the workspace.
 
 ## After `rpgkit init`
 
@@ -51,10 +51,10 @@ my-project/
 
 ### Out-of-workspace runtime store
 
-Starting from the global-install layout, all runtime state lives under your home directory, keyed by a stable hash of the workspace's absolute path:
+Starting from the global-install layout, all runtime state lives under your home directory, keyed by a path-derived **slug** (the workspace's absolute path, lowercased, with non-alphanumeric runs collapsed to `-`):
 
 ```text
-~/.rpgkit/workspaces/<sha256(abspath)[:12]>/
+~/.rpgkit/workspaces/<workspace-id>/
 ├── .git/        # Inner-git snapshot repo (per-stage auto-commits)
 ├── .gitignore   # Excludes logs/copilot/ only — other logs are tracked for debug
 ├── .meta.toml   # Back-pointer to the workspace path + metadata
@@ -64,13 +64,13 @@ Starting from the global-install layout, all runtime state lives under your home
 
 Reports (`rpg.html`, review HTML, …) stay **inside** the workspace at `<workspace>/.rpgkit/reports/` because they are small, user-facing artefacts that benefit from sitting next to the code (and may be committed).
 
-The hash is computed as `sha256(os.path.realpath(workspace_path))[:12]`, so moving or renaming the workspace yields a different home directory. Run `rpgkit version` from inside the workspace to see the resolved paths (the **Data**, **Logs**, and **Inner git** lines).
+`<workspace-id>` is normally the slug itself (e.g. `home-hys-projects-myrepo`); paths whose slug exceeds 200 characters are truncated and given a 6-char base36 SHA-256 suffix so the directory name fits comfortably under POSIX `NAME_MAX` (255). Same shape as Claude Code's `~/.claude/projects/`. Moving or renaming the workspace yields a different id, so each clone has independent state. Run `rpgkit version` from inside the workspace to see the resolved paths (the **Data**, **Logs**, and **Inner git** lines). For backward compatibility, workspaces created before 0.1.4 (which used a 12-hex-char SHA-256 hash directory) continue to resolve correctly.
 
 > Pipeline scripts (formerly materialised into `.rpgkit/scripts/`) now live inside the installed `rpgkit-cli` wheel under `rpgkit_cli/core_pack/scripts/` and are invoked via the global [`rpgkit script <name>`](cli-reference.md) command. They are no longer copied into each workspace, so `rpgkit init` produces a much smaller footprint and a single source of truth per CLI install.
 
 The agent configuration directory varies by the selected AI assistant and release package. For the verified CLI path, `--ai claude` installs `.claude/commands/`, while `--ai copilot` installs `.github/agents/`, `.github/prompts/`, and `.vscode/mcp.json`.
 
-Command definitions are installed into the AI-agent-specific folder. Normal users should not need to inspect `~/.rpgkit/workspaces/<hash>/data/` directly—run `rpgkit version` from the workspace to see all relevant paths.
+Command definitions are installed into the AI-agent-specific folder. Normal users should not need to inspect `~/.rpgkit/workspaces/<workspace-id>/data/` directly—run `rpgkit version` from the workspace to see all relevant paths.
 
 ### Quick reference: where does each file live?
 
@@ -82,16 +82,16 @@ Command definitions are installed into the AI-agent-specific folder. Normal user
 | Agent command definitions | `<workspace>/.claude/` or `<workspace>/.github/` |
 | MCP / VS Code config | `<workspace>/.vscode/` |
 | Git hooks (`post-commit`, `post-merge`) | `<workspace>/.git/hooks/` |
-| Generated data (`rpg.json`, `dep_graph.json`, …) | `~/.rpgkit/workspaces/<hash>/data/` |
-| Per-stage logs | `~/.rpgkit/workspaces/<hash>/logs/` |
-| Inner-git snapshot repo | `~/.rpgkit/workspaces/<hash>/.git/` |
+| Generated data (`rpg.json`, `dep_graph.json`, …) | `~/.rpgkit/workspaces/<workspace-id>/data/` |
+| Per-stage logs | `~/.rpgkit/workspaces/<workspace-id>/logs/` |
+| Inner-git snapshot repo | `~/.rpgkit/workspaces/<workspace-id>/.git/` |
 | Pipeline scripts (read-only) | inside the installed `rpgkit-cli` wheel |
 
 To see the resolved paths for the current workspace, run `rpgkit version` from anywhere inside it.
 
 ## Generated Data Files
 
-As you run `/rpgkit.*` commands, `~/.rpgkit/workspaces/<hash>/data/` is progressively populated (paths below are shown relative to that directory):
+As you run `/rpgkit.*` commands, `~/.rpgkit/workspaces/<workspace-id>/data/` is progressively populated (paths below are shown relative to that directory):
 
 | Generated file | Command | Description |
 | -------------- | ------- | ----------- |
@@ -144,13 +144,13 @@ Typical producers and updaters:
 
 ## Runtime Logs and Reports
 
-Runtime logs are written under `~/.rpgkit/workspaces/<hash>/logs/`, for example:
+Runtime logs are written under `~/.rpgkit/workspaces/<workspace-id>/logs/`, for example:
 
-- `~/.rpgkit/workspaces/<hash>/logs/encode.log`
-- `~/.rpgkit/workspaces/<hash>/logs/update_rpg.log`
-- `~/.rpgkit/workspaces/<hash>/logs/feature_build.log`
-- `~/.rpgkit/workspaces/<hash>/logs/build_data_flow.log`
+- `~/.rpgkit/workspaces/<workspace-id>/logs/encode.log`
+- `~/.rpgkit/workspaces/<workspace-id>/logs/update_rpg.log`
+- `~/.rpgkit/workspaces/<workspace-id>/logs/feature_build.log`
+- `~/.rpgkit/workspaces/<workspace-id>/logs/build_data_flow.log`
 
-Execution traces are written under `~/.rpgkit/workspaces/<hash>/data/trajectory/`. Review or diagnostic artifacts may be written under `<workspace>/.rpgkit/reports/` when a command generates them.
+Execution traces are written under `~/.rpgkit/workspaces/<workspace-id>/data/trajectory/`. Review or diagnostic artifacts may be written under `<workspace>/.rpgkit/reports/` when a command generates them.
 
 To discover the home-side paths (data / logs / inner-git) for the current workspace, run `rpgkit version` from anywhere inside it—the relevant lines are labelled **Workspace**, **Data**, **Logs**, and **Inner git**.

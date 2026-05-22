@@ -28,7 +28,7 @@ from typing import Optional
 # Use the canonical paths from common.paths so the output location
 # matches what downstream stages (feature_build, feature_build_validation,
 # ...) expect.  That resolves to
-# ``~/.rpgkit/workspaces/<hash>/data/feature_spec.json`` rather than the
+# ``~/.rpgkit/workspaces/<workspace-id>/data/feature_spec.json`` rather than the
 # workspace-local ``.rpgkit/data/feature_spec.json`` this script used
 # to compute on its own — a mismatch that previously broke the
 # feature_spec → feature_build handoff.

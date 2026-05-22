@@ -79,7 +79,7 @@ def _resolve_rpg_path() -> str:
 
     The default (``RPG_FILE``) is provided by
     :mod:`common.paths`, which resolves to
-    ``~/.rpgkit/workspaces/<hash>/data/rpg.json`` for the current
+    ``~/.rpgkit/workspaces/<workspace-id>/data/rpg.json`` for the current
     workspace (discovered by walking up from cwd looking for
     ``.rpgkit/config.toml``).  Callers running ``rpgkit-mcp`` from any
     subdirectory of a workspace therefore get the right RPG file

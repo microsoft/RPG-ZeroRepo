@@ -152,7 +152,7 @@ Use this path when you want RPG-Kit to turn requirements into a new codebase.
 > - **Claude Code**: type `/rpgkit.feature_spec ...` directly in the chat — slash commands are recognised and dispatch the matching workflow.
 > - **GitHub Copilot CLI**: slash commands are not supported (custom agents are), so first run `/agent rpgkit.feature_spec` to switch to the target agent, then type `start` to run its built-in workflow.
 
-RPG-Kit progressively builds `rpg.json` in the home-side runtime directory (`~/.rpgkit/workspaces/<hash>/data/rpg.json`) and uses it to keep requirements, planning artifacts, generated code, and dependency information aligned. Your workspace source files are not polluted.
+RPG-Kit progressively builds `rpg.json` in the home-side runtime directory (`~/.rpgkit/workspaces/<workspace-id>/data/rpg.json`) and uses it to keep requirements, planning artifacts, generated code, and dependency information aligned. Your workspace source files are not polluted.
 
 ## Quick Start: Existing Repository
 
@@ -188,7 +188,7 @@ Use this path when you already have a repository and want an AI agent to underst
 
 ## What happens after `rpgkit init`
 
-`rpgkit init` does not modify your source files, **and it does not write runtime state into your workspace**. It only adds command definitions, MCP configuration, and hooks to your workspace. RPG-Kit runtime data (artifacts and logs) lives under the home-side directory `~/.rpgkit/workspaces/<hash>/`, isolated by a hash derived from the workspace's absolute path.
+`rpgkit init` does not modify your source files, **and it does not write runtime state into your workspace**. It only adds command definitions, MCP configuration, and hooks to your workspace. RPG-Kit runtime data (artifacts and logs) lives under the home-side directory `~/.rpgkit/workspaces/<workspace-id>/`, where `<workspace-id>` is a slug derived from the workspace's absolute path (e.g. `home-hys-projects-myrepo`).
 
 ```text
 my-project/

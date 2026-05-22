@@ -2,8 +2,8 @@
 
 Every successful (or failed) ``rpgkit script <X>`` invocation
 auto-commits the current state of the per-workspace home directory at
-``~/.rpgkit/workspaces/<hash>/`` into a dedicated git repo at
-``~/.rpgkit/workspaces/<hash>/.git/``. This lets ``git log`` and
+``~/.rpgkit/workspaces/<workspace-id>/`` into a dedicated git repo at
+``~/.rpgkit/workspaces/<workspace-id>/.git/``. This lets ``git log`` and
 ``git diff`` show how pipeline stages change between runs.
 
 What gets tracked:
@@ -150,7 +150,7 @@ def categorise_script(relpath: str) -> str:
 def _inner_git_dir(workspace: Path) -> Path:
     """Return the home directory used as ``git -C <dir>`` for the snapshots.
 
-    The directory is ``~/.rpgkit/workspaces/<hash>/``; the inner repo's
+    The directory is ``~/.rpgkit/workspaces/<workspace-id>/``; the inner repo's
     ``.git`` sits directly inside it.
     """
     return _storage.home_workspace_dir(workspace)
@@ -219,7 +219,7 @@ def _run_git(workspace: Path, *args: str, check: bool = False, timeout: int = 30
 # ---------------------------------------------------------------------------
 
 def ensure_inner_git(workspace: Path, *, initial_msg: Optional[str] = None) -> bool:
-    """Create ``~/.rpgkit/workspaces/<hash>/.git`` if missing.
+    """Create ``~/.rpgkit/workspaces/<workspace-id>/.git`` if missing.
 
     Returns ``True`` when a fresh repo was created, ``False`` when it
     already existed or when setup was skipped (git missing, home dir

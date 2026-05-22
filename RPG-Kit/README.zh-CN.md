@@ -152,7 +152,7 @@ uvx --from "git+https://github.com/microsoft/RPG-ZeroRepo.git#subdirectory=RPG-K
 > - **Claude Code**：直接在对话中输入 `/rpgkit.feature_spec ...`，slash command 会被识别并触发对应 workflow。
 > - **GitHub Copilot CLI**：不支持 slash command（但支持自定义 agent），需要先 `/agent rpgkit.feature_spec` 切换到目标 agent，然后输入 `start` 让它执行内置的 workflow。
 
-RPG-Kit 会渐进式地在 home-side 运行时目录（`~/.rpgkit/workspaces/<hash>/data/rpg.json`）里创建 `rpg.json`，并用它把需求、规划产物、生成的代码和依赖信息保持对齐。你的工作区源文件不会被污染。
+RPG-Kit 会渐进式地在 home-side 运行时目录（`~/.rpgkit/workspaces/<workspace-id>/data/rpg.json`）里创建 `rpg.json`，并用它把需求、规划产物、生成的代码和依赖信息保持对齐。你的工作区源文件不会被污染。
 
 ## 快速开始：已有仓库
 
@@ -188,7 +188,7 @@ RPG-Kit 会渐进式地在 home-side 运行时目录（`~/.rpgkit/workspaces/<ha
 
 ## `rpgkit init` 之后会发生什么
 
-`rpgkit init` 不会修改你的源文件，**也不会在你的工作区写入运行时状态**。它只在你的工作区添加命令定义、MCP 配置和 hooks，所有 RPG-Kit 的运行时数据（产物、日志）都放在 home-side 目录 `~/.rpgkit/workspaces/<hash>/` 下，由工作区绝对路径派生的 hash 隔离。
+`rpgkit init` 不会修改你的源文件，**也不会在你的工作区写入运行时状态**。它只在你的工作区添加命令定义、MCP 配置和 hooks，所有 RPG-Kit 的运行时数据（产物、日志）都放在 home-side 目录 `~/.rpgkit/workspaces/<workspace-id>/` 下，其中 `<workspace-id>` 是根据工作区绝对路径生成的可读 slug（例如 `home-hys-projects-myrepo`）。
 
 ```text
 my-project/

@@ -166,7 +166,7 @@ def run_encode(
             html_content = generate_html(viz_data)
             # rpg.html is a user-facing artefact: keep it in the
             # workspace's .rpgkit/reports/ rather than next to the
-            # machine-side rpg.json under ~/.rpgkit/workspaces/<hash>/.
+            # machine-side rpg.json under ~/.rpgkit/workspaces/<workspace-id>/.
             RPG_HTML_FILE.parent.mkdir(parents=True, exist_ok=True)
             viz_output = str(RPG_HTML_FILE)
             RPG_HTML_FILE.write_text(html_content, encoding="utf-8")

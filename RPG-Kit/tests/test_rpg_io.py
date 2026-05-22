@@ -29,7 +29,7 @@ requires_git = pytest.mark.skipif(not _has_git(), reason="git not on PATH")
 
 
 def _make_home_layout(tmp_path: Path, hash_id: str = "abc123def456") -> Path:
-    """Create the ``~/.rpgkit/workspaces/<hash>/`` layout for tests.
+    """Create the ``~/.rpgkit/workspaces/<workspace-id>/`` layout for tests.
 
     Returns the home_dir (the dir that gets ``git init``).  Caller is
     responsible for git-initialising and snapshotting it.

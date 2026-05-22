@@ -2,7 +2,7 @@
 """Save an EditPlan JSON document to ``RPG_EDIT_PLAN_FILE``.
 
 Reads JSON from stdin, validates that it parses, and writes it to
-``~/.rpgkit/workspaces/<hash>/data/rpg_edit_plan.json``.  Slash-command
+``~/.rpgkit/workspaces/<workspace-id>/data/rpg_edit_plan.json``.  Slash-command
 templates use this so they never need to know the physical (home-dir)
 location of the workspace.
 

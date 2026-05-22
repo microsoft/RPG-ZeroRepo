@@ -320,7 +320,7 @@ CLAUDE_LOCAL_PATH = Path.home() / ".claude" / "local" / "claude"
 #
 #   _SOURCE_BUNDLE / _SOURCE_LEGACY  — provisioning channel; persisted as
 #                                       ``channel`` in ``~/.rpgkit/workspaces/
-#                                       <hash>/.meta.toml`` so subsequent
+#                                       <workspace-id>/.meta.toml`` so subsequent
 #                                       ``rpgkit update`` calls honour the
 #                                       user's original choice.  Mirrors the
 #                                       constants in :mod:`rpgkit_cli._storage`.
@@ -366,7 +366,7 @@ def _current_cli_version() -> str:
 def _read_source_marker(project_path: Path) -> str | None:
     """Return the recorded provisioning channel for ``project_path``.
 
-    Reads ``channel`` from ``~/.rpgkit/workspaces/<hash>/.meta.toml``.
+    Reads ``channel`` from ``~/.rpgkit/workspaces/<workspace-id>/.meta.toml``.
     Returns ``None`` when no meta file exists (fresh workspace) or the
     channel field is missing.
     """
@@ -383,7 +383,7 @@ def _write_source_marker(project_path: Path, source: str) -> None:
     """Persist the provisioning channel in the home-side ``.meta.toml``.
 
     Replaces the legacy ``workspace/.rpgkit/.source`` text file with a
-    structured TOML record under ``~/.rpgkit/workspaces/<hash>/`` that
+    structured TOML record under ``~/.rpgkit/workspaces/<workspace-id>/`` that
     also carries timestamps and the version of rpgkit-cli that last
     touched the workspace.  See :mod:`rpgkit_cli._storage` for the
     layout rationale.
@@ -1959,7 +1959,7 @@ def _run_initial_encode(project_path: Path) -> bool:
     of lines of ``RPGParser - INFO - ...``), so instead we:
 
       * Capture stderr in a reader thread and write it verbatim to
-        ``~/.rpgkit/workspaces/<hash>/logs/encode.log`` — power users
+        ``~/.rpgkit/workspaces/<workspace-id>/logs/encode.log`` — power users
         can ``tail -f`` it for the full firehose.
       * Parse a handful of phase markers off each line to drive a
         :class:`rich.progress.Progress` bar with a spinner + current
@@ -1991,7 +1991,7 @@ def _run_initial_encode(project_path: Path) -> bool:
             return False
 
     # Keep all generated artefacts (logs/data/inner-git) in the
-    # per-workspace home dir under ~/.rpgkit/workspaces/<hash>/.  The
+    # per-workspace home dir under ~/.rpgkit/workspaces/<workspace-id>/.  The
     # workspace tree should stay clean — no .rpgkit/logs/ written here.
     from . import _storage
     log_dir = _storage.workspace_logs_dir(project_path)
@@ -2739,15 +2739,15 @@ def _install_git_post_commit_hook(project_path: Path) -> bool:
 
     * **Phase 1 (foreground)**: ``update_graphs.py sync`` advances
       ``meta.git`` to the new HEAD.  Output is teed into
-      ``~/.rpgkit/workspaces/<hash>/logs/hooks.log``.
+      ``~/.rpgkit/workspaces/<workspace-id>/logs/hooks.log``.
 
     * **Phase 2 (background)**: ``update_graphs.py update-rpg`` is
       detached via ``subprocess.Popen(start_new_session=True)``.  A
       mkdir-based directory lock at
-      ``~/.rpgkit/workspaces/<hash>/logs/.update_rpg.lock`` serialises
+      ``~/.rpgkit/workspaces/<workspace-id>/logs/.update_rpg.lock`` serialises
       overlapping commits; locks older than 60 minutes are treated as
       orphaned and removed.  The worker's stdout/stderr land in
-      ``~/.rpgkit/workspaces/<hash>/logs/update_rpg.log``.
+      ``~/.rpgkit/workspaces/<workspace-id>/logs/update_rpg.log``.
 
     Both phases are best-effort: every failure path is swallowed inside
     :func:`hook` so a hook misbehaviour never blocks ``git commit``.
@@ -3603,7 +3603,7 @@ def ensure_rpgkit_runtime_dirs(
     """Pre-create RPG-Kit runtime directories under ``~/.rpgkit/``.
 
     The per-workspace data, logs, and inner-git snapshot repo live
-    under the user's home directory at ``~/.rpgkit/workspaces/<hash>/``
+    under the user's home directory at ``~/.rpgkit/workspaces/<workspace-id>/``
     rather than inside the workspace.  Reports stay in the workspace
     (``<workspace>/.rpgkit/reports/``) because they're user-facing
     artefacts.
@@ -3617,11 +3617,11 @@ def ensure_rpgkit_runtime_dirs(
     upfront rather than lazily.
 
     Created (idempotent):
-        - ``~/.rpgkit/workspaces/<hash>/data/``
-        - ``~/.rpgkit/workspaces/<hash>/data/trajectory/``
-        - ``~/.rpgkit/workspaces/<hash>/logs/``
+        - ``~/.rpgkit/workspaces/<workspace-id>/data/``
+        - ``~/.rpgkit/workspaces/<workspace-id>/data/trajectory/``
+        - ``~/.rpgkit/workspaces/<workspace-id>/logs/``
         - ``<workspace>/.rpgkit/reports/``
-        - ``~/.rpgkit/workspaces/<hash>/.meta.toml`` (refreshed)
+        - ``~/.rpgkit/workspaces/<workspace-id>/.meta.toml`` (refreshed)
 
     The inner ``.git/`` directory is NOT created here; that's
     the responsibility of :mod:`rpgkit_cli._inner_git`, which seeds an
@@ -4190,7 +4190,7 @@ def init(
         console.print(security_notice)
 
     # Pre-create runtime directories so early pipeline prompts that redirect
-    # to ~/.rpgkit/workspaces/<hash>/logs/<stage>.log don't fail with "No such file or directory".
+    # to ~/.rpgkit/workspaces/<workspace-id>/logs/<stage>.log don't fail with "No such file or directory".
     ensure_rpgkit_runtime_dirs(project_path)
 
     steps_lines = []
@@ -4237,8 +4237,8 @@ def init(
 
     step_num += 1
     steps_lines.append(
-        f"{step_num}. You can inspect each step's output under [cyan]~/.rpgkit/workspaces/<hash>/data/[/cyan], "
-        f"and review detailed execution trajectories under [cyan]~/.rpgkit/workspaces/<hash>/data/trajectory/[/cyan]. "
+        f"{step_num}. You can inspect each step's output under [cyan]~/.rpgkit/workspaces/<workspace-id>/data/[/cyan], "
+        f"and review detailed execution trajectories under [cyan]~/.rpgkit/workspaces/<workspace-id>/data/trajectory/[/cyan]. "
         f"Run [cyan]rpgkit version[/cyan] from inside the workspace to see the resolved Data / Logs / Inner-git paths."
     )
 
@@ -4300,7 +4300,7 @@ def init(
         ):
             console.print(
                 "[dim]Inner snapshot repo initialised at "
-                "[cyan]~/.rpgkit/workspaces/<hash>/.git[/cyan] \u2014 "
+                "[cyan]~/.rpgkit/workspaces/<workspace-id>/.git[/cyan] \u2014 "
                 "run [cyan]rpgkit version[/cyan] for the exact path "
                 "and a ready-to-paste `git -C` invocation.[/dim]"
             )
@@ -4683,7 +4683,7 @@ def update(
             _write_workspace_config(project_path, selected_ai)
 
             # Pre-create runtime directories so stage prompts that redirect
-            # to ~/.rpgkit/workspaces/<hash>/logs/<stage>.log don't fail when the folder is
+            # to ~/.rpgkit/workspaces/<workspace-id>/logs/<stage>.log don't fail when the folder is
             # missing (e.g. user removed it, or workspace was created by an
             # older rpgkit init that didn't pre-create logs/).
             ensure_rpgkit_runtime_dirs(project_path, tracker=tracker)
@@ -4794,7 +4794,7 @@ def update(
         ):
             console.print(
                 "[dim]Initialised inner snapshot repo at "
-                "[cyan]~/.rpgkit/workspaces/<hash>/.git[/cyan] for this workspace.[/dim]"
+                "[cyan]~/.rpgkit/workspaces/<workspace-id>/.git[/cyan] for this workspace.[/dim]"
             )
 
 
@@ -5121,7 +5121,7 @@ def hook(name: str = typer.Argument(..., help="Hook name: post-commit | post-mer
     """Dispatch from ``.git/hooks/<name>`` to the matching Python handler.
 
     Resolves the current workspace via the standard cwd-walk, attaches
-    a hook log under ``~/.rpgkit/workspaces/<hash>/logs/hooks.log``,
+    a hook log under ``~/.rpgkit/workspaces/<workspace-id>/logs/hooks.log``,
     and runs the per-hook orchestration.  Every failure path is
     swallowed (logged, never raised) so a misbehaving hook never blocks
     the user's git operation.
@@ -5372,7 +5372,7 @@ def version():
     # invoked from inside an rpgkit workspace.  Without this the user
     # has no obvious way to find their generated artefacts / logs after
     # we moved them out of the repo tree into ``~/.rpgkit/workspaces/
-    # <hash>/`` — they'd have to compute the sha256 themselves.
+    # <workspace-id>/`` — they'd have to derive the workspace id themselves.
     try:
         from . import _inner_git
         ws = _inner_git.find_workspace_root()

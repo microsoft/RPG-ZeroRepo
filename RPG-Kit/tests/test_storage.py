@@ -66,9 +66,50 @@ class TestWorkspaceId:
         assert _storage.workspace_id(a) != _storage.workspace_id(b)
 
     def test_hash_length_is_12(self, workspace: Path) -> None:
-        wid = _storage.workspace_id(workspace)
+        """Pre-0.1.4 legacy id is still computable for backward compat."""
+        wid = _storage._legacy_workspace_id(workspace)
         assert len(wid) == 12
         assert all(c in "0123456789abcdef" for c in wid)
+
+    def test_short_path_returns_plain_slug(self, tmp_path: Path) -> None:
+        """Common case: slug below the budget, no hash suffix."""
+        ws = tmp_path / "myrepo"
+        ws.mkdir()
+        wid = _storage.workspace_id(ws)
+        # The slug should include the workspace dir name and contain only
+        # lowercase alphanumerics + ``-``.
+        assert "myrepo" in wid
+        assert all(c.isalnum() or c == "-" for c in wid)
+        assert not wid.startswith("-")
+        assert not wid.endswith("-")
+        # No overflow hash suffix for a short path.
+        assert "-" + _storage._base36_hash(ws) not in wid
+
+    def test_long_path_truncates_and_appends_hash(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Overflow case: id is truncated and ends with a base36 hash."""
+        # Synthesise a workspace whose slug far exceeds the budget by
+        # monkey-patching ``_resolve`` (creating a 300-deep dir tree is
+        # slow and noisy on disk).
+        fake_path = Path("/" + "/".join("seg%02d" % i for i in range(60)))
+        monkeypatch.setattr(_storage, "_resolve", lambda p: fake_path)
+
+        wid = _storage.workspace_id(tmp_path)
+        assert len(wid) <= _storage._SLUG_MAX_LEN, (
+            "workspace_id must stay under NAME_MAX budget"
+        )
+        # Suffix shape: ``-<6 base36 chars>``.
+        assert wid[-7] == "-"
+        suffix = wid[-_storage._HASH_SUFFIX_LEN :]
+        assert all(c in _storage._BASE36_ALPHABET for c in suffix)
+        # Deterministic across calls.
+        assert _storage.workspace_id(tmp_path) == wid
+
+    def test_root_path_returns_root(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """``/`` slugs to ``root`` (avoids empty directory name)."""
+        monkeypatch.setattr(_storage, "_resolve", lambda p: Path("/"))
+        assert _storage.workspace_id(Path("/")) == "root"
 
 
 # ---------------------------------------------------------------------------
@@ -97,6 +138,40 @@ class TestPathHelpers:
         """Reports stay in the workspace, not in home."""
         reports = _storage.workspace_reports_dir(workspace)
         assert reports == workspace.resolve() / ".rpgkit" / "reports"
+
+    def test_legacy_hash_dir_fallback(
+        self, fake_home: Path, workspace: Path
+    ) -> None:
+        """Pre-0.1.4 directories using the 12-hex-char id are honoured.
+
+        When a user upgrades and their on-disk state lives under the old
+        ``<sha256[:12]>`` directory, ``home_workspace_dir`` must keep
+        returning that directory so the user doesn't silently lose state.
+        """
+        # Plant a legacy directory but **no** slug-named one.
+        legacy_dir = (
+            fake_home / ".rpgkit" / "workspaces" / _storage._legacy_workspace_id(workspace)
+        )
+        legacy_dir.mkdir(parents=True)
+        assert _storage.home_workspace_dir(workspace) == legacy_dir
+
+    def test_slug_dir_wins_over_legacy(
+        self, fake_home: Path, workspace: Path
+    ) -> None:
+        """When both legacy and slug dirs exist, the slug dir wins.
+
+        Lets users migrate by simply creating the slug dir (or letting
+        the next ``rpgkit init`` do it) without manual cleanup.
+        """
+        legacy_dir = (
+            fake_home / ".rpgkit" / "workspaces" / _storage._legacy_workspace_id(workspace)
+        )
+        legacy_dir.mkdir(parents=True)
+        slug_dir = (
+            fake_home / ".rpgkit" / "workspaces" / _storage.workspace_id(workspace)
+        )
+        slug_dir.mkdir(parents=True)
+        assert _storage.home_workspace_dir(workspace) == slug_dir
 
 
 # ---------------------------------------------------------------------------
@@ -141,7 +216,7 @@ class TestFindWorkspaceRoot:
         renamed) and the walker keeps climbing rather than misrouting."""
         self._mark(workspace)
         # Forge meta recording a *different* absolute path under
-        # ``~/.rpgkit/workspaces/<hash>/.meta.toml``.
+        # ``~/.rpgkit/workspaces/<workspace-id>/.meta.toml``.
         meta_path = _storage.workspace_meta_path(workspace)
         meta_path.parent.mkdir(parents=True, exist_ok=True)
         meta_path.write_text(
