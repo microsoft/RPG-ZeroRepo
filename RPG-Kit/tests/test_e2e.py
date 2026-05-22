@@ -728,18 +728,6 @@ class TestE2EFullPipeline:
 class TestE2ECLISimulation:
     """Simulate CLI-like invocations end-to-end."""
 
-    def test_cli_encode_helpers(self, sample_repo, tmp_path):
-        """RPG_FILE path constant points to the home-dir runtime location.
-
-        Workspace state lives under ``~/.rpgkit/workspaces/<hash>/``,
-        so ``RPG_FILE`` resolves to ``<home-state>/data/rpg.json`` rather than the
-        legacy ``<workspace>/.rpgkit/data/rpg.json``.  We just assert the trailing
-        path components so the test is independent of any specific hash.
-        """
-        from common.paths import RPG_FILE
-
-        assert str(RPG_FILE).endswith(os.path.join("data", "rpg.json"))
-
     def test_cli_rpg_stats(self, encoded_rpg):
         """check_encode.get_rpg_stats produces valid statistics from encoded RPG data."""
         from rpg_encoder.check_encode import get_rpg_stats

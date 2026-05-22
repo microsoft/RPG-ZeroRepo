@@ -232,8 +232,10 @@ def ensure_inner_git(workspace: Path, *, initial_msg: Optional[str] = None) -> b
     which is information only the caller has.
 
     When a fresh repo is created we also drop a ``.gitignore`` that
-    excludes ``logs/`` (too noisy), then commit the current state of
-    ``data/`` + ``.meta.toml`` so ``git log`` has a starting point.
+    excludes ``logs/copilot/`` (LLM session traces — large, not useful
+    in history; see :data:`_INNER_GIT_IGNORE`), then commit the current
+    state of ``data/`` + ``.meta.toml`` so ``git log`` has a starting
+    point.
     """
     home_dir = _inner_git_dir(workspace)
     if not home_dir.is_dir():

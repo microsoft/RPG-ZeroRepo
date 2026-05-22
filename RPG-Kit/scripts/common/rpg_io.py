@@ -222,7 +222,8 @@ def _try_restore_from_inner_git(
     # working when a script ever renames data files in the future.
     try:
         log = subprocess.run(
-            ["git", "-C", str(git_dir), "log", "--format=%H", "--", relpath],
+            ["git", "-C", str(git_dir), "log", "--follow",
+             "--format=%H", "--", relpath],
             capture_output=True, text=True, env=env, timeout=10,
         )
     except (subprocess.SubprocessError, OSError):
