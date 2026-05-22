@@ -137,11 +137,7 @@ uvx --from "git+https://github.com/microsoft/RPG-ZeroRepo.git#subdirectory=RPG-K
    /rpgkit.feature_build
    /rpgkit.feature_refactor
    [Optional] /rpgkit.feature_edit <edit instructions>
-   /rpgkit.build_skeleton
-   /rpgkit.build_data_flow
-   /rpgkit.design_base_classes
-   /rpgkit.design_interfaces
-   /rpgkit.plan_tasks
+   /rpgkit.plan
    /rpgkit.code_gen
    [Optional] /rpgkit.rpg_edit <edit instructions>
    ```
@@ -241,7 +237,7 @@ rpgkit update
 
 ## 예정된 기능
 
-- **더 간단한 생성 커맨드:** 현재의 다단계 생성 흐름을 `/rpgkit.generate_repo`, `/rpgkit.generate_feature`, `/rpgkit.plan` 등 더 적은 커맨드로 통합합니다.
+- **더 간단한 생성 커맨드:** 현재의 다단계 생성 흐름을 `/rpgkit.generate_repo`, `/rpgkit.generate_feature` 등 더 적은 커맨드로 통합합니다. `/rpgkit.plan` 은 0.1.4 에서 출시되었습니다.
 - **다국어 지원:** Go, C++, Rust, JavaScript/TypeScript 등을 추가로 지원합니다.
 - **더 많은 플랫폼 통합:** 다양한 시스템에서 서로 다른 AI 코딩 에이전트의 CLI 및 VS Code 확장 워크플로에 걸쳐 RPG-Kit을 지원합니다.
 

@@ -137,11 +137,7 @@ uvx --from "git+https://github.com/microsoft/RPG-ZeroRepo.git#subdirectory=RPG-K
    /rpgkit.feature_build
    /rpgkit.feature_refactor
    [Optional] /rpgkit.feature_edit <edit instructions>
-   /rpgkit.build_skeleton
-   /rpgkit.build_data_flow
-   /rpgkit.design_base_classes
-   /rpgkit.design_interfaces
-   /rpgkit.plan_tasks
+   /rpgkit.plan
    /rpgkit.code_gen
    [Optional] /rpgkit.rpg_edit <edit instructions>
    ```
@@ -241,7 +237,7 @@ rpgkit update
 
 ## 即将推出的功能
 
-- **更简化的生成命令**：把当前多步骤的生成流程合并为更少的命令，例如 `/rpgkit.generate_repo`、`/rpgkit.generate_feature` 和 `/rpgkit.plan`。
+- **更简化的生成命令**：把当前多步骤的生成流程合并为更少的命令，例如 `/rpgkit.generate_repo` 和 `/rpgkit.generate_feature`。`/rpgkit.plan` 已在 0.1.4 中发布。
 - **多语言支持**：增加对 Go、C++、Rust、JavaScript/TypeScript 等的支持。
 - **更多平台集成**：在不同系统上跨 CLI 和 VS Code 扩展工作流支持不同的 AI 编码智能体。
 

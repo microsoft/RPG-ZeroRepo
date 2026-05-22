@@ -137,11 +137,7 @@ uvx --from "git+https://github.com/microsoft/RPG-ZeroRepo.git#subdirectory=RPG-K
    /rpgkit.feature_build
    /rpgkit.feature_refactor
    [Optional] /rpgkit.feature_edit <edit instructions>
-   /rpgkit.build_skeleton
-   /rpgkit.build_data_flow
-   /rpgkit.design_base_classes
-   /rpgkit.design_interfaces
-   /rpgkit.plan_tasks
+   /rpgkit.plan
    /rpgkit.code_gen
    [Optional] /rpgkit.rpg_edit <edit instructions>
    ```
@@ -241,7 +237,7 @@ rpgkit update
 
 ## आगामी सुविधाएँ
 
-- **सरल जनरेशन कमांड्स:** वर्तमान बहु-चरण जनरेशन प्रवाह को कम कमांड्स में मर्ज किया जाएगा, जैसे `/rpgkit.generate_repo`, `/rpgkit.generate_feature` और `/rpgkit.plan`।
+- **सरल जनरेशन कमांड्स:** वर्तमान बहु-चरण जनरेशन प्रवाह को कम कमांड्स में मर्ज किया जाएगा, जैसे `/rpgkit.generate_repo` और `/rpgkit.generate_feature`। `/rpgkit.plan` 0.1.4 में रिलीज़ हो चुका है।
 - **बहु-भाषा समर्थन:** Go, C++, Rust, JavaScript/TypeScript और अन्य के लिए समर्थन जोड़ा जाएगा।
 - **अधिक प्लेटफ़ॉर्म एकीकरण:** विभिन्न सिस्टम्स पर विभिन्न AI कोडिंग एजेंट्स के लिए CLI और VS Code एक्सटेंशन वर्कफ़्लो में RPG-Kit समर्थन।
 

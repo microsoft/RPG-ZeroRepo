@@ -137,11 +137,7 @@ Use this path when you want RPG-Kit to turn requirements into a new codebase.
    /rpgkit.feature_build
    /rpgkit.feature_refactor
    [Optional] /rpgkit.feature_edit <edit instructions>
-   /rpgkit.build_skeleton
-   /rpgkit.build_data_flow
-   /rpgkit.design_base_classes
-   /rpgkit.design_interfaces
-   /rpgkit.plan_tasks
+   /rpgkit.plan
    /rpgkit.code_gen
    [Optional] /rpgkit.rpg_edit <edit instructions>
    ```
@@ -241,7 +237,7 @@ rpgkit update
 
 ## Upcoming Features
 
-- **Simpler generation commands:** merge the current multi-step generation flow into fewer commands, such as `/rpgkit.generate_repo`, `/rpgkit.generate_feature`, and `/rpgkit.plan`.
+- **Simpler generation commands:** merge the current multi-step generation flow into fewer commands, such as `/rpgkit.generate_repo` and `/rpgkit.generate_feature`. `/rpgkit.plan` has shipped in 0.1.4.
 - **Multi-language support:** add support for Go, C++, Rust, JavaScript/TypeScript, and more.
 - **More platform integrations:** support RPG-Kit across CLI and VS Code extension workflows for different AI coding agents on different systems.
 

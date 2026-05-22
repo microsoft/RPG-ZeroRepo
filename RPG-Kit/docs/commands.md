@@ -1,6 +1,6 @@
 # /rpgkit Commands Reference
 
-RPG-Kit provides 13 slash commands that work in three paths:
+RPG-Kit provides 14 slash commands that work in three paths:
 
 - **Forward pipeline:** Requirements → Repository Planning Graph (RPG) → Code
 - **Reverse encoder:** Existing code → RPG
@@ -23,11 +23,16 @@ RPG-Kit provides 13 slash commands that work in three paths:
 
 | Command | Description |
 | ------- | ----------- |
+| `/rpgkit.plan` | Run all five Phase-2 stages in one step with automatic resume — recommended |
 | `/rpgkit.build_skeleton` | Build repository file skeleton from component architecture; creates `.rpgkit/data/rpg.json` |
 | `/rpgkit.build_data_flow` | Build inter-component data flow DAG and update the RPG |
 | `/rpgkit.design_base_classes` | Design shared base classes and data structures |
 | `/rpgkit.design_interfaces` | Design function/class interfaces with type hints and docstrings |
 | `/rpgkit.plan_tasks` | Plan dependency-ordered implementation task batches |
+
+> `/rpgkit.plan` is the simplest way to drive Phase 2 end-to-end. Use
+> the individual commands above only when you want to debug or
+> re-run a specific stage.
 
 ### Phase 3: Code Generation and Surgical Edits
 
@@ -158,6 +163,69 @@ Edit feature tree nodes before repository planning begins.
 ---
 
 ## Phase 2: RPG Construction and Planning
+
+### `/rpgkit.plan`
+
+Run the full Phase-2 pipeline (`build_skeleton` → `build_data_flow` →
+`design_base_classes` → `design_interfaces` → `plan_tasks`) in one
+step. This is the recommended entry point for Phase 2.
+
+**Input:** `.rpgkit/data/feature_tree.json` (produced by
+`/rpgkit.feature_refactor`)
+
+**Output:** every artifact produced by the five individual commands —
+`skeleton.json`, `data_flow.json`, `base_classes.json`,
+`interfaces.json`, `tasks.json`, plus `rpg.json` and the
+`data_flow_viz.html` visualization.
+
+**Process:**
+
+1. **Probe progress** — runs `rpgkit script plan.py --check-only --json`
+   to see which stages already have valid artifacts.
+2. **Decide** — based on the probe result, the command prompts you
+   **once** with one of three options:
+    - All five stages already done → `Overwrite` or `Exit`.
+    - Partial progress (some stages done) → `Continue`, `Restart`, or `Exit`.
+    - Fresh workspace → no prompt; runs the full pipeline.
+3. **Run** — executes the chosen mode through `rpgkit script plan.py`.
+   Each stage's stdout is streamed live and also written to a per-stage
+   log under `.rpgkit/logs/`.
+4. **Verify** — after every stage's build script, the corresponding
+   `check_*.py` script re-runs to validate the produced artifact. If
+   verification fails the pipeline stops and prints recovery hints.
+
+**Resume semantics:** the command treats `type == "update"` from each
+`check_*.py` as the source of truth for "this stage is done". If you
+press Ctrl-C halfway through, running `/rpgkit.plan` again automatically
+resumes from the first not-done stage. When any earlier stage is
+re-run, every downstream stage is rebuilt too so artifacts never drift
+apart.
+
+**CLI flags forwarded after `$ARGUMENTS`:**
+
+- `--force` — discard existing artifacts and rebuild every stage.
+- `--max-iter-skeleton N`, `--max-iter-data-flow N`,
+  `--max-iter-base-classes N`, `--max-iter-interfaces N` —
+  override iteration counts for the corresponding stage.
+- `--verbose` — forward `--verbose` to every sub-script.
+- `--no-trajectory` — forward `--no-trajectory` where supported.
+
+**Examples:**
+
+```text
+/rpgkit.plan
+/rpgkit.plan --verbose
+/rpgkit.plan --force                    # rebuild everything
+/rpgkit.plan --max-iter-skeleton 15
+```
+
+To inspect progress without running anything:
+
+```bash
+rpgkit script plan.py --check-only
+```
+
+---
 
 ### `/rpgkit.build_skeleton`
 

@@ -137,11 +137,7 @@ uvx --from "git+https://github.com/microsoft/RPG-ZeroRepo.git#subdirectory=RPG-K
    /rpgkit.feature_build
    /rpgkit.feature_refactor
    [Optional] /rpgkit.feature_edit <edit instructions>
-   /rpgkit.build_skeleton
-   /rpgkit.build_data_flow
-   /rpgkit.design_base_classes
-   /rpgkit.design_interfaces
-   /rpgkit.plan_tasks
+   /rpgkit.plan
    /rpgkit.code_gen
    [Optional] /rpgkit.rpg_edit <edit instructions>
    ```
@@ -241,7 +237,7 @@ rpgkit update
 
 ## 今後の機能
 
-- **よりシンプルな生成コマンド:** 現在の多段階の生成フローを、`/rpgkit.generate_repo`、`/rpgkit.generate_feature`、`/rpgkit.plan` などのより少ないコマンドにまとめます。
+- **よりシンプルな生成コマンド:** 現在の多段階の生成フローを、`/rpgkit.generate_repo` や `/rpgkit.generate_feature` などのより少ないコマンドにまとめます。`/rpgkit.plan` は 0.1.4 でリリース済みです。
 - **多言語サポート:** Go、C++、Rust、JavaScript/TypeScript などのサポートを追加します。
 - **より多くのプラットフォーム連携:** さまざまなシステム上の異なる AI コーディングエージェントについて、CLI と VS Code 拡張ワークフローを横断して RPG-Kit をサポートします。
 
