@@ -197,6 +197,12 @@ def _run_git(workspace: Path, *args: str, check: bool = False, timeout: int = 30
     """
     import os as _os
     env = {**_os.environ, "LC_ALL": "C", "LANG": "C"}
+    # Strip inherited git env vars: a foreground hook caller may have set
+    # GIT_INDEX_FILE / GIT_DIR / GIT_WORK_TREE pointing at the outer repo.
+    # If we leak those into the inner-git call the outer repo's index gets
+    # corrupted (entries from $HOME/.rpgkit get written into the outer index.lock).
+    for _v in ("GIT_INDEX_FILE", "GIT_DIR", "GIT_WORK_TREE", "GIT_OBJECT_DIRECTORY"):
+        env.pop(_v, None)
     cmd = ["git", "-C", str(_inner_git_dir(workspace))] + list(args)
     return subprocess.run(
         cmd,
