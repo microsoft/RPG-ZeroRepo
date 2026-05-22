@@ -436,9 +436,15 @@ class LLMClient:
         call_record.success = response is not None
         call_record.error = error if not response else None
         if captured_path:
-            call_record.metadata["session_trace"] = str(
-                captured_path.relative_to(self._INFERRED_PROJECT_DIR)
-            )
+            try:
+                rel = captured_path.relative_to(self._INFERRED_PROJECT_DIR)
+                call_record.metadata["session_trace"] = str(rel)
+            except ValueError:
+                # captured_path lives outside the workspace (e.g. Claude
+                # writes traces under ~/.claude/projects/<hash>/sessions/).
+                # session_trace is purely informational — never let a
+                # bookkeeping error abort the LLM call.
+                call_record.metadata["session_trace"] = str(captured_path)
         
         # Store in history
         self._call_history.append(call_record)
