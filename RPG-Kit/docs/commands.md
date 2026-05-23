@@ -6,7 +6,7 @@ RPG-Kit provides 13 slash commands that work in three paths:
 - **Reverse encoder:** Existing code → RPG
 - **Surgical edit:** Natural-language changes applied to code, RPG, and dependency graph together
 
-> **Note on data paths.** Throughout this document, paths shown as `.rpgkit/data/...` and `.rpgkit/logs/...` are stable logical names. The actual files live **outside the workspace** under `~/.rpgkit/workspaces/<sha256(abspath)[:12]>/{data,logs}/` so that runtime artefacts never enter the user's git repository. Reports (`rpg.html`, review HTML, etc.) stay in the workspace at `<workspace>/.rpgkit/reports/` because they are small user-facing artefacts users may want to commit. Run `rpgkit version` from inside the workspace to see the resolved Data / Logs paths. See [project-structure.md](project-structure.md) for the full layout.
+> **Note on data paths.** Throughout this document, paths shown as `.rpgkit/data/...` and `.rpgkit/logs/...` are stable logical names. The actual files live **outside the workspace** under `~/.rpgkit/workspaces/<workspace-id>/{data,logs}/`, where `<workspace-id>` is a slug-based identifier and may include an overflow `-<hash6>` suffix, so that runtime artefacts never enter the user's git repository. Reports (`rpg.html`, review HTML, etc.) stay in the workspace at `<workspace>/.rpgkit/reports/` because they are small user-facing artefacts users may want to commit. Run `rpgkit version` from inside the workspace to see the resolved Data / Logs paths. See [project-structure.md](project-structure.md) for the full layout.
 
 ## Command Overview
 
