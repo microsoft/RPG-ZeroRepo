@@ -139,7 +139,7 @@ Next:
   /rpgkit.code_gen        — generate source code from the plan
 
 Inspect:
-  .rpgkit/data/data_flow_viz.html   — interactive DAG visualization
+  ~/.rpgkit/workspaces/<workspace-id>/data/data_flow_viz.html   — interactive DAG visualization
   rpgkit script plan.py --check-only — re-print the progress table
 
 For surgical adjustments to individual stages, the granular
