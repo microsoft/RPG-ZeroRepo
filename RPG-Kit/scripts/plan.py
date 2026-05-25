@@ -512,8 +512,7 @@ def main(argv: Optional[list[str]] = None) -> int:
     print()
     print(f"Plan complete in {total_elapsed:.1f}s.")
     print("Next: `/rpgkit.code_gen` to generate source code.")
-    print("Graph: open `.rpgkit/data/data_flow_viz.html` to inspect the DAG.")
-    return 0
+    print("Graph: see the 'Writing visualization to:' line above for the generated HTML path.")
 
 
 def _print_failure_hint(stage: Stage, rc: int, *, phase: str) -> None:
