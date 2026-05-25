@@ -170,7 +170,7 @@ Run the full Phase-2 pipeline (`build_skeleton` → `build_data_flow` →
 `design_base_classes` → `design_interfaces` → `plan_tasks`) in one
 step. This is the recommended entry point for Phase 2.
 
-**Input:** `.rpgkit/data/feature_tree.json` (produced by
+**Input:** `~/.rpgkit/workspaces/<workspace-id>/data/feature_tree.json` (produced by
 `/rpgkit.feature_refactor`)
 
 **Output:** every artifact produced by the five individual commands —
