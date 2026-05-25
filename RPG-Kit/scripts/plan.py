@@ -136,7 +136,7 @@ def _resolve_invoker() -> list[str]:
 
 def _script_argv(invoker: list[str], script_name: str) -> list[str]:
     """Build the argv needed to invoke ``script_name`` via ``invoker``."""
-    if invoker[0].endswith("rpgkit"):
+    if Path(invoker[0]).stem == "rpgkit":
         return [*invoker, script_name]
     return [*invoker, str(_SCRIPTS_DIR / script_name)]
 
