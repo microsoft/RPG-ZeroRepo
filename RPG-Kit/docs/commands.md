@@ -189,7 +189,7 @@ step. This is the recommended entry point for Phase 2.
     - Fresh workspace → no prompt; runs the full pipeline.
 3. **Run** — executes the chosen mode through `rpgkit script plan.py`.
    Each stage's stdout is streamed live and also written to a per-stage
-   log under `.rpgkit/logs/`.
+   log under `~/.rpgkit/workspaces/<workspace-id>/logs/`.
 4. **Verify** — after every stage's build script, the corresponding
    `check_*.py` script re-runs to validate the produced artifact. If
    verification fails the pipeline stops and prints recovery hints.
