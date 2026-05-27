@@ -1,6 +1,6 @@
 # /rpgkit Commands Reference
 
-RPG-Kit provides 14 slash commands that work in three paths:
+RPG-Kit provides 15 slash commands that work in three paths:
 
 - **Forward pipeline:** Requirements → Repository Planning Graph (RPG) → Code
 - **Reverse encoder:** Existing code → RPG
@@ -14,10 +14,15 @@ RPG-Kit provides 14 slash commands that work in three paths:
 
 | Command | Description |
 | ------- | ----------- |
+| `/rpgkit.feature_construct <desc>` | Run Phase 1 feature specification, build, and refactor in one step — recommended |
 | `/rpgkit.feature_spec <desc>` | Create structured feature specifications from user input or `docs/` files |
 | `/rpgkit.feature_build` | Generate and expand the feature tree from specifications |
 | `/rpgkit.feature_refactor` | Refactor feature tree into modular component architecture |
 | `/rpgkit.feature_edit <instr>` | Edit feature tree nodes before skeleton planning — optional |
+
+> `/rpgkit.feature_construct` is the simplest way to drive Phase 1 end-to-end. Use
+> the individual Phase 1 commands only when you want to debug or re-run a
+> specific stage.
 
 ### Phase 2: RPG Construction and Planning
 
@@ -53,6 +58,51 @@ Both directions produce the same RPG structure at `.rpgkit/data/rpg.json`, enabl
 ---
 
 ## Phase 1: Feature Specification
+
+### `/rpgkit.feature_construct`
+
+Run the full Phase 1 pipeline (`feature_spec` → `feature_build` → `feature_refactor`) in one step. This is the recommended entry point for creating the feature tree that feeds `/rpgkit.plan`.
+
+**Input modes:**
+
+- **Direct input:** provide requirements after the command.
+- **Auto-detect:** omit input to use existing `docs/*.md` files automatically.
+- **Inline prompt:** if neither direct input nor usable docs exist, the command asks for requirements and then continues in the same flow.
+
+**Output:** every artifact produced by the three individual Phase 1 commands — `.rpgkit/data/feature_spec/`, `feature_spec.json`, `feature_build.json`, and `feature_tree.json`.
+
+**Process:**
+
+1. **Probe progress** — runs `rpgkit script feature_construct.py --check-only --json` to see which Phase 1 stages already have valid artifacts.
+2. **Generate requirements artifacts when needed** — follows the `/rpgkit.feature_spec` workflow for direct text or `docs/*.md` sources.
+3. **Run/resume** — executes `rpgkit script feature_construct.py`, skipping completed stages and cascading downstream rebuilds when an upstream stage reruns.
+4. **Optional expansion** — after completion, the user can expand features through the existing `feature_build --mode suggest-directions` and `--mode step2 --direction <indices>` flow; refactor is rerun afterward so `feature_tree.json` stays aligned.
+
+**CLI flags forwarded after `$ARGUMENTS`:**
+
+- `--check-only` — show Phase 1 progress without modifying artifacts or running stages.
+- `--json` — with `--check-only`, emit the progress report as JSON.
+- `--force` — rebuild all Phase 1 stages.
+- `--dry-run` — print the commands that would run without modifying artifacts.
+- `--verbose` — forward native verbose logging flags.
+- `--no-trajectory` — disable trajectory recording where supported.
+- `--max-iter-refactor N` — forward to `feature_refactor.py` as `--max-iterations N`.
+- `--review-threshold N` — forward to `feature_build.py --mode step1`.
+- `--review-max-iterations N` — forward to `feature_build.py --mode step1`.
+
+Use `--` to separate options from requirement text:
+
+```text
+/rpgkit.feature_construct --check-only
+/rpgkit.feature_construct --check-only --json
+/rpgkit.feature_construct --review-threshold 99 -- Build a CLI tool for managing Docker containers
+/rpgkit.feature_construct Build a CLI tool for managing Docker containers
+/rpgkit.feature_construct                  # Auto-detect docs/ files
+```
+
+**Next step:** `/rpgkit.plan` is the default handoff after Phase 1. If the final tree needs small adjustments, run `/rpgkit.feature_edit <instructions>`. The granular Phase 1 commands remain available for debug and surgical reruns; `/rpgkit.build_skeleton` is a Phase 2 granular fallback, not the default next step.
+
+---
 
 ### `/rpgkit.feature_spec`
 
@@ -171,7 +221,7 @@ Run the full Phase-2 pipeline (`build_skeleton` → `build_data_flow` →
 step. This is the recommended entry point for Phase 2.
 
 **Input:** `~/.rpgkit/workspaces/<workspace-id>/data/feature_tree.json` (produced by
-`/rpgkit.feature_refactor`)
+`/rpgkit.feature_construct` or `/rpgkit.feature_refactor`)
 
 **Output:** every artifact produced by the five individual commands —
 `skeleton.json`, `data_flow.json`, `base_classes.json`,
@@ -530,10 +580,10 @@ All intermediate data is stored in `.rpgkit/data/`:
 
 | File | Produced by | Description |
 | ---- | ----------- | ----------- |
-| `feature_spec/` | `feature_spec` | Evidence and feature specification documents |
-| `feature_spec.json` | `feature_spec` | Structured feature specification |
-| `feature_build.json` | `feature_build` | Expanded feature tree |
-| `feature_tree.json` | `feature_refactor` / `feature_edit` | Component architecture |
+| `feature_spec/` | `feature_construct` / `feature_spec` | Evidence and feature specification documents |
+| `feature_spec.json` | `feature_construct` / `feature_spec` | Structured feature specification |
+| `feature_build.json` | `feature_construct` / `feature_build` | Expanded feature tree |
+| `feature_tree.json` | `feature_construct` / `feature_refactor` / `feature_edit` | Component architecture |
 | `skeleton.json` | `build_skeleton` | File skeleton |
 | `skeleton_summary.txt` | `build_skeleton` | Human-readable skeleton summary |
 | `rpg.json` | `build_skeleton` / `encode`, then updated by later commands | Repository Planning Graph |
