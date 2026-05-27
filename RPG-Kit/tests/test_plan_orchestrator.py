@@ -5,10 +5,10 @@ Covers the decision rules of ``scripts/plan.py``:
 * ``decide()`` cascade behaviour
 * probe-result parsing (``_extract_last_json_object``)
 * CLI flag wiring for max-iteration overrides
+* checker JSON field contracts used by the orchestrator
 
-The build / check sub-scripts themselves are *not* exercised here
-because they would require real LLM calls; this test focuses on the
-orchestrator's deterministic logic only.
+The build sub-scripts themselves are *not* exercised here because they
+would require real LLM calls; this test focuses on deterministic logic.
 """
 
 from __future__ import annotations
@@ -21,6 +21,9 @@ import pytest
 
 _REPO = Path(__file__).resolve().parents[1]
 _SCRIPTS = _REPO / "scripts"
+
+if str(_SCRIPTS) not in sys.path:
+    sys.path.insert(0, str(_SCRIPTS))
 
 # ``plan.py`` is shipped under ``scripts/`` and not installed as a
 # package, so load it via importlib.
@@ -42,6 +45,15 @@ def _states(types: list[str]) -> list["plan.StageState"]:
         plan.StageState(stage=stage, type=t, done=(t == "update"))
         for stage, t in zip(plan.STAGES, types)
     ]
+
+
+def _load_script(name: str):
+    spec = importlib.util.spec_from_file_location(name, _SCRIPTS / f"{name}.py")
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[name] = module
+    spec.loader.exec_module(module)
+    return module
 
 
 # ---------------------------------------------------------------------------
@@ -161,6 +173,21 @@ class TestBuildArgs:
 # ---------------------------------------------------------------------------
 # Stage table sanity — guard against silent registry drift.
 # ---------------------------------------------------------------------------
+
+class TestCheckerContracts:
+    @pytest.mark.parametrize(
+        ("script_name", "args"),
+        [
+            ("check_data_flow", (Path("missing-data-flow.json"), Path("missing-skeleton.json"))),
+            ("check_base_classes", (Path("missing-base-classes.json"),)),
+        ],
+    )
+    def test_plan_checkers_emit_type_not_state(self, script_name: str, args: tuple[Path, ...]) -> None:
+        checker = _load_script(script_name)
+        result = checker.inspect_state(*args)
+        assert result["type"] == "init"
+        assert "state" not in result
+
 
 class TestStageRegistry:
     def test_five_stages_in_canonical_order(self) -> None:

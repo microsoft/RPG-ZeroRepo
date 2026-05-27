@@ -168,14 +168,14 @@ def inspect_state(data_flow_path: Path, skeleton_path: Path) -> Dict[str, Any]:
     """Inspect current state and determine action needed.
     
     Returns dict with:
-    - state: "error" | "init" | "warning" | "update"
+    - type: "error" | "init" | "warning" | "update"
     - message: description
     - details: additional info
     """
     # Check if data_flow.json exists
     if not data_flow_path.exists():
         return {
-            "state": "init",
+            "type": "init",
             "message": "data_flow.json not found - need to run build_data_flow",
             "details": {}
         }
@@ -186,7 +186,7 @@ def inspect_state(data_flow_path: Path, skeleton_path: Path) -> Dict[str, Any]:
             data_flow = json.load(f)
     except json.JSONDecodeError as e:
         return {
-            "state": "error",
+            "type": "error",
             "message": f"Invalid JSON in data_flow.json: {e}",
             "details": {}
         }
@@ -194,7 +194,7 @@ def inspect_state(data_flow_path: Path, skeleton_path: Path) -> Dict[str, Any]:
     # Check for error field
     if "error" in data_flow:
         return {
-            "state": "error",
+            "type": "error",
             "message": f"Data flow has error: {data_flow['error']}",
             "details": {}
         }
@@ -203,7 +203,7 @@ def inspect_state(data_flow_path: Path, skeleton_path: Path) -> Dict[str, Any]:
     is_valid, errors = validate_data_flow_structure(data_flow)
     if not is_valid:
         return {
-            "state": "error",
+            "type": "error",
             "message": "Data flow structure is invalid",
             "details": {"errors": errors}
         }
@@ -223,14 +223,14 @@ def inspect_state(data_flow_path: Path, skeleton_path: Path) -> Dict[str, Any]:
             
             if not is_consistent:
                 return {
-                    "state": "warning",
+                    "type": "warning",
                     "message": "Component mismatch between skeleton and data flow",
                     "details": xval_details
                 }
             
             # All good
             return {
-                "state": "update",
+                "type": "update",
                 "message": "Data flow is valid and consistent",
                 "details": {
                     "edge_count": len(data_flow.get("data_flow", [])),
@@ -242,7 +242,7 @@ def inspect_state(data_flow_path: Path, skeleton_path: Path) -> Dict[str, Any]:
         except Exception as e:
             # Skeleton load failed, just validate data flow
             return {
-                "state": "update",
+                "type": "update",
                 "message": f"Data flow is valid (skeleton check skipped: {e})",
                 "details": {
                     "edge_count": len(data_flow.get("data_flow", [])),
@@ -252,7 +252,7 @@ def inspect_state(data_flow_path: Path, skeleton_path: Path) -> Dict[str, Any]:
     
     # No skeleton to compare
     return {
-        "state": "update",
+        "type": "update",
         "message": "Data flow is valid (no skeleton to cross-validate)",
         "details": {
             "edge_count": len(data_flow.get("data_flow", [])),
@@ -263,7 +263,7 @@ def inspect_state(data_flow_path: Path, skeleton_path: Path) -> Dict[str, Any]:
 
 def print_state(result: Dict[str, Any]) -> None:
     """Print state information."""
-    state = result["state"]
+    state = result["type"]
     message = result["message"]
     details = result.get("details", {})
     
@@ -338,7 +338,7 @@ def main():
     result = inspect_state(args.data_flow, args.skeleton)
     
     # In verbose mode, include all edges and component details
-    if args.verbose and result.get("state") == "update":
+    if args.verbose and result.get("type") == "update":
         data_flow_data = load_json(args.data_flow)
         if data_flow_data:
             result["edges"] = data_flow_data.get("data_flow", [])
@@ -353,7 +353,7 @@ def main():
         print_state(result)
         
         # Print verbose details
-        if args.verbose and result.get("state") == "update":
+        if args.verbose and result.get("type") == "update":
             edges = result.get("edges", [])
             if edges:
                 print("\nData Flow Edges:")
@@ -365,7 +365,7 @@ def main():
                 print(f"\nSubtree Order: {' → '.join(subtree_order)}")
     
     # Return exit code based on state
-    if result["state"] == "error":
+    if result["type"] == "error":
         return 1
     return 0
 

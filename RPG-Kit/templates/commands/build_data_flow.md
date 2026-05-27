@@ -24,7 +24,7 @@ Unless it is explicitly empty, you may assume it is always available as `$ARGUME
 
 Run the script `rpgkit script check_data_flow.py` to verify the current state.
 
-1. Inspect the `state` field in the output:
+1. Inspect the `type` field in the output:
 
    * `error` → Display the error message and stop. Instruct user to fix the error or regenerate. Terminate this command.
    * `init` → Proceed to Step 2.

@@ -108,14 +108,14 @@ def inspect_state(base_classes_path: Path) -> Dict[str, Any]:
     """Inspect current state and determine action needed.
     
     Returns dict with:
-    - state: "error" | "init" | "update"
+    - type: "error" | "init" | "update"
     - message: description
     - details: additional info
     """
     # Check if base_classes.json exists
     if not base_classes_path.exists():
         return {
-            "state": "init",
+            "type": "init",
             "message": "base_classes.json not found - need to run design_base_classes",
             "details": {}
         }
@@ -126,7 +126,7 @@ def inspect_state(base_classes_path: Path) -> Dict[str, Any]:
             data = json.load(f)
     except json.JSONDecodeError as e:
         return {
-            "state": "error",
+            "type": "error",
             "message": f"Invalid JSON in base_classes.json: {e}",
             "details": {}
         }
@@ -134,7 +134,7 @@ def inspect_state(base_classes_path: Path) -> Dict[str, Any]:
     # Check for error field
     if "error" in data:
         return {
-            "state": "error",
+            "type": "error",
             "message": f"Base classes has error: {data['error']}",
             "details": {}
         }
@@ -143,7 +143,7 @@ def inspect_state(base_classes_path: Path) -> Dict[str, Any]:
     is_valid, errors = validate_base_classes_structure(data)
     if not is_valid:
         return {
-            "state": "error",
+            "type": "error",
             "message": "Base classes structure or syntax is invalid",
             "details": {"errors": errors}
         }
@@ -161,7 +161,7 @@ def inspect_state(base_classes_path: Path) -> Dict[str, Any]:
     ds_file_paths = [ds.get("file_path", "") for ds in data_structures if ds.get("file_path")]
     
     return {
-        "state": "update",
+        "type": "update",
         "message": "Base classes are valid",
         "details": {
             "file_count": len(base_classes),
@@ -178,7 +178,7 @@ def inspect_state(base_classes_path: Path) -> Dict[str, Any]:
 
 def print_state(result: Dict[str, Any]) -> None:
     """Print state information."""
-    state = result["state"]
+    state = result["type"]
     message = result["message"]
     details = result.get("details", {})
     
@@ -259,7 +259,7 @@ def main():
     result = inspect_state(args.input)
     
     # In verbose mode, include raw base_classes data
-    if args.verbose and result.get("state") == "update":
+    if args.verbose and result.get("type") == "update":
         base_classes_data = load_json(args.input)
         if base_classes_data:
             result["base_classes"] = base_classes_data.get("base_classes", [])
@@ -273,7 +273,7 @@ def main():
         print_state(result)
     
     # Return exit code based on state
-    if result["state"] == "error":
+    if result["type"] == "error":
         return 1
     return 0
 
