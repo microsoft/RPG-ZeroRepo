@@ -8,8 +8,8 @@ layout is::
         __init__.py
         _assets.py
         core_pack/
-            scripts/         (full RPG-Kit/scripts/ tree)
-            commands/        (full RPG-Kit/templates/commands/ tree)
+            scripts/         (full CoderMind/scripts/ tree)
+            commands/        (full CoderMind/templates/commands/ tree)
 
 ``rpgkit init`` and ``rpgkit update`` copy from here to the workspace
 when bundle mode is active (the default).  When the bundle is absent

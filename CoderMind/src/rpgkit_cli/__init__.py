@@ -430,9 +430,9 @@ def _write_workspace_config(project_path: Path, selected_ai: str) -> None:
 
     cfg_path.parent.mkdir(parents=True, exist_ok=True)
     cfg_path.write_text(
-        "# RPG-Kit workspace configuration\n"
+        "# CoderMind workspace configuration\n"
         "# Managed by `rpgkit init` / `rpgkit update`.  Safe to commit.\n"
-        "# See: https://github.com/microsoft/RPG-ZeroRepo (RPG-Kit/docs/configuration.md)\n"
+        "# See: https://github.com/microsoft/RPG-ZeroRepo (CoderMind/docs/configuration.md)\n"
         "\n"
         "[rpgkit]\n"
         f'ai_cli_cmd = "{cli_cmd}"\n',
@@ -872,15 +872,18 @@ _GITIGNORE_RPGKIT_AI = {
 }
 
 BANNER = """
-██████╗ ██████╗  ██████╗       ██╗  ██╗██╗████████╗
-██╔══██╗██╔══██╗██╔════╝       ██║ ██╔╝██║╚══██╔══╝
-██████╔╝██████╔╝██║  ███╗█████╗█████╔╝ ██║   ██║   
-██╔══██╗██╔═══╝ ██║   ██║╚════╝██╔═██╗ ██║   ██║   
-██║  ██║██║     ╚██████╔╝      ██║  ██╗██║   ██║   
-╚═╝  ╚═╝╚═╝      ╚═════╝       ╚═╝  ╚═╝╚═╝   ╚═╝   
+ ██████╗ ██████╗ ██████╗ ███████╗██████╗ ███╗   ███╗██╗███╗   ██╗██████╗
+██╔════╝██╔═══██╗██╔══██╗██╔════╝██╔══██╗████╗ ████║██║████╗  ██║██╔══██╗
+██║     ██║   ██║██║  ██║█████╗  ██████╔╝██╔████╔██║██║██╔██╗ ██║██║  ██║
+██║     ██║   ██║██║  ██║██╔══╝  ██╔══██╗██║╚██╔╝██║██║██║╚██╗██║██║  ██║
+╚██████╗╚██████╔╝██████╔╝███████╗██║  ██║██║ ╚═╝ ██║██║██║ ╚████║██████╔╝
+ ╚═════╝ ╚═════╝ ╚═════╝ ╚══════╝╚═╝  ╚═╝╚═╝     ╚═╝╚═╝╚═╝  ╚═══╝╚═════╝
 """
 
-TAGLINE = "RPG-Kit Plugin - LLM-based Automated Code Generation System Toolkit"
+TAGLINE = (
+    "CoderMind — Plan-first coding for Claude Code & GitHub Copilot\n"
+    "(formerly RPG-Kit — CLI commands rename in a future release)"
+)
 
 
 class StepTracker:
@@ -1102,7 +1105,7 @@ class BannerGroup(TyperGroup):
 
 app = typer.Typer(
     name="rpgkit",
-    help="Setup tool for RPG-Kit feature tree generation projects",
+    help="Setup tool for CoderMind (formerly RPG-Kit) — repository planning graph workspaces",
     add_completion=False,
     invoke_without_command=True,
     cls=BannerGroup,
@@ -1340,7 +1343,7 @@ def init_git_repo(
         subprocess.run(["git", "init"], check=True, capture_output=True, text=True)
         subprocess.run(["git", "add", "."], check=True, capture_output=True, text=True)
         subprocess.run(
-            ["git", "commit", "-m", "Initial commit from RPG-Kit template"],
+            ["git", "commit", "-m", "Initial commit from CoderMind template"],
             check=True,
             capture_output=True,
             text=True,
@@ -2292,7 +2295,7 @@ def _maybe_offer_initial_encode(
         console.print()
         console.print(
             Panel(
-                "RPG-Kit can build the initial graph for this repo now by "
+                "CoderMind can build the initial graph for this repo now by "
                 "running the encoder against your existing code.  This is "
                 "what the [cyan]/rpgkit.encode[/] slash command does — kicking "
                 "it off here saves you a step.\n\n"
@@ -2359,7 +2362,7 @@ def _install_claude_hooks(project_path: Path) -> None:
                 "command": (
                     f"{_HOOK_PATH_FALLBACK}; "
                     "rpgkit script update_graphs.py status 2>/dev/null"
-                    " || echo '[RPG-Kit] RPG status unavailable'"
+                    " || echo '[CoderMind] RPG status unavailable'"
                 ),
                 "timeout": 10,
             }
@@ -3042,7 +3045,7 @@ def _fetch_latest_rpgkit_release(
     if release_data is None:
         release_type = "pre-release" if pre else "release"
         raise RuntimeError(
-            f"No RPG-Kit {release_type} found in {repo_owner}/{repo_name}. "
+            f"No CoderMind {release_type} found in {repo_owner}/{repo_name}. "
             f"Expected tags to start with {_RPGKIT_RELEASE_TAG_PREFIX}."
         )
     return release_data
@@ -3758,7 +3761,7 @@ def init(
         ),
     ),
 ):
-    """Initialize a new RPG-Kit project from the latest template.
+    """Initialize a new CoderMind project from the latest template.
 
     This command will:
     1. Check that required tools are installed (git is optional)
@@ -3837,7 +3840,7 @@ def init(
     current_dir = Path.cwd()
 
     setup_lines = [
-        "[cyan]RPG-Kit Project Setup[/cyan]",
+        "[cyan]CoderMind Project Setup[/cyan]",
         "",
         f"{'Project':<15} [green]{project_path.name}[/green]",
         f"{'Working Path':<15} [dim]{current_dir}[/dim]",
@@ -3921,7 +3924,7 @@ def init(
     console.print(f"[cyan]Selected AI assistant:[/cyan] {selected_ai}")
     console.print(f"[cyan]Selected script type:[/cyan] {selected_script}")
 
-    tracker = StepTracker("Initialize RPG-Kit Project")
+    tracker = StepTracker("Initialize CoderMind Project")
 
     sys._rpgkit_tracker_active = True
 
@@ -4132,7 +4135,7 @@ def init(
         else:
             ignored_path_desc = agent_config["folder"]
         security_notice = Panel(
-            f"RPG-Kit's slash command definitions under [cyan]{ignored_path_desc}[/cyan] are regenerated by [cyan]rpgkit init/update[/cyan] and are excluded from git by default.\n"
+            f"CoderMind's slash command definitions under [cyan]{ignored_path_desc}[/cyan] are regenerated by [cyan]rpgkit init/update[/cyan] and are excluded from git by default.\n"
             f"Collaborators should run [cyan]rpgkit init[/cyan] in their clone to materialize the prompt files locally.",
             title="[yellow]Agent Folder Notice[/yellow]",
             border_style="yellow",
@@ -4196,7 +4199,7 @@ def init(
 
     step_num += 1
     steps_lines.append(
-        f"{step_num}. The RPG-Kit MCP server provides [cyan]search_rpg[/], [cyan]explore_rpg[/], "
+        f"{step_num}. The CoderMind MCP server provides [cyan]search_rpg[/], [cyan]explore_rpg[/], "
         f"[cyan]get_node_detail[/], and [cyan]list_rpg_tree[/] "
         f"tools for AI agents to query RPG graphs via the Model Context Protocol."
     )
@@ -4316,7 +4319,7 @@ def update(
         ),
     ),
 ):
-    """Update RPG-Kit template files in an existing project to the latest version.
+    """Update CoderMind template files in an existing project to the latest version.
 
     This command updates scripts, templates, command definitions, MCP
     config, gitignore rules, and git hooks in the current directory.
@@ -4340,9 +4343,9 @@ def update(
         console.print(
             Panel(
                 "No [cyan].rpgkit/[/cyan] directory found in the current directory.\n"
-                "This command updates an existing RPG-Kit project.\n\n"
+                "This command updates an existing CoderMind project.\n\n"
                 "To create a new project, use: [cyan]rpgkit init[/cyan]",
-                title="[red]Not an RPG-Kit Project[/red]",
+                title="[red]Not a CoderMind Project[/red]",
                 border_style="red",
                 padding=(1, 2),
             )
@@ -4524,7 +4527,7 @@ def update(
             console.print(f"[dim]update: skipping CLI upgrade ({skip_reason}).[/dim]")
 
     # Build step tracker
-    tracker = StepTracker("Update RPG-Kit Project")
+    tracker = StepTracker("Update CoderMind Project")
 
     sys._rpgkit_tracker_active = True
 
@@ -4660,7 +4663,7 @@ def update(
 
     console.print(tracker.render())
     console.print(
-        "\n[bold green]RPG-Kit templates updated successfully.[/bold green]"
+        "\n[bold green]CoderMind templates updated successfully.[/bold green]"
     )
     console.print(
         f"[dim]Updated: scripts, templates, and {AGENT_CONFIG[selected_ai]['name']} "
@@ -4717,7 +4720,7 @@ def script(
         help="Print the absolute filesystem path of NAME and exit.",
     ),
 ) -> None:
-    """Execute a bundled RPG-Kit pipeline script.
+    """Execute a bundled CoderMind pipeline script.
 
     All arguments after ``<relpath>`` are forwarded verbatim to the
     target script.  Standard input/output/error are inherited so the
@@ -5134,7 +5137,7 @@ def check():
 
     console.print(tracker.render())
 
-    console.print("\n[bold green]RPG-Kit CLI is ready to use![/bold green]")
+    console.print("\n[bold green]CoderMind CLI is ready to use![/bold green]")
 
     if not git_ok:
         console.print("[dim]Tip: Install git for repository management[/dim]")
@@ -5300,7 +5303,7 @@ def version():
 
     panel = Panel(
         info_table,
-        title="[bold cyan]RPG-Kit CLI Information[/bold cyan]",
+        title="[bold cyan]CoderMind CLI Information[/bold cyan]",
         border_style="cyan",
         padding=(1, 2),
     )

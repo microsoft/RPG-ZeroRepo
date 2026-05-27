@@ -1,4 +1,4 @@
-name: RPG-Kit Lint
+name: CoderMind Lint
 
 permissions:
   contents: read
@@ -7,13 +7,13 @@ on:
   push:
     branches: [main]
     paths:
-      - "RPG-Kit/**"
+      - "CoderMind/**"
       - ".github/workflows/rpgkit-*.yml"
       - ".github/workflows/scripts/rpgkit/**"
       - ".markdownlint-cli2.jsonc"
   pull_request:
     paths:
-      - "RPG-Kit/**"
+      - "CoderMind/**"
       - ".github/workflows/rpgkit-*.yml"
       - ".github/workflows/scripts/rpgkit/**"
       - ".markdownlint-cli2.jsonc"
@@ -30,4 +30,4 @@ jobs:
         uses: DavidAnson/markdownlint-cli2-action@v19
         with:
           globs: |
-            RPG-Kit/**/*.md
+            CoderMind/**/*.md

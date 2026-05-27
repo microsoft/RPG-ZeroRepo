@@ -1,11 +1,11 @@
-name: RPG-Kit Pre-Release
+name: CoderMind Pre-Release
 
 on:
   push:
     branches:
       - dev
     paths:
-      - "RPG-Kit/**"
+      - "CoderMind/**"
       - ".github/workflows/rpgkit-pre-release.yml"
       - ".github/workflows/scripts/rpgkit/**"
   workflow_dispatch:
@@ -17,7 +17,7 @@ jobs:
       contents: write
       pull-requests: write
     env:
-      PROJECT_DIR: RPG-Kit
+      PROJECT_DIR: CoderMind
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -28,7 +28,7 @@ jobs:
       - name: Prepare scripts
         run: chmod +x .github/workflows/scripts/rpgkit/*.sh
 
-      - name: Get RPG-Kit pre-release version
+      - name: Get CoderMind pre-release version
         id: get_tag
         run: .github/workflows/scripts/rpgkit/get-next-pre-version.sh "${{ github.run_number }}"
 
