@@ -101,7 +101,7 @@ except ImportError:  # pragma: no cover - fallback for older Pythons
 #: Subdirectory of the user's home where cmind keeps all per-workspace data.
 HOME_ROOT_RELPATH = Path(".cmind") / "workspaces"
 
-#: Marker file inside the workspace that identifies it as an cmind
+#: Marker file inside the workspace that identifies it as a cmind
 #: workspace. ``cmind init`` writes this; cwd-walk-up looks for it.
 WORKSPACE_MARKER_RELPATH = Path(".cmind") / "config.toml"
 

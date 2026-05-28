@@ -1506,61 +1506,6 @@ def _cleanup_legacy_vscode_mcp(project_path: Path) -> None:
         pass
 
 
-def _cleanup_legacy_codegen_persistent(project_path: Path) -> list[str]:
-    """Delete obsolete ``cmind-codegen.*`` persistent-instruction files.
-
-    Earlier versions of ``cmind init`` (pre-C4 cleanup) wrote a
-    codegen-specific instructions file that AI agents would auto-load on
-    every session, polluting unrelated commands (rpg_edit, encode, plain
-    Q&A) with codegen workflow noise.
-
-    This helper:
-
-    * Removes ``<project>/.claude/rules/cmind-codegen.md``
-    * Removes ``<project>/.github/instructions/cmind-codegen.instructions.md``
-    * Also cleans the legacy ``<project>/repo/.claude/...`` and
-      ``<project>/repo/.github/...`` paths, so workspaces created
-      under the old ``<workspace>/repo`` layout are upgraded on the
-      next ``cmind init`` / ``cmind update`` run.
-    * Tidies up empty parent directories the file leaves behind.
-    * Returns the list of paths actually removed (for tracker reporting).
-
-    The function is safe to call repeatedly and on workspaces that never
-    had the legacy file.
-    """
-    legacy_repo_dir = project_path / "repo"
-    candidates = [
-        # New layout (workspace == repo)
-        project_path / ".claude" / "rules" / "cmind-codegen.md",
-        project_path / ".github" / "instructions" / "cmind-codegen.instructions.md",
-        # Legacy layout (<workspace>/repo) — keep scanning so users who
-        # upgrade from old workspaces still get the file removed.
-        legacy_repo_dir / ".claude" / "rules" / "cmind-codegen.md",
-        legacy_repo_dir / ".github" / "instructions" / "cmind-codegen.instructions.md",
-    ]
-
-    removed: list[str] = []
-    for path in candidates:
-        if not path.is_file():
-            continue
-        try:
-            path.unlink()
-            removed.append(str(path.relative_to(project_path)))
-        except OSError:
-            continue
-
-        # Tidy up empty parent dirs (only if the parent contains nothing
-        # else; we never delete user-owned content).
-        parent = path.parent
-        try:
-            if parent.exists() and not any(parent.iterdir()):
-                parent.rmdir()
-        except OSError:
-            pass
-
-    return removed
-
-
 def _generate_mcp_config(
     project_path: Path,
     selected_ai: str,
@@ -2284,8 +2229,16 @@ def _maybe_offer_initial_encode(
     Failures never propagate — ``cmind init`` is already done and we
     don't want a flaky encoder to taint the exit code.
     """
-    # Already encoded: nothing to do.
-    rpg_file = project_path / ".cmind" / "data" / "rpg.json"
+    # Already encoded: nothing to do.  rpg.json lives in the home-side
+    # workspace store (``~/.cmind/workspaces/<id>/data/rpg.json``), not
+    # in the workspace-local ``.cmind/data/`` — use the storage helper
+    # so this check matches where the encoder actually writes.
+    try:
+        rpg_file = _storage.workspace_data_dir(project_path) / "rpg.json"
+    except Exception:
+        # Fallback for environments where storage resolution fails;
+        # err on the side of running the encoder rather than skipping it.
+        rpg_file = project_path / ".cmind" / "data" / "rpg.json"
     if rpg_file.exists():
         return
 
@@ -3951,7 +3904,6 @@ def init(
         ("gitignore", "Configure .gitignore"),
         ("mcp", "Configure MCP server"),
         ("copilot-cli-mcp", "Register rpg-tools in ~/.copilot/mcp-config.json"),
-        ("legacy-cleanup", "Remove obsolete persistent rules"),
         ("cleanup", "Cleanup"),
         ("git", "Initialize git repository"),
         ("hooks", "Install auto-update hooks"),
@@ -4015,21 +3967,6 @@ def init(
             else:
                 tracker.start("copilot-cli-mcp")
                 _register_copilot_cli_global_mcp(tracker=tracker)
-
-            # Migrate workspaces created before C4: drop the auto-loaded
-            # cmind-codegen.* persistent-instruction files.
-            tracker.start("legacy-cleanup")
-            try:
-                removed = _cleanup_legacy_codegen_persistent(project_path)
-                if removed:
-                    tracker.complete(
-                        "legacy-cleanup",
-                        f"removed {len(removed)} file(s)",
-                    )
-                else:
-                    tracker.skip("legacy-cleanup", "none")
-            except Exception as exc:
-                tracker.error("legacy-cleanup", str(exc))
 
             if not no_git:
                 tracker.start("git")
@@ -4552,7 +4489,6 @@ def update(
         ("gitignore", "Configure .gitignore"),
         ("mcp", "Configure MCP server"),
         ("copilot-cli-mcp", "Register rpg-tools in ~/.copilot/mcp-config.json"),
-        ("legacy-cleanup", "Remove obsolete persistent rules"),
         ("hooks", "Install auto-update hooks"),
         ("cleanup", "Cleanup"),
         ("final", "Finalize"),
@@ -4614,21 +4550,6 @@ def update(
             else:
                 tracker.start("copilot-cli-mcp")
                 _register_copilot_cli_global_mcp(tracker=tracker)
-
-            # Migrate workspaces created before C4: drop the auto-loaded
-            # cmind-codegen.* persistent-instruction files.
-            tracker.start("legacy-cleanup")
-            try:
-                removed = _cleanup_legacy_codegen_persistent(project_path)
-                if removed:
-                    tracker.complete(
-                        "legacy-cleanup",
-                        f"removed {len(removed)} file(s)",
-                    )
-                else:
-                    tracker.skip("legacy-cleanup", "none")
-            except Exception as exc:
-                tracker.error("legacy-cleanup", str(exc))
 
             # Re-install hooks so behavior fixes propagate to existing
             # workspaces.  Without this, the .git/hooks/* files stay
