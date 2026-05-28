@@ -7,7 +7,7 @@ Function: Validate base_classes.json state and validate Python syntax
 - Validates Python code syntax (error state if syntax errors)
 - Returns update state if valid
 
-Input: .rpgkit/base_classes.json
+Input: .cmind/base_classes.json
 """
 
 import json

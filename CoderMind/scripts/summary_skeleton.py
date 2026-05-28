@@ -417,7 +417,7 @@ def main() -> int:
     input_path = Path(args.input)
     if not input_path.exists():
         print(f"Error: Skeleton file not found: {input_path}")
-        print("Please run /rpgkit.build_skeleton first.")
+        print("Please run /cmind.build_skeleton first.")
         return 1
     
     skeleton_data = load_skeleton(input_path)

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Feature Module for RPG-Kit.
+"""Feature Module for CoderMind.
 
 This module provides prompt templates for feature tree operations:
 - Feature build (expansion and review)

@@ -1,6 +1,6 @@
 ---
 description: Build inter-component data flow graph (DAG)
-name: rpgkit.build_data_flow
+name: cmind.build_data_flow
 ---
 
 ## User Input
@@ -16,13 +16,13 @@ All the bash command timeout is set to 1 hour.
 
 ## **Outline**
 
-The text entered by the user after `/rpgkit.build_data_flow` **is the adjustment suggestion**.
+The text entered by the user after `/cmind.build_data_flow` **is the adjustment suggestion**.
 Unless it is explicitly empty, you may assume it is always available as `$ARGUMENTS`.
 **Do not** ask the user to repeat the input.
 
 ### Step 1: Pre-check
 
-Run the script `rpgkit script check_data_flow.py` to verify the current state.
+Run the script `cmind script check_data_flow.py` to verify the current state.
 
 1. Inspect the `state` field in the output:
 
@@ -69,7 +69,7 @@ Run the script `rpgkit script check_data_flow.py` to verify the current state.
 1. Display the following prompt and wait for user confirmation:
 
    ```text
-   Description: Run the script `rpgkit script build_data_flow.py` to:
+   Description: Run the script `cmind script build_data_flow.py` to:
      - Design inter-component data flow as a DAG
      - Generate subtree processing order
    
@@ -81,7 +81,7 @@ Run the script `rpgkit script check_data_flow.py` to verify the current state.
 2. Execute the following command with the selected iteration count:
 
    ```bash
-   rpgkit script build_data_flow.py --max-iterations <default_or_user_defined>
+   cmind script build_data_flow.py --max-iterations <default_or_user_defined>
    ```
 
    The script writes a structured log automatically;
@@ -97,7 +97,7 @@ Run the script `rpgkit script check_data_flow.py` to verify the current state.
    - Components: <component_count>
    - Subtree Order: <show subtree order>
    
-   Output: .rpgkit/data/data_flow.json
+   Output: .cmind/data/data_flow.json
    ```
 
 ### Step 3: Validation
@@ -105,7 +105,7 @@ Run the script `rpgkit script check_data_flow.py` to verify the current state.
 Run the validation script:
 
 ```bash
-rpgkit script check_data_flow.py --verbose
+cmind script check_data_flow.py --verbose
 ```
 
 Display the validation results to the user:
@@ -125,29 +125,29 @@ Display the validation results to the user:
 Run the visualization script:
 
 ```bash
-rpgkit script generate_viz.py
+cmind script generate_viz.py
 ```
 
 Report:
 
 * Status of data flow building
 * Summary of edges and subtree order
-* Preparedness for next stage (`/rpgkit.design_base_classes` or `/rpgkit.design_interfaces`)
+* Preparedness for next stage (`/cmind.design_base_classes` or `/cmind.design_interfaces`)
 
 Prompt the user:
 
 ```text
 Data flow has been generated. Review the file structure at:
-.rpgkit/data/data_flow.json
+.cmind/data/data_flow.json
 
 Visualization generated at:
-.rpgkit/data/data_flow_viz.html (Open in browser to inspect)
+.cmind/data/data_flow_viz.html (Open in browser to inspect)
 
 To proceed with base class design, run:
-/rpgkit.design_base_classes
+/cmind.design_base_classes
 
 To regenerate with adjustments, run:
-/rpgkit.build_data_flow <adjustment instructions>
+/cmind.build_data_flow <adjustment instructions>
 ```
 
 **If keeping existing data flow:**
@@ -160,5 +160,5 @@ Current data flow:
 - Components: <component_count>
 - Subtree Order: <subtree_order>
 
-Next step: Run /rpgkit.design_base_classes
+Next step: Run /cmind.design_base_classes
 ```

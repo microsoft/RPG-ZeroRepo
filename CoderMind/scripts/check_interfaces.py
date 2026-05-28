@@ -320,7 +320,7 @@ def check_state(input_path: Path, output_path: Path) -> Dict[str, Any]:
     # Check input (skeleton.json)
     if not result["input_exists"]:
         result["type"] = "error"
-        result["message"] = f"Input file not found: {input_path}. Please run /rpgkit.build_skeleton first."
+        result["message"] = f"Input file not found: {input_path}. Please run /cmind.build_skeleton first."
         return result
     
     input_valid, input_errors = validate_skeleton(input_path)

@@ -12,7 +12,7 @@ downstream stage.  Two failure modes have hurt users in the past:
 2. **Silent corruption with no recovery path** — once truncated, the
    only "fix" was to re-encode from scratch.  But the inner-git
    snapshot repo already holds the previous good state at
-   ``~/.rpgkit/workspaces/<workspace-id>/.git/``; we just weren't using it.
+   ``~/.cmind/workspaces/<workspace-id>/.git/``; we just weren't using it.
 
 This module fixes both with two complementary primitives:
 
@@ -149,21 +149,21 @@ def safe_load_rpg(path: Path | str) -> Any:
 # ---------------------------------------------------------------------------
 
 # Filenames inside the inner-git repo that we know how to recover.
-# Mirrors the layout produced by :mod:`rpgkit_cli._inner_git`:
+# Mirrors the layout produced by :mod:`cmind_cli._inner_git`:
 # ``data/rpg.json``, ``data/dep_graph.json``, etc.
 def _git_relpath_for(path: Path) -> Optional[str]:
     """Return the path relative to the home-workspace dir for git lookup.
 
-    ``rpg.json`` lives at ``~/.rpgkit/workspaces/<workspace-id>/data/rpg.json``;
-    the inner git repo is rooted at ``~/.rpgkit/workspaces/<workspace-id>/``,
+    ``rpg.json`` lives at ``~/.cmind/workspaces/<workspace-id>/data/rpg.json``;
+    the inner git repo is rooted at ``~/.cmind/workspaces/<workspace-id>/``,
     so the path we ``git checkout`` is ``data/rpg.json``.  Falls back
     to ``None`` when ``path`` doesn't look like it lives under such a
     home dir (e.g. test fixtures passing absolute paths into ``/tmp``).
     """
     parts = path.resolve().parts
-    # Look for ".rpgkit/workspaces/<workspace-id>/..." in the path's components.
+    # Look for ".cmind/workspaces/<workspace-id>/..." in the path's components.
     try:
-        idx = parts.index(".rpgkit")
+        idx = parts.index(".cmind")
         if (
             idx + 2 < len(parts)
             and parts[idx + 1] == "workspaces"
@@ -211,7 +211,7 @@ def _try_restore_from_inner_git(
     # Strip any inherited ``GIT_*`` vars (e.g. ``GIT_DIR``,
     # ``GIT_INDEX_FILE``) that would point ``git`` at the **outer**
     # repository when this recovery runs inside a hook context.  This
-    # mirrors the env-sanitisation done in ``rpgkit_cli._inner_git._run_git``.
+    # mirrors the env-sanitisation done in ``cmind_cli._inner_git._run_git``.
     env = {k: v for k, v in os.environ.items()
            if k not in ("GIT_INDEX_FILE", "GIT_DIR",
                         "GIT_WORK_TREE", "GIT_OBJECT_DIRECTORY")}
@@ -259,7 +259,7 @@ def _try_restore_from_inner_git(
 
         logger.warning(
             "rpg-io: %s was corrupted (%s at line %d col %d); auto-restored "
-            "from inner-git snapshot %s. Run `rpgkit version` to see the "
+            "from inner-git snapshot %s. Run `cmind version` to see the "
             "exact inner-git path.",
             path,
             original_exc.msg,

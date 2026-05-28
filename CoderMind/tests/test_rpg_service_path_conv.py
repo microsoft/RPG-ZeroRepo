@@ -1,10 +1,10 @@
-"""Regression tests for the ``rpgkit update`` path-format bugs.
+"""Regression tests for the ``cmind update`` path-format bugs.
 
 After unifying RPG node paths to the canonical codegen format
 (``file::Name`` / ``file::Cls::method``) the ``RPGService`` helpers
 that bridge between dep_graph node IDs and RPG ``meta.path`` strings
 were producing legacy ``::class X`` forms, which would silently revert
-canonical paths to legacy on every ``rpgkit update`` run.  These tests
+canonical paths to legacy on every ``cmind update`` run.  These tests
 pin down the canonical behavior so the regression does not re-emerge.
 """
 
@@ -155,7 +155,7 @@ class TestRoundTrip:
 class TestProcessDiffSignature:
 
     def test_max_exclude_votes_parameter_exists(self):
-        """``rpgkit update`` should not silently spend 4 LLM calls on exclude_files; ``process_diff`` must accept and propagate the ``max_exclude_votes`` parameter so callers can opt for the single-call default."""
+        """``cmind update`` should not silently spend 4 LLM calls on exclude_files; ``process_diff`` must accept and propagate the ``max_exclude_votes`` parameter so callers can opt for the single-call default."""
         import inspect
         from rpg_encoder.rpg_evolution import RPGEvolution
         sig = inspect.signature(RPGEvolution.process_diff)

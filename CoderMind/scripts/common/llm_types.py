@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
-"""LLM Type Definitions for RPG-Kit.
+"""LLM Type Definitions for CoderMind.
 
 This module provides unified data structures for LLM interactions, including
 messages, responses, token usage tracking, and conversational memory.
 
 Ported from RPG-ZeroRepo (zerorepo/rpg_gen/base/llm_client/) with adaptations
-for RPG-Kit's project structure and coding conventions.
+for CoderMind's project structure and coding conventions.
 
 Key components:
 - LLMMessage: Standard message format for LLM interactions

@@ -10,13 +10,13 @@ The ``RPGParser`` class orchestrates the full pipeline:
 5. (Optional) Analyze data flow
 
 Ported from RPG-ZeroRepo ``zerorepo/rpg_encoder/rpg_parsing/rpg_encoding.py``
-with the following adaptations for RPG-Kit:
+with the following adaptations for CoderMind:
 - Uses ``LLMClient`` from ``scripts.common.llm_client``
 - Uses ``Memory`` / message types from ``scripts.common.llm_types``
 - Uses utility functions from ``scripts.common.utils``
 - Uses ``RPG`` / ``Node`` / ``NodeMetaData`` / ``NodeType``
   from ``scripts.skeleton.rpg_models``
-- DataFlowAgent is **skipped** (RPG-Kit already has its own data-flow agent)
+- DataFlowAgent is **skipped** (CoderMind already has its own data-flow agent)
 """
 
 import json
@@ -414,7 +414,7 @@ class RPGParser:
         refactor_context_window: int = 10,
         refactor_max_iters: int = 5,
         save_path: str = "",
-        # Data flow analysis is skipped (RPG-Kit has its own)
+        # Data flow analysis is skipped (CoderMind has its own)
     ) -> Tuple[RPG, Dict, str]:
         """Run the full RPG parsing pipeline.
 

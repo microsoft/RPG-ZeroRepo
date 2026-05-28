@@ -1,6 +1,6 @@
 {
   // Mirror of the workspace-root `.markdownlint-cli2.jsonc` so running
-  // `markdownlint-cli2` from `RPG-Kit/` picks up the same rules.
+  // `markdownlint-cli2` from `CoderMind/` picks up the same rules.
   // The slash-command templates under `templates/commands/` are prompt
   // material consumed verbatim by Coding Agents — wrapping at 80 cols
   // or forcing an H1 would damage their semantics, so the corresponding
@@ -31,7 +31,7 @@
     // Internal design notes / WIP plans — not user-facing docs.
     "plans/",
     // The entire workspace/ tree is for e2e fixtures + backups; not
-    // part of rpgkit's published docs.
+    // part of cmind's published docs.
     "workspace/"
   ]
 }

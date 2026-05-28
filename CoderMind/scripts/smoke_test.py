@@ -107,7 +107,7 @@ def _get_python_exe(repo_path: Path) -> str:
 def _find_source_files(repo_path: Path) -> List[Path]:
     """Find all .py source files (excluding tests, venv, __pycache__)."""
     skip_dirs = {".venv_dev", ".venv", "venv", "__pycache__", ".git",
-                 ".rpgkit", ".pytest_cache", "node_modules"}
+                 ".cmind", ".pytest_cache", "node_modules"}
     result = []
     for py_file in repo_path.rglob("*.py"):
         parts = set(py_file.relative_to(repo_path).parts)

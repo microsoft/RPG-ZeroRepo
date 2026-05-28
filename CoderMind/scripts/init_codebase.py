@@ -52,13 +52,13 @@ from code_gen.context_collector import write_interface_skeletons
 #   Celery/Translations) plus the modern tool-cache entries (ruff, mypy,
 #   pyright) and the common OS-junk lines (.DS_Store, Thumbs.db). Written
 #   only when the user's existing ``.gitignore`` lacks ``__pycache__/``.
-# * ``_GITIGNORE_RPGKIT_BLOCK`` — RPG-Kit-specific ignores (the entire
-#   ``.rpgkit/`` runtime tree, the ``.claude`` workspace symlink, and the
-#   ``.venv_dev/`` / ``.rpgkit_dev_env/`` venvs created by the codegen
+# * ``_GITIGNORE_CMIND_BLOCK`` — CoderMind-specific ignores (the entire
+#   ``.cmind/`` runtime tree, the ``.claude`` workspace symlink, and the
+#   ``.venv_dev/`` / ``.cmind_dev_env/`` venvs created by the codegen
 #   pipeline). Appended whenever the existing ``.gitignore`` lacks
-#   ``.rpgkit/``, regardless of whether Python ignores are already present.
+#   ``.cmind/``, regardless of whether Python ignores are already present.
 #   This guarantees that an existing Python project getting bootstrapped
-#   by ``init_codebase`` still gets the RPG-Kit runtime files ignored.
+#   by ``init_codebase`` still gets the CoderMind runtime files ignored.
 _GITIGNORE_PYTHON_BLOCK = """# Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[cod]
@@ -169,23 +169,23 @@ ehthumbs.db
 desktop.ini
 """
 
-_GITIGNORE_RPGKIT_BLOCK = """# RPG-Kit runtime workspace
-# The entire .rpgkit/ tree is internal tooling state: logs, scripts copy,
+_GITIGNORE_CMIND_BLOCK = """# CoderMind runtime workspace
+# The entire .cmind/ tree is internal tooling state: logs, scripts copy,
 # state snapshots, trajectory traces, encoder/codegen JSON artifacts.
 # Treat it as ephemeral — none of it should be tracked in the project repo.
-.rpgkit/
+.cmind/
 
-# RPG-Kit dev environments (created by codegen pipeline)
+# CoderMind dev environments (created by codegen pipeline)
 .venv_dev/
-.rpgkit_dev_env/
+.cmind_dev_env/
 
-# RPG-Kit workspace symlink
+# CoderMind workspace symlink
 .claude
 """
 
 # Kept for backward compatibility with any external import — equivalent to
 # the full ``.gitignore`` written for a brand-new project.
-GITIGNORE_CONTENT = _GITIGNORE_PYTHON_BLOCK + "\n" + _GITIGNORE_RPGKIT_BLOCK
+GITIGNORE_CONTENT = _GITIGNORE_PYTHON_BLOCK + "\n" + _GITIGNORE_CMIND_BLOCK
 
 
 def _gitignore_has_python_block(existing: str) -> bool:
@@ -193,10 +193,10 @@ def _gitignore_has_python_block(existing: str) -> bool:
     return "__pycache__/" in existing
 
 
-def _gitignore_has_rpgkit_block(existing: str) -> bool:
-    """Heuristic: does an existing .gitignore already ignore .rpgkit/?
+def _gitignore_has_cmind_block(existing: str) -> bool:
+    """Heuristic: does an existing .gitignore already ignore .cmind/?
 
-    Accepts the line-anchored form ``.rpgkit/`` or ``.rpgkit`` (without a
+    Accepts the line-anchored form ``.cmind/`` or ``.cmind`` (without a
     leading ``#``) so that earlier handwritten variants still count as
     "already configured" and don't get a duplicate block appended.
     """
@@ -204,7 +204,7 @@ def _gitignore_has_rpgkit_block(existing: str) -> bool:
         line = raw.strip()
         if not line or line.startswith("#"):
             continue
-        if line in (".rpgkit", ".rpgkit/", "/.rpgkit", "/.rpgkit/"):
+        if line in (".cmind", ".cmind/", "/.cmind", "/.cmind/"):
             return True
     return False
 
@@ -214,16 +214,16 @@ def _gitignore_has_rpgkit_block(existing: str) -> bool:
 # ============================================================================
 #
 # Removed: the
-# previously-generated `repo/.claude/rules/rpgkit-codegen.md` and
-# `repo/.github/instructions/rpgkit-codegen.instructions.md` files were
+# previously-generated `repo/.claude/rules/cmind-codegen.md` and
+# `repo/.github/instructions/cmind-codegen.instructions.md` files were
 # auto-loaded by Claude Code / Copilot for **every** session, contaminating
 # unrelated commands (rpg_edit, encode, plain Q&A) with codegen-only
 # instructions.  The recovery-after-/compact concern is already handled by
 # `templates/commands/code_gen.md` itself, which the user re-invokes via
-# `/rpgkit.code_gen`.
+# `/cmind.code_gen`.
 #
-# `rpgkit update` cleans up any stale `rpgkit-codegen.*` files left in older
-# user workspaces (see src/rpgkit_cli/__init__.py).
+# `cmind update` cleans up any stale `cmind-codegen.*` files left in older
+# user workspaces (see src/cmind_cli/__init__.py).
 
 
 def load_json_file(path: Path) -> Dict[str, Any]:
@@ -297,13 +297,13 @@ def create_readme(repo_path: Path, dry_run: bool = False) -> bool:
 
 
 def create_gitignore(repo_path: Path, dry_run: bool = False) -> bool:
-    """Create or update ``.gitignore`` to cover Python cache and RPG-Kit runtime.
+    """Create or update ``.gitignore`` to cover Python cache and CoderMind runtime.
 
     Behavior matrix:
 
-    * ``.gitignore`` does not exist        → write the full template (Python + RPG-Kit blocks).
-    * Exists, lacks Python block           → append Python + RPG-Kit blocks.
-    * Exists, has Python block, no RPG-Kit → append only the RPG-Kit block.
+    * ``.gitignore`` does not exist        → write the full template (Python + CoderMind blocks).
+    * Exists, lacks Python block           → append Python + CoderMind blocks.
+    * Exists, has Python block, no CoderMind → append only the CoderMind block.
     * Exists, has both blocks              → no-op.
 
     Returns True when the file was created/modified, False when nothing changed
@@ -320,19 +320,19 @@ def create_gitignore(repo_path: Path, dry_run: bool = False) -> bool:
         return False
 
     has_python = _gitignore_has_python_block(existing)
-    has_rpgkit = _gitignore_has_rpgkit_block(existing)
+    has_cmind = _gitignore_has_cmind_block(existing)
 
-    if has_python and has_rpgkit:
+    if has_python and has_cmind:
         return False  # Already fully configured
 
     additions = ""
     if not has_python:
         additions += _GITIGNORE_PYTHON_BLOCK
-    if not has_rpgkit:
+    if not has_cmind:
         # Separate the two blocks with a blank line for readability.
         if additions:
             additions += "\n"
-        additions += _GITIGNORE_RPGKIT_BLOCK
+        additions += _GITIGNORE_CMIND_BLOCK
 
     if not additions:
         return False
@@ -503,11 +503,11 @@ def init_codebase(
     # Ensure repo directory exists
     repo_path.mkdir(parents=True, exist_ok=True)
 
-    # Ensure .rpgkit/ runtime directories exist.  This is normally already
-    # done by ``rpgkit init`` / ``rpgkit update`` (see
-    # ``rpgkit_cli.ensure_rpgkit_runtime_dirs``), but we mkdir here too as
-    # a safety net: a workspace created by an older rpgkit may lack
-    # ``.rpgkit/logs/``, in which case stage prompts that redirect with
+    # Ensure .cmind/ runtime directories exist.  This is normally already
+    # done by ``cmind init`` / ``cmind update`` (see
+    # ``cmind_cli.ensure_cmind_runtime_dirs``), but we mkdir here too as
+    # a safety net: a workspace created by an older cmind may lack
+    # ``.cmind/logs/``, in which case stage prompts that redirect with
     # shell ``>`` fail before the Python process can recover.  Creating
     # them here at code_gen bootstrap is harmless and idempotent.
     from common.paths import LOGS_DIR, DATA_DIR, TRAJECTORY_DIR
@@ -678,7 +678,7 @@ def print_result(result: Dict[str, Any], json_output: bool = False):
             print(f"\n   Initial commit: {result['commit_hash'][:8]}")
     
     print("\n   " + "─" * 60)
-    print(f"   Next step: Run /rpgkit.code_gen to start TDD")
+    print(f"   Next step: Run /cmind.code_gen to start TDD")
 
 
 def main():

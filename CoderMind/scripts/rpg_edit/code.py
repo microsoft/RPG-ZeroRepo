@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Apply EditPlan code_changes via a dedicated SubAgent (RPG-Driven).
 
-This script implements Step 5c of /rpgkit.rpg_edit. Instead of the main
+This script implements Step 5c of /cmind.rpg_edit. Instead of the main
 Agent freely editing code, it dispatches a SubAgent with a constrained
 prompt that treats the updated RPG nodes as authoritative ground truth.
 

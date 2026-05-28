@@ -49,10 +49,10 @@ if ($Version -notmatch '^v\d+\.\d+\.\d+(-.+)?$') {
 }
 
 $RepoRoot = if ($env:GITHUB_WORKSPACE) { $env:GITHUB_WORKSPACE } else { (git rev-parse --show-toplevel).Trim() }
-$ProjectDir = if ($env:PROJECT_DIR) { $env:PROJECT_DIR } else { "RPG-Kit" }
+$ProjectDir = if ($env:PROJECT_DIR) { $env:PROJECT_DIR } else { "CoderMind" }
 $ProjectRoot = Join-Path $RepoRoot $ProjectDir
 if (-not (Test-Path $ProjectRoot)) {
-    Write-Error "RPG-Kit project directory not found: $ProjectRoot"
+    Write-Error "CoderMind project directory not found: $ProjectRoot"
     exit 1
 }
 Set-Location $ProjectRoot
@@ -68,10 +68,10 @@ New-Item -ItemType Directory -Path $GenReleasesDir -Force | Out-Null
 function Rewrite-Paths {
     param([string]$Content)
 
-    $Content = $Content -replace '(/?)\bmemory/', '.rpgkit/memory/'
-    $Content = $Content -replace '(/?)\bscripts/', '.rpgkit/scripts/'
-    $Content = $Content -replace '(/?)\btemplates/', '.rpgkit/templates/'
-    $Content = $Content -replace '(/?)\butils/', '.rpgkit/utils/'
+    $Content = $Content -replace '(/?)\bmemory/', '.cmind/memory/'
+    $Content = $Content -replace '(/?)\bscripts/', '.cmind/scripts/'
+    $Content = $Content -replace '(/?)\btemplates/', '.cmind/templates/'
+    $Content = $Content -replace '(/?)\butils/', '.cmind/utils/'
     return $Content
 }
 
@@ -97,11 +97,11 @@ function Generate-Commands {
             $description = $matches[1]
         }
         
-        # Rewrite paths for .rpgkit structure
+        # Rewrite paths for .cmind structure
         $body = Rewrite-Paths -Content $body
         
         # Generate output file based on extension
-        $outputFile = Join-Path $OutputDir "rpgkit.$name.$Extension"
+        $outputFile = Join-Path $OutputDir "cmind.$name.$Extension"
         
         switch ($Extension) {
             'toml' {
@@ -127,7 +127,7 @@ function Generate-CopilotPrompts {
     
     New-Item -ItemType Directory -Path $PromptsDir -Force | Out-Null
     
-    $agentFiles = Get-ChildItem -Path "$AgentsDir/rpgkit.*.agent.md" -File -ErrorAction SilentlyContinue
+    $agentFiles = Get-ChildItem -Path "$AgentsDir/cmind.*.agent.md" -File -ErrorAction SilentlyContinue
     
     foreach ($agentFile in $agentFiles) {
         $basename = $agentFile.Name -replace '\.agent\.md$', ''
@@ -153,18 +153,18 @@ function Build-Variant {
     New-Item -ItemType Directory -Path $baseDir -Force | Out-Null
     
     # Copy base structure but filter scripts by variant
-    $specDir = Join-Path $baseDir ".rpgkit"
+    $specDir = Join-Path $baseDir ".cmind"
     New-Item -ItemType Directory -Path $specDir -Force | Out-Null
     
     if (Test-Path "pyproject.toml") {
         Copy-Item -Path "pyproject.toml" -Destination (Join-Path $specDir "pyproject.toml") -Force
-        Write-Host "Copied pyproject.toml -> .rpgkit"
+        Write-Host "Copied pyproject.toml -> .cmind"
     }
 
     # Copy memory directory
     if (Test-Path "memory") {
         Copy-Item -Path "memory" -Destination $specDir -Recurse -Force
-        Write-Host "Copied memory -> .rpgkit"
+        Write-Host "Copied memory -> .cmind"
     }
     
     # Only copy the relevant script variant directory
@@ -176,13 +176,13 @@ function Build-Variant {
             'sh' {
                 if (Test-Path "scripts/bash") {
                     Copy-Item -Path "scripts/bash" -Destination $scriptsDestDir -Recurse -Force
-                    Write-Host "Copied scripts/bash -> .rpgkit/scripts"
+                    Write-Host "Copied scripts/bash -> .cmind/scripts"
                 }
             }
             'ps' {
                 if (Test-Path "scripts/powershell") {
                     Copy-Item -Path "scripts/powershell" -Destination $scriptsDestDir -Recurse -Force
-                    Write-Host "Copied scripts/powershell -> .rpgkit/scripts"
+                    Write-Host "Copied scripts/powershell -> .cmind/scripts"
                 }
             }
         }
@@ -212,13 +212,13 @@ function Build-Variant {
             New-Item -ItemType Directory -Path $destFileDir -Force | Out-Null
             Copy-Item -Path $_.FullName -Destination $destFile -Force
         }
-        Write-Host "Copied templates -> .rpgkit/templates"
+        Write-Host "Copied templates -> .cmind/templates"
     }
     
     # Copy utils directory
     if (Test-Path "utils") {
         Copy-Item -Path "utils" -Destination $specDir -Recurse -Force
-        Write-Host "Copied utils -> .rpgkit/utils"
+        Write-Host "Copied utils -> .cmind/utils"
     }
     
     # Replace <AI_CLI_CMD> placeholder in copied scripts with the actual CLI command name
@@ -342,7 +342,7 @@ function Build-Variant {
     }
     
     # Create zip archive
-    $zipFile = Join-Path $GenReleasesDir "rpgkit-template-${Agent}-${Script}-${Version}.zip"
+    $zipFile = Join-Path $GenReleasesDir "cmind-template-${Agent}-${Script}-${Version}.zip"
     Compress-Archive -Path "$baseDir/*" -DestinationPath $zipFile -Force
     Write-Host "Created $zipFile"
 }
@@ -411,6 +411,6 @@ foreach ($agent in $AgentList) {
 }
 
 Write-Host "`nArchives in ${GenReleasesDir}:"
-Get-ChildItem -Path $GenReleasesDir -Filter "rpgkit-template-*-${Version}.zip" | ForEach-Object {
+Get-ChildItem -Path $GenReleasesDir -Filter "cmind-template-*-${Version}.zip" | ForEach-Object {
     Write-Host "  $($_.Name)"
 }

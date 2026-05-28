@@ -7,8 +7,8 @@ Function: Validate data_flow.json state and cross-validate with skeleton.json
 - Cross-validates components between skeleton and data flow (warning state)
 - Returns update state if valid
 
-Input: .rpgkit/data_flow.json
-Reference: .rpgkit/skeleton.json
+Input: .cmind/data_flow.json
+Reference: .cmind/skeleton.json
 """
 
 import json

@@ -1,6 +1,6 @@
 ---
 description: Build repository file skeleton from component architecture
-name: rpgkit.build_skeleton
+name: cmind.build_skeleton
 ---
 
 ## User Input
@@ -14,17 +14,17 @@ proceed with default behavior.
 
 ## **Outline**
 
-The text entered by the user after `/rpgkit.build_skeleton` **is the adjustment suggestion**.
+The text entered by the user after `/cmind.build_skeleton` **is the adjustment suggestion**.
 Unless it is explicitly empty, you may assume it is always available as `$ARGUMENTS`.
 **Do not** ask the user to repeat the input.
 
 ### Step 1: Pre-check
 
-Run the script `rpgkit script check_skeleton.py` to verify the current state.
+Run the script `cmind script check_skeleton.py` to verify the current state.
 
 1. Inspect the `type` field in the output:
 
-   * `error` → Display the error message and stop. Instruct user to run `/rpgkit.refactor_feature` first. Terminate this command.
+   * `error` → Display the error message and stop. Instruct user to run `/cmind.refactor_feature` first. Terminate this command.
    * `init` → Proceed to Step 2.
    * `warning` → Display the following prompt and wait for user confirmation:
 
@@ -57,7 +57,7 @@ Run the script `rpgkit script check_skeleton.py` to verify the current state.
 1. Display the following prompt and wait for user confirmation:
 
    ```text
-   Description: Run the script `rpgkit script build_skeleton.py` to:
+   Description: Run the script `cmind script build_skeleton.py` to:
      - Step 1: Design directory structure for components
      - Step 2: Assign features to Python files
    
@@ -69,7 +69,7 @@ Run the script `rpgkit script check_skeleton.py` to verify the current state.
 2. Execute the following command with the selected iteration count:
 
    ```bash
-   rpgkit script build_skeleton.py --max-iterations <default_or_user_defined>
+   cmind script build_skeleton.py --max-iterations <default_or_user_defined>
    ```
 
    The script writes a structured log automatically;
@@ -92,7 +92,7 @@ Run the script `rpgkit script check_skeleton.py` to verify the current state.
 Run the validation script:
 
 ```bash
-rpgkit script check_skeleton.py --verbose
+cmind script check_skeleton.py --verbose
 ```
 
 Display the validation results to the user:
@@ -110,7 +110,7 @@ Display the validation results to the user:
 Run the summary script to generate a formatted report and save to file:
 
 ```bash
-rpgkit script summary_skeleton.py
+cmind script summary_skeleton.py
 ```
 
 The summary (including directory structure, component paths, and statistics) is
@@ -127,8 +127,8 @@ Outputs (managed by the script; consumed by downstream stages):
   skeleton_summary.txt   - Human-readable summary
 
 To proceed with data flow design, run:
-  /rpgkit.build_data_flow
+  /cmind.build_data_flow
 
 To regenerate with adjustments, run:
-  /rpgkit.build_skeleton <adjustment instructions>
+  /cmind.build_skeleton <adjustment instructions>
 ```

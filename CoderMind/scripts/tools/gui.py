@@ -41,12 +41,12 @@ from typing import Optional
 # Constants
 # ---------------------------------------------------------------------------
 
-DEFAULT_OUTPUT_DIR = ".rpgkit/tmp/screenshots"
+DEFAULT_OUTPUT_DIR = ".cmind/tmp/screenshots"
 DEFAULT_DISPLAY = ":99"
 DEFAULT_SCREEN_SIZE = "1280x720x24"
 SCRIPT_TIMEOUT = 60
 LAUNCH_WAIT = 3          # seconds to wait after launching app
-_PID_FILE = ".rpgkit/tmp/gui_app.pid"   # persist app PID across CLI calls
+_PID_FILE = ".cmind/tmp/gui_app.pid"   # persist app PID across CLI calls
 
 # Track managed processes for cleanup (in-process only; PID file for cross-process)
 _managed_pids: dict = {}  # label -> pid

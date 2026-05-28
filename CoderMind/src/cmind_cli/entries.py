@@ -1,8 +1,8 @@
-"""Console-script entries for ``rpgkit-cli``.
+"""Console-script entries for ``cmind-cli``.
 
 Currently provides:
 
-* :func:`mcp_main` — the ``rpgkit-mcp`` console script.  Sets up
+* :func:`mcp_main` — the ``cmind-mcp`` console script.  Sets up
   ``sys.path`` so that the bundled ``scripts/`` directory is importable,
   then hands off to ``mcp_server.main()``.
 
@@ -26,8 +26,8 @@ def mcp_main() -> None:
     scripts_dir = _assets.scripts_dir()
     if not scripts_dir.is_dir():
         sys.stderr.write(
-            "rpgkit-mcp: packaged scripts directory unavailable. "
-            "Try reinstalling: `uv tool install rpgkit-cli --force`.\n"
+            "cmind-mcp: packaged scripts directory unavailable. "
+            "Try reinstalling: `uv tool install cmind-cli --force`.\n"
         )
         sys.exit(2)
 
@@ -38,7 +38,7 @@ def mcp_main() -> None:
     try:
         from mcp_server import main as _mcp_server_main  # type: ignore[import-not-found]
     except Exception as exc:  # pragma: no cover - import-time failure surface
-        sys.stderr.write(f"rpgkit-mcp: failed to import mcp_server: {exc}\n")
+        sys.stderr.write(f"cmind-mcp: failed to import mcp_server: {exc}\n")
         sys.exit(3)
 
     _mcp_server_main()

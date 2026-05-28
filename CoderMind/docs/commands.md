@@ -1,12 +1,12 @@
-# /rpgkit Commands Reference
+# /cmind Commands Reference
 
-RPG-Kit provides 13 slash commands that work in three paths:
+CoderMind provides 13 slash commands that work in three paths:
 
 - **Forward pipeline:** Requirements → Repository Planning Graph (RPG) → Code
 - **Reverse encoder:** Existing code → RPG
 - **Surgical edit:** Natural-language changes applied to code, RPG, and dependency graph together
 
-> **Note on data paths.** Throughout this document, paths shown as `.rpgkit/data/...` and `.rpgkit/logs/...` are stable logical names. The actual files live **outside the workspace** under `~/.rpgkit/workspaces/<workspace-id>/{data,logs}/`, where `<workspace-id>` is a slug-based identifier and may include an overflow `-<hash6>` suffix, so that runtime artefacts never enter the user's git repository. Reports (`rpg.html`, review HTML, etc.) stay in the workspace at `<workspace>/.rpgkit/reports/` because they are small user-facing artefacts users may want to commit. Run `rpgkit version` from inside the workspace to see the resolved Data / Logs paths. See [project-structure.md](project-structure.md) for the full layout.
+> **Note on data paths.** Throughout this document, paths shown as `.cmind/data/...` and `.cmind/logs/...` are stable logical names. The actual files live **outside the workspace** under `~/.cmind/workspaces/<workspace-id>/{data,logs}/`, where `<workspace-id>` is a slug-based identifier and may include an overflow `-<hash6>` suffix, so that runtime artefacts never enter the user's git repository. Reports (`rpg.html`, review HTML, etc.) stay in the workspace at `<workspace>/.cmind/reports/` because they are small user-facing artefacts users may want to commit. Run `cmind version` from inside the workspace to see the resolved Data / Logs paths. See [project-structure.md](project-structure.md) for the full layout.
 
 ## Command Overview
 
@@ -14,42 +14,42 @@ RPG-Kit provides 13 slash commands that work in three paths:
 
 | Command | Description |
 | ------- | ----------- |
-| `/rpgkit.feature_spec <desc>` | Create structured feature specifications from user input or `docs/` files |
-| `/rpgkit.feature_build` | Generate and expand the feature tree from specifications |
-| `/rpgkit.feature_refactor` | Refactor feature tree into modular component architecture |
-| `/rpgkit.feature_edit <instr>` | Edit feature tree nodes before skeleton planning — optional |
+| `/cmind.feature_spec <desc>` | Create structured feature specifications from user input or `docs/` files |
+| `/cmind.feature_build` | Generate and expand the feature tree from specifications |
+| `/cmind.feature_refactor` | Refactor feature tree into modular component architecture |
+| `/cmind.feature_edit <instr>` | Edit feature tree nodes before skeleton planning — optional |
 
 ### Phase 2: RPG Construction and Planning
 
 | Command | Description |
 | ------- | ----------- |
-| `/rpgkit.build_skeleton` | Build repository file skeleton from component architecture; creates `.rpgkit/data/rpg.json` |
-| `/rpgkit.build_data_flow` | Build inter-component data flow DAG and update the RPG |
-| `/rpgkit.design_base_classes` | Design shared base classes and data structures |
-| `/rpgkit.design_interfaces` | Design function/class interfaces with type hints and docstrings |
-| `/rpgkit.plan_tasks` | Plan dependency-ordered implementation task batches |
+| `/cmind.build_skeleton` | Build repository file skeleton from component architecture; creates `.cmind/data/rpg.json` |
+| `/cmind.build_data_flow` | Build inter-component data flow DAG and update the RPG |
+| `/cmind.design_base_classes` | Design shared base classes and data structures |
+| `/cmind.design_interfaces` | Design function/class interfaces with type hints and docstrings |
+| `/cmind.plan_tasks` | Plan dependency-ordered implementation task batches |
 
 ### Phase 3: Code Generation and Surgical Edits
 
 | Command | Description |
 | ------- | ----------- |
-| `/rpgkit.code_gen` | TDD-based implementation with iterative test-code-fix cycles |
-| `/rpgkit.rpg_edit <instr>` | Surgical edit of RPG graph, code, and dependency graph from a natural-language instruction — optional |
+| `/cmind.code_gen` | TDD-based implementation with iterative test-code-fix cycles |
+| `/cmind.rpg_edit <instr>` | Surgical edit of RPG graph, code, and dependency graph from a natural-language instruction — optional |
 
 ### RPG Encoder: Code to RPG
 
 | Command | Description |
 | ------- | ----------- |
-| `/rpgkit.encode` | Encode an existing repository into `.rpgkit/data/rpg.json` |
-| `/rpgkit.update_rpg` | Manually run incremental RPG update when the automatic hook is skipped or fails |
+| `/cmind.encode` | Encode an existing repository into `.cmind/data/rpg.json` |
+| `/cmind.update_rpg` | Manually run incremental RPG update when the automatic hook is skipped or fails |
 
-Both directions produce the same RPG structure at `.rpgkit/data/rpg.json`, enabling AI agents to query the graph via the **MCP server** (`search_rpg`, `explore_rpg`, `get_node_detail`, `list_rpg_tree`). See [configuration.md](configuration.md) for MCP details.
+Both directions produce the same RPG structure at `.cmind/data/rpg.json`, enabling AI agents to query the graph via the **MCP server** (`search_rpg`, `explore_rpg`, `get_node_detail`, `list_rpg_tree`). See [configuration.md](configuration.md) for MCP details.
 
 ---
 
 ## Phase 1: Feature Specification
 
-### `/rpgkit.feature_spec`
+### `/cmind.feature_spec`
 
 Create structured feature specifications from user input or documentation files.
 
@@ -61,7 +61,7 @@ Create structured feature specifications from user input or documentation files.
 **Output:**
 
 ```text
-.rpgkit/data/feature_spec/
+.cmind/data/feature_spec/
 ├── evidence/                # Source evidence files
 │   ├── user_input.md        # From direct user input, or
 │   ├── 01_project_charter.md
@@ -73,31 +73,31 @@ Create structured feature specifications from user input or documentation files.
     └── ...
 ```
 
-Also generates `.rpgkit/data/feature_spec.json`.
+Also generates `.cmind/data/feature_spec.json`.
 
 **Examples:**
 
 ```text
-/rpgkit.feature_spec Build a CLI tool for managing Docker containers
-/rpgkit.feature_spec                  # Auto-detect docs/ files
+/cmind.feature_spec Build a CLI tool for managing Docker containers
+/cmind.feature_spec                  # Auto-detect docs/ files
 ```
 
 ---
 
-### `/rpgkit.feature_build`
+### `/cmind.feature_build`
 
-Generate and iteratively refine the feature tree from `.rpgkit/data/feature_spec.json`.
+Generate and iteratively refine the feature tree from `.cmind/data/feature_spec.json`.
 
-**Input:** `.rpgkit/data/feature_spec.json`
+**Input:** `.cmind/data/feature_spec.json`
 
-**Output:** `.rpgkit/data/feature_build.json`
+**Output:** `.cmind/data/feature_build.json`
 
 **Current workflow:**
 
-1. **Validate status** — runs `rpgkit script feature_build_validation.py` to verify that `feature_spec.json` exists and decide whether this is a first build or an expansion.
-2. **Build or expand** — runs `rpgkit script feature_build.py --mode step1`.
-   - If `feature_build.json` does not exist, RPG-Kit builds the feature tree from the specification and iterates until requirements are covered.
-   - If `feature_build.json` already exists, RPG-Kit switches to beyond-spec expansion mode and adds production-relevant features not described by the original spec.
+1. **Validate status** — runs `cmind script feature_build_validation.py` to verify that `feature_spec.json` exists and decide whether this is a first build or an expansion.
+2. **Build or expand** — runs `cmind script feature_build.py --mode step1`.
+   - If `feature_build.json` does not exist, CoderMind builds the feature tree from the specification and iterates until requirements are covered.
+   - If `feature_build.json` already exists, CoderMind switches to beyond-spec expansion mode and adds production-relevant features not described by the original spec.
 3. **Review** — validates coverage, duplicates, and MIU constraints. Coverage review uses a default threshold of `98.0` and up to `3` review iterations.
 4. **Optional user-guided expansion** — the agent can ask whether to suggest additional expansion directions, then run `--mode suggest-directions` and `--mode step2 --direction <indices>`.
 
@@ -106,18 +106,18 @@ The spec-driven expansion loop has a hard safety cap of 20 iterations; the model
 **Examples:**
 
 ```text
-/rpgkit.feature_build
+/cmind.feature_build
 ```
 
 ---
 
-### `/rpgkit.feature_refactor`
+### `/cmind.feature_refactor`
 
 Refactor the feature tree into a modular component architecture.
 
-**Input:** `.rpgkit/data/feature_build.json`
+**Input:** `.cmind/data/feature_build.json`
 
-**Output:** `.rpgkit/data/feature_tree.json`
+**Output:** `.cmind/data/feature_tree.json`
 
 **Process:**
 
@@ -127,16 +127,16 @@ Refactor the feature tree into a modular component architecture.
 **Example:**
 
 ```text
-/rpgkit.feature_refactor
+/cmind.feature_refactor
 ```
 
 ---
 
-### `/rpgkit.feature_edit`
+### `/cmind.feature_edit`
 
 Edit feature tree nodes before repository planning begins.
 
-**Input/Output:** `.rpgkit/data/feature_tree.json`
+**Input/Output:** `.cmind/data/feature_tree.json`
 
 **Supported edits:** add, delete, modify, expand, move, or merge feature tree nodes.
 
@@ -149,27 +149,27 @@ Edit feature tree nodes before repository planning begins.
 **Examples:**
 
 ```text
-/rpgkit.feature_edit Delete the 'cloud integration' component
-/rpgkit.feature_edit Add logging features under 'cli operations'
-/rpgkit.feature_edit Expand the 'security' component with encryption options
-/rpgkit.feature_edit Merge 'analytics telemetry' into 'monitoring observability'
+/cmind.feature_edit Delete the 'cloud integration' component
+/cmind.feature_edit Add logging features under 'cli operations'
+/cmind.feature_edit Expand the 'security' component with encryption options
+/cmind.feature_edit Merge 'analytics telemetry' into 'monitoring observability'
 ```
 
 ---
 
 ## Phase 2: RPG Construction and Planning
 
-### `/rpgkit.build_skeleton`
+### `/cmind.build_skeleton`
 
 Build the repository file skeleton from the component architecture. This is where the forward pipeline first creates the RPG.
 
-**Input:** `.rpgkit/data/feature_tree.json`
+**Input:** `.cmind/data/feature_tree.json`
 
 **Output:**
 
-- `.rpgkit/data/skeleton.json` — file skeleton
-- `.rpgkit/data/skeleton_summary.txt` — human-readable skeleton summary
-- `.rpgkit/data/rpg.json` — initial Repository Planning Graph with file and feature nodes
+- `.cmind/data/skeleton.json` — file skeleton
+- `.cmind/data/skeleton_summary.txt` — human-readable skeleton summary
+- `.cmind/data/rpg.json` — initial Repository Planning Graph with file and feature nodes
 
 **Process:**
 
@@ -179,23 +179,23 @@ Build the repository file skeleton from the component architecture. This is wher
 **Examples:**
 
 ```text
-/rpgkit.build_skeleton
-/rpgkit.build_skeleton Prefer flat directory structure
+/cmind.build_skeleton
+/cmind.build_skeleton Prefer flat directory structure
 ```
 
 ---
 
-### `/rpgkit.build_data_flow`
+### `/cmind.build_data_flow`
 
 Build inter-component data flow as a directed acyclic graph (DAG).
 
-**Input:** `.rpgkit/data/skeleton.json`, `.rpgkit/data/feature_tree.json`
+**Input:** `.cmind/data/skeleton.json`, `.cmind/data/feature_tree.json`
 
 **Output:**
 
-- `.rpgkit/data/data_flow.json` — data flow DAG
-- `.rpgkit/data/data_flow_viz.html` — interactive visualization
-- Updates `.rpgkit/data/rpg.json` — adds data-flow edges
+- `.cmind/data/data_flow.json` — data flow DAG
+- `.cmind/data/data_flow_viz.html` — interactive visualization
+- Updates `.cmind/data/rpg.json` — adds data-flow edges
 
 **Process:**
 
@@ -203,29 +203,29 @@ Build inter-component data flow as a directed acyclic graph (DAG).
 2. **Iteration choice** — asks for max iterations:
    - `Y` uses the default of 5 iterations.
    - A number sets a custom iteration budget.
-3. **DAG design** — runs `rpgkit script build_data_flow.py --max-iterations <N>`.
-4. **Validation** — runs `rpgkit script check_data_flow.py --verbose`.
-5. **Visualization** — runs `rpgkit script generate_viz.py` when a new data flow is built.
+3. **DAG design** — runs `cmind script build_data_flow.py --max-iterations <N>`.
+4. **Validation** — runs `cmind script check_data_flow.py --verbose`.
+5. **Visualization** — runs `cmind script generate_viz.py` when a new data flow is built.
 
 **Example:**
 
 ```text
-/rpgkit.build_data_flow
-/rpgkit.build_data_flow Make the ingestion layer independent from reporting
+/cmind.build_data_flow
+/cmind.build_data_flow Make the ingestion layer independent from reporting
 ```
 
 ---
 
-### `/rpgkit.design_base_classes`
+### `/cmind.design_base_classes`
 
 Design shared base classes and global data structures to improve modularity and reuse.
 
-**Input:** `.rpgkit/data/skeleton.json`, `.rpgkit/data/data_flow.json`
+**Input:** `.cmind/data/skeleton.json`, `.cmind/data/data_flow.json`
 
 **Output:**
 
-- `.rpgkit/data/base_classes.json` — base class and global data structure definitions
-- Updates `.rpgkit/data/rpg.json` — adds base-class relationship edges
+- `.cmind/data/base_classes.json` — base class and global data structure definitions
+- Updates `.cmind/data/rpg.json` — adds base-class relationship edges
 
 **Process:**
 
@@ -242,21 +242,21 @@ Design shared base classes and global data structures to improve modularity and 
 **Example:**
 
 ```text
-/rpgkit.design_base_classes
+/cmind.design_base_classes
 ```
 
 ---
 
-### `/rpgkit.design_interfaces`
+### `/cmind.design_interfaces`
 
 Design function and class interfaces with type hints and docstrings for all planned repository files.
 
-**Input:** `.rpgkit/data/skeleton.json`, `.rpgkit/data/data_flow.json`, `.rpgkit/data/base_classes.json`
+**Input:** `.cmind/data/skeleton.json`, `.cmind/data/data_flow.json`, `.cmind/data/base_classes.json`
 
 **Output:**
 
-- `.rpgkit/data/interfaces.json` — function/class interface definitions
-- Updates `.rpgkit/data/rpg.json` — adds fine-grained dependency edges such as inheritance, invocation, and references
+- `.cmind/data/interfaces.json` — function/class interface definitions
+- Updates `.cmind/data/rpg.json` — adds fine-grained dependency edges such as inheritance, invocation, and references
 
 **Process:**
 
@@ -268,18 +268,18 @@ Design function and class interfaces with type hints and docstrings for all plan
 **Example:**
 
 ```text
-/rpgkit.design_interfaces
+/cmind.design_interfaces
 ```
 
 ---
 
-### `/rpgkit.plan_tasks`
+### `/cmind.plan_tasks`
 
 Plan implementation tasks from interface definitions, organized into dependency-ordered batches.
 
-**Input:** `.rpgkit/data/interfaces.json`, `.rpgkit/data/data_flow.json`, `.rpgkit/data/rpg.json`
+**Input:** `.cmind/data/interfaces.json`, `.cmind/data/data_flow.json`, `.cmind/data/rpg.json`
 
-**Output:** `.rpgkit/data/tasks.json`
+**Output:** `.cmind/data/tasks.json`
 
 **Process:**
 
@@ -291,20 +291,20 @@ Plan implementation tasks from interface definitions, organized into dependency-
 **Example:**
 
 ```text
-/rpgkit.plan_tasks
+/cmind.plan_tasks
 ```
 
 ---
 
 ## Phase 3: Code Generation and Surgical Edits
 
-### `/rpgkit.code_gen`
+### `/cmind.code_gen`
 
 Execute TDD-based code implementation with iterative test-code-fix cycles.
 
-**Input:** `.rpgkit/data/tasks.json`, `.rpgkit/data/interfaces.json`, `.rpgkit/data/base_classes.json`, `.rpgkit/data/data_flow.json`, `.rpgkit/data/rpg.json`
+**Input:** `.cmind/data/tasks.json`, `.cmind/data/interfaces.json`, `.cmind/data/base_classes.json`, `.cmind/data/data_flow.json`, `.cmind/data/rpg.json`
 
-**Output:** complete tested source code, `.rpgkit/data/code_gen_state.jsonl`, and updated `.rpgkit/data/rpg.json`
+**Output:** complete tested source code, `.cmind/data/code_gen_state.jsonl`, and updated `.cmind/data/rpg.json`
 
 **Batch modes:**
 
@@ -335,35 +335,35 @@ Execute TDD-based code implementation with iterative test-code-fix cycles.
 **Example:**
 
 ```text
-/rpgkit.code_gen
+/cmind.code_gen
 ```
 
 ---
 
-### `/rpgkit.rpg_edit`
+### `/cmind.rpg_edit`
 
 Apply a natural-language edit to code, RPG, and dependency graph in sync.
 
-This command is independent from `/rpgkit.feature_edit` and `/rpgkit.update_rpg`. It does not edit `feature_tree.json`; it uses the current RPG feature graph as the authoritative entry point for code modifications.
+This command is independent from `/cmind.feature_edit` and `/cmind.update_rpg`. It does not edit `feature_tree.json`; it uses the current RPG feature graph as the authoritative entry point for code modifications.
 
 **Input:** edit instruction after the command
 
-**Input files:** `.rpgkit/data/rpg.json`, `.rpgkit/data/dep_graph.json`
+**Input files:** `.cmind/data/rpg.json`, `.cmind/data/dep_graph.json`
 
 **Generated files:**
 
-- `.rpgkit/data/rpg_edit_impact.json` — impact analysis output
-- `.rpgkit/data/rpg_edit_plan.json` — user-confirmed edit plan
-- `.rpgkit/data/rpg_edit_code_result.json` — code application result
+- `.cmind/data/rpg_edit_impact.json` — impact analysis output
+- `.cmind/data/rpg_edit_plan.json` — user-confirmed edit plan
+- `.cmind/data/rpg_edit_code_result.json` — code application result
 
 **Workflow:**
 
-1. **Pre-check** — runs `rpgkit script rpg_edit/validate.py --json` and stops if the RPG or dependency graph is unavailable.
-2. **Locate target nodes** — runs `rpgkit script rpg_edit/locate.py --query "<instruction>" --json` and selects existing nodes or nearest parent nodes for new features.
-3. **Analyze impact** — runs `rpgkit script rpg_edit/impact.py --node-id ... --json` to identify affected nodes, callers, callees, and files.
+1. **Pre-check** — runs `cmind script rpg_edit/validate.py --json` and stops if the RPG or dependency graph is unavailable.
+2. **Locate target nodes** — runs `cmind script rpg_edit/locate.py --query "<instruction>" --json` and selects existing nodes or nearest parent nodes for new features.
+3. **Analyze impact** — runs `cmind script rpg_edit/impact.py --node-id ... --json` to identify affected nodes, callers, callees, and files.
 4. **Optional visual reconnaissance** — for UI/layout/style edits, probes the app with the browser helper when available.
 5. **Mandatory code reconnaissance** — reads affected files and searches related patterns before producing a plan.
-6. **Generate and confirm plan** — writes `.rpgkit/data/rpg_edit_plan.json` and asks the user to apply, cancel, revise, or inspect a node.
+6. **Generate and confirm plan** — writes `.cmind/data/rpg_edit_plan.json` and asks the user to apply, cancel, revise, or inspect a node.
 7. **Apply on a branch** — creates a `rpg-edit/<short-id>` branch only after a clean working-tree preflight.
 8. **RPG-first apply** — updates RPG feature changes first, then dispatches code changes, refreshes `dep_graph.json`, and folds graph updates into the branch commit.
 9. **Test and review** — runs smoke tests and impact review.
@@ -372,76 +372,76 @@ This command is independent from `/rpgkit.feature_edit` and `/rpgkit.update_rpg`
 **Examples:**
 
 ```text
-/rpgkit.rpg_edit Add a last_login field to the User model and update it on login
-/rpgkit.rpg_edit Add rate limiting to all API endpoints
-/rpgkit.rpg_edit Refactor auth into separate registration and login modules
+/cmind.rpg_edit Add a last_login field to the User model and update it on login
+/cmind.rpg_edit Add rate limiting to all API endpoints
+/cmind.rpg_edit Refactor auth into separate registration and login modules
 ```
 
 ---
 
 ## RPG Encoder: Code to RPG
 
-The encoder works in the reverse direction from the forward pipeline. It takes an existing codebase and produces the same Repository Planning Graph structure used by RPG-Kit's planning, editing, and MCP tooling.
+The encoder works in the reverse direction from the forward pipeline. It takes an existing codebase and produces the same Repository Planning Graph structure used by CoderMind's planning, editing, and MCP tooling.
 
-### `/rpgkit.encode`
+### `/cmind.encode`
 
 Encode the current repository into an RPG from scratch.
 
 **Output:**
 
-- `.rpgkit/data/rpg.json` — Repository Planning Graph
-- `.rpgkit/data/dep_graph.json` — code dependency graph used for incremental sync and edits
+- `.cmind/data/rpg.json` — Repository Planning Graph
+- `.cmind/data/dep_graph.json` — code dependency graph used for incremental sync and edits
 
 **Process:**
 
-1. **Pre-check** — runs `rpgkit script rpg_encoder/check_encode.py --json`.
-2. **Full encode** — runs `rpgkit script rpg_encoder/run_encode.py --json`.
-3. **Next steps** — suggests `/rpgkit.update_rpg` for incremental updates and MCP tools for exploration.
+1. **Pre-check** — runs `cmind script rpg_encoder/check_encode.py --json`.
+2. **Full encode** — runs `cmind script rpg_encoder/run_encode.py --json`.
+3. **Next steps** — suggests `/cmind.update_rpg` for incremental updates and MCP tools for exploration.
 
-If `rpg.json` already exists, the command asks whether to full re-encode, switch to `/rpgkit.update_rpg`, or quit.
+If `rpg.json` already exists, the command asks whether to full re-encode, switch to `/cmind.update_rpg`, or quit.
 
 **Example:**
 
 ```text
-/rpgkit.encode
+/cmind.encode
 ```
 
 ---
 
-### `/rpgkit.update_rpg`
+### `/cmind.update_rpg`
 
 Manually trigger an incremental RPG update when the automatic hook did not run or when the user wants an immediate foreground update.
 
-Under normal use, RPG-Kit installs a post-commit hook that updates the RPG in the background after each commit. This command is the manual fallback.
+Under normal use, CoderMind installs a post-commit hook that updates the RPG in the background after each commit. This command is the manual fallback.
 
-**Input:** existing `.rpgkit/data/rpg.json` and a git repository with at least two commits
+**Input:** existing `.cmind/data/rpg.json` and a git repository with at least two commits
 
-**Output:** updated `.rpgkit/data/rpg.json` and `.rpgkit/data/dep_graph.json`
+**Output:** updated `.cmind/data/rpg.json` and `.cmind/data/dep_graph.json`
 
 **Process:**
 
-1. **Pre-check** — runs `rpgkit script rpg_encoder/check_encode.py --json` and stops if `rpg.json` is missing or corrupt.
-2. **Commit baseline check** — verifies `HEAD~1` exists. If there is no previous commit, run `/rpgkit.encode` instead.
-3. **Incremental update** — runs `rpgkit script update_graphs.py update-rpg --json`, comparing the current workspace against `HEAD~1`, the same baseline used by the hook.
+1. **Pre-check** — runs `cmind script rpg_encoder/check_encode.py --json` and stops if `rpg.json` is missing or corrupt.
+2. **Commit baseline check** — verifies `HEAD~1` exists. If there is no previous commit, run `/cmind.encode` instead.
+3. **Incremental update** — runs `cmind script update_graphs.py update-rpg --json`, comparing the current workspace against `HEAD~1`, the same baseline used by the hook.
 4. **Report result** — displays node/edge deltas, functional areas, alignment status, and output path.
 
 Use this command when:
 
 - The post-commit hook failed or was skipped.
-- `.rpgkit/logs/update_rpg.log` shows an error.
+- `.cmind/logs/update_rpg.log` shows an error.
 - The RPG seems stale and you want to force a synchronous update.
 
 **Example:**
 
 ```text
-/rpgkit.update_rpg
+/cmind.update_rpg
 ```
 
 ---
 
 ## MCP Server Tools
 
-RPG-Kit registers an MCP server named `rpg-tools` so AI agents can query `.rpgkit/data/rpg.json` during chat. The server exposes four read-only tools:
+CoderMind registers an MCP server named `rpg-tools` so AI agents can query `.cmind/data/rpg.json` during chat. The server exposes four read-only tools:
 
 | Tool | Description |
 | ---- | ----------- |
@@ -450,7 +450,7 @@ RPG-Kit registers an MCP server named `rpg-tools` so AI agents can query `.rpgki
 | `get_node_detail` | Fetch full details for a function, class, file, or feature node |
 | `list_rpg_tree` | Render the functional architecture as a tree |
 
-If `.rpgkit/data/rpg.json` is not available yet, the tools return an `rpg_unavailable` response that asks the agent to run `/rpgkit.encode`.
+If `.cmind/data/rpg.json` is not available yet, the tools return an `rpg_unavailable` response that asks the agent to run `/cmind.encode`.
 
 See [configuration.md](configuration.md) for MCP registration, auto-approval, hooks, and initialization options.
 
@@ -458,7 +458,7 @@ See [configuration.md](configuration.md) for MCP registration, auto-approval, ho
 
 ## Data Files
 
-All intermediate data is stored in `.rpgkit/data/`:
+All intermediate data is stored in `.cmind/data/`:
 
 | File | Produced by | Description |
 | ---- | ----------- | ----------- |
@@ -485,8 +485,8 @@ All intermediate data is stored in `.rpgkit/data/`:
 
 `rpg.json` is the central artifact that ties the pipeline together. It can be created in either direction:
 
-1. **Forward:** `/rpgkit.build_skeleton` creates it from `feature_tree.json`; later planning and generation commands enrich it.
-2. **Reverse:** `/rpgkit.encode` creates it from an existing codebase; `/rpgkit.update_rpg` keeps it aligned after commits.
+1. **Forward:** `/cmind.build_skeleton` creates it from `feature_tree.json`; later planning and generation commands enrich it.
+2. **Reverse:** `/cmind.encode` creates it from an existing codebase; `/cmind.update_rpg` keeps it aligned after commits.
 
 Subsequent commands update the same file:
 

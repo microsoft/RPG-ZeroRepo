@@ -108,9 +108,9 @@ class TestCheckEncode:
     def test_update_state_valid_rpg(self, tmp_path, monkeypatch):
         """When a valid rpg.json exists, check_encode should return type=update."""
         monkeypatch.chdir(tmp_path)
-        rpgkit_data = tmp_path / ".rpgkit" / "data"
-        rpgkit_data.mkdir(parents=True)
-        rpg_file = rpgkit_data / "rpg.json"
+        cmind_data = tmp_path / ".cmind" / "data"
+        cmind_data.mkdir(parents=True)
+        rpg_file = cmind_data / "rpg.json"
         rpg_file.write_text(json.dumps(_make_rpg_data(), indent=2))
 
         from rpg_encoder.check_encode import check_encode
@@ -124,9 +124,9 @@ class TestCheckEncode:
     def test_error_state_invalid_rpg(self, tmp_path, monkeypatch):
         """When rpg.json exists but has invalid format, return type=error."""
         monkeypatch.chdir(tmp_path)
-        rpgkit_data = tmp_path / ".rpgkit" / "data"
-        rpgkit_data.mkdir(parents=True)
-        rpg_file = rpgkit_data / "rpg.json"
+        cmind_data = tmp_path / ".cmind" / "data"
+        cmind_data.mkdir(parents=True)
+        rpg_file = cmind_data / "rpg.json"
         rpg_file.write_text(json.dumps({"some_key": "value"}, indent=2))
 
         from rpg_encoder.check_encode import check_encode
@@ -137,9 +137,9 @@ class TestCheckEncode:
     def test_error_state_empty_file(self, tmp_path, monkeypatch):
         """When rpg.json exists but is empty, return type=error."""
         monkeypatch.chdir(tmp_path)
-        rpgkit_data = tmp_path / ".rpgkit" / "data"
-        rpgkit_data.mkdir(parents=True)
-        rpg_file = rpgkit_data / "rpg.json"
+        cmind_data = tmp_path / ".cmind" / "data"
+        cmind_data.mkdir(parents=True)
+        rpg_file = cmind_data / "rpg.json"
         rpg_file.write_text("")
 
         from rpg_encoder.check_encode import check_encode
@@ -149,9 +149,9 @@ class TestCheckEncode:
     def test_update_state_nested_format(self, tmp_path, monkeypatch):
         """When rpg.json uses nested rpg.structure format, return type=update."""
         monkeypatch.chdir(tmp_path)
-        rpgkit_data = tmp_path / ".rpgkit" / "data"
-        rpgkit_data.mkdir(parents=True)
-        rpg_file = rpgkit_data / "rpg.json"
+        cmind_data = tmp_path / ".cmind" / "data"
+        cmind_data.mkdir(parents=True)
+        rpg_file = cmind_data / "rpg.json"
         nested_data = {
             "repo_name": "nested_repo",
             "rpg": {
@@ -172,9 +172,9 @@ class TestCheckEncode:
     def test_update_state_root_tree_format(self, tmp_path, monkeypatch):
         """When rpg.json uses root tree format (nested children), return type=update."""
         monkeypatch.chdir(tmp_path)
-        rpgkit_data = tmp_path / ".rpgkit" / "data"
-        rpgkit_data.mkdir(parents=True)
-        rpg_file = rpgkit_data / "rpg.json"
+        cmind_data = tmp_path / ".cmind" / "data"
+        cmind_data.mkdir(parents=True)
+        rpg_file = cmind_data / "rpg.json"
         tree_data = {
             "repo_name": "tree_repo",
             "root": {
@@ -327,13 +327,13 @@ class TestTemplates:
         encode_md = os.path.join(self._template_dir, "encode.md")
         fm = self._parse_frontmatter(encode_md)
         assert "name" in fm
-        assert fm["name"] == "rpgkit.encode"
+        assert fm["name"] == "cmind.encode"
 
     def test_update_rpg_template_frontmatter(self):
         update_md = os.path.join(self._template_dir, "update_rpg.md")
         fm = self._parse_frontmatter(update_md)
         assert "name" in fm
-        assert fm["name"] == "rpgkit.update_rpg"
+        assert fm["name"] == "cmind.update_rpg"
 
     def test_encode_template_references_check_script(self):
         encode_md = os.path.join(self._template_dir, "encode.md")
@@ -498,7 +498,7 @@ class TestMCPServer:
         ``create_mcp_server`` surfaces on the MCP client as the opaque
         ``MCP error -32000: Connection closed`` and hides the real cause.
         The server is required to come up in degraded mode and the
-        ``_unavailable_payload`` helper must point users at ``/rpgkit.encode``.
+        ``_unavailable_payload`` helper must point users at ``/cmind.encode``.
         """
         import mcp_server as m
         missing = tmp_path / "rpg.json"
@@ -508,7 +508,7 @@ class TestMCPServer:
         assert server.name == "rpg-tools"
         payload = json.loads(m._unavailable_payload(str(missing), "file_not_found"))
         assert payload["error"] == "rpg_unavailable"
-        assert "/rpgkit.encode" in payload["next_step"]
+        assert "/cmind.encode" in payload["next_step"]
 
 
 # ============================================================================
@@ -518,19 +518,19 @@ class TestMCPServer:
 class TestCLIIntegration:
     def test_main_app_no_encode_command(self):
         """The main app should NOT have 'encode' registered (removed in M12 redo)."""
-        from rpgkit_cli import app
+        from cmind_cli import app
         command_names = [cmd.name for cmd in app.registered_commands]
         assert "encode" not in command_names
 
     def test_main_app_no_update_rpg_command(self):
         """The main app should NOT have 'update-rpg' registered."""
-        from rpgkit_cli import app
+        from cmind_cli import app
         command_names = [cmd.name for cmd in app.registered_commands]
         assert "update-rpg" not in command_names
 
     def test_main_app_no_mcp_server_command(self):
         """The main app should NOT have 'mcp-server' registered."""
-        from rpgkit_cli import app
+        from cmind_cli import app
         command_names = [cmd.name for cmd in app.registered_commands]
         assert "mcp-server" not in command_names
 

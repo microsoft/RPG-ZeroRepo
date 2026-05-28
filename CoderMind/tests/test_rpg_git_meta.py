@@ -319,7 +319,7 @@ def test_status_legacy_rpg_without_meta_still_works(tmp_path, git_repo):
 
     data = _run_status_json(rpg_path, cwd=git_repo)
     assert "last_synced_commit" not in data
-    # current_commit is still surfaced — useful when /rpgkit.encode runs next
+    # current_commit is still surfaced — useful when /cmind.encode runs next
     assert "current_commit" in data
 
     # Text-mode output should not advertise sync state

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Static Completeness Checks for RPG-Kit Code Generation.
+"""Static Completeness Checks for CoderMind Code Generation.
 
 Project-type-agnostic static checks run after a subtree completes.
 These detect unimplemented stubs and placeholder returns without LLM cost.

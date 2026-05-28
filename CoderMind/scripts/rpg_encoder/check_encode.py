@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Check Encode Script.
 
-Inspect .rpgkit/data/rpg.json existence and validity to determine
+Inspect .cmind/data/rpg.json existence and validity to determine
 the appropriate encode action.
 
 Decision rules:

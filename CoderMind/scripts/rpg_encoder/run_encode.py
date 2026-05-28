@@ -2,13 +2,13 @@
 """Run Encode Script.
 
 Full repository encode: calls RPGParser.parse_rpg_from_repo() to build
-an RPG from scratch and saves it to .rpgkit/data/rpg.json.
+an RPG from scratch and saves it to .cmind/data/rpg.json.
 
 Prints a single JSON result to stdout with status and statistics.
 
 Usage:
-    rpgkit script rpg_encoder/run_encode.py --json
-    rpgkit script rpg_encoder/run_encode.py --repo-dir ./my-project
+    cmind script rpg_encoder/run_encode.py --json
+    cmind script rpg_encoder/run_encode.py --repo-dir ./my-project
 """
 
 import json
@@ -25,7 +25,7 @@ _script_dir = Path(__file__).resolve().parent.parent
 if str(_script_dir) not in sys.path:
     sys.path.insert(0, str(_script_dir))
 
-from common.paths import RPG_FILE, DEP_GRAPH_FILE, RPG_HTML_FILE, WORKSPACE_ROOT, ensure_rpgkit_dir  # noqa: E402
+from common.paths import RPG_FILE, DEP_GRAPH_FILE, RPG_HTML_FILE, WORKSPACE_ROOT, ensure_cmind_dir  # noqa: E402
 from common.trajectory import Trajectory  # noqa: E402
 
 
@@ -40,7 +40,7 @@ def run_encode(
     Args:
         repo_dir: Code directory to scan.  Defaults to
             :data:`common.paths.WORKSPACE_ROOT` — the directory the
-            user ran ``rpgkit init --here`` in (their existing source
+            user ran ``cmind init --here`` in (their existing source
             repo).  Pass an explicit path to override.
         repo_name: Override the inferred repo name.
         output: Override the RPG output path.
@@ -165,8 +165,8 @@ def run_encode(
             viz_data = load_rpg(output)
             html_content = generate_html(viz_data)
             # rpg.html is a user-facing artefact: keep it in the
-            # workspace's .rpgkit/reports/ rather than next to the
-            # machine-side rpg.json under ~/.rpgkit/workspaces/<workspace-id>/.
+            # workspace's .cmind/reports/ rather than next to the
+            # machine-side rpg.json under ~/.cmind/workspaces/<workspace-id>/.
             RPG_HTML_FILE.parent.mkdir(parents=True, exist_ok=True)
             viz_output = str(RPG_HTML_FILE)
             RPG_HTML_FILE.write_text(html_content, encoding="utf-8")
@@ -211,8 +211,8 @@ def main():
         default=None,
         help=(
             "Repository directory to scan. Defaults to the workspace "
-            "root (the directory containing ``.rpgkit/``, i.e. where "
-            "``rpgkit init --here`` was run)."
+            "root (the directory containing ``.cmind/``, i.e. where "
+            "``cmind init --here`` was run)."
         ),
     )
     parser.add_argument("--repo-name", default=None, help="Repository name")
@@ -229,7 +229,7 @@ def main():
     )
     args = parser.parse_args()
 
-    ensure_rpgkit_dir()
+    ensure_cmind_dir()
     result = run_encode(
         repo_dir=args.repo_dir,
         repo_name=args.repo_name,

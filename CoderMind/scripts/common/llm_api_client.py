@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
-"""API-Based LLM Client for RPG-Kit.
+"""API-Based LLM Client for CoderMind.
 
 This module provides direct API access to LLM providers as an optional
 complement to the existing CLI-based LLM client in ``llm_client.py``.
 
 Ported from RPG-ZeroRepo (zerorepo/rpg_gen/base/llm_client/) with adaptations
-for RPG-Kit's project structure and coding conventions.
+for CoderMind's project structure and coding conventions.
 
 Key components:
 - LLMConfig: Model configuration for unified LLM access across providers

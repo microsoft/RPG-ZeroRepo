@@ -25,12 +25,12 @@ if [[ ! $NEW_VERSION =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-.+)?$ ]]; then
 fi
 
 REPO_ROOT="${GITHUB_WORKSPACE:-$(git rev-parse --show-toplevel)}"
-PROJECT_DIR="${PROJECT_DIR:-RPG-Kit}"
+PROJECT_DIR="${PROJECT_DIR:-CoderMind}"
 PROJECT_ROOT="$REPO_ROOT/$PROJECT_DIR"
 GENRELEASES_DIR="$PROJECT_ROOT/.genreleases"
 
 if [[ ! -d "$PROJECT_ROOT" ]]; then
-  echo "RPG-Kit project directory not found: $PROJECT_ROOT" >&2
+  echo "CoderMind project directory not found: $PROJECT_ROOT" >&2
   exit 1
 fi
 
@@ -57,11 +57,11 @@ generate_commands() {
     case $ext in
       toml)
         body=$(sed 's/\\/\\\\/g' <<< "$body")
-        { echo "description = \"$description\""; echo; echo "prompt = \"\"\""; echo "$body"; echo "\"\"\""; } > "$output_dir/rpgkit.$name.$ext" ;;
+        { echo "description = \"$description\""; echo; echo "prompt = \"\"\""; echo "$body"; echo "\"\"\""; } > "$output_dir/cmind.$name.$ext" ;;
       md)
-        echo "$body" > "$output_dir/rpgkit.$name.$ext" ;;
+        echo "$body" > "$output_dir/cmind.$name.$ext" ;;
       agent.md)
-        echo "$body" > "$output_dir/rpgkit.$name.$ext" ;;
+        echo "$body" > "$output_dir/cmind.$name.$ext" ;;
     esac
   done
 }
@@ -71,7 +71,7 @@ generate_copilot_prompts() {
   mkdir -p "$prompts_dir"
 
   # Generate a .prompt.md file for each .agent.md file
-  for agent_file in "$agents_dir"/rpgkit.*.agent.md; do
+  for agent_file in "$agents_dir"/cmind.*.agent.md; do
     [[ -f "$agent_file" ]] || continue
 
     local basename=$(basename "$agent_file" .agent.md)
@@ -109,27 +109,27 @@ build_variant() {
   mkdir -p "$base_dir"
   
   # Copy base structure but filter scripts by variant
-  SPEC_DIR="$base_dir/.rpgkit"
+  SPEC_DIR="$base_dir/.cmind"
   mkdir -p "$SPEC_DIR"
   
   # Create empty data directory for runtime output
   mkdir -p "$SPEC_DIR/data"
 
-  [[ -f pyproject.toml ]] && { cp pyproject.toml "$SPEC_DIR/pyproject.toml"; echo "Copied pyproject.toml -> .rpgkit"; }
+  [[ -f pyproject.toml ]] && { cp pyproject.toml "$SPEC_DIR/pyproject.toml"; echo "Copied pyproject.toml -> .cmind"; }
 
-  [[ -d memory ]] && { cp -r memory "$SPEC_DIR/"; echo "Copied memory -> .rpgkit"; }
+  [[ -d memory ]] && { cp -r memory "$SPEC_DIR/"; echo "Copied memory -> .cmind"; }
   
   # Only copy the relevant script variant directory
   if [[ -d scripts ]]; then
     mkdir -p "$SPEC_DIR/scripts"
     case $script in
       sh)
-        [[ -d scripts/bash ]] && { cp -r scripts/bash "$SPEC_DIR/scripts/"; echo "Copied scripts/bash -> .rpgkit/scripts"; }
+        [[ -d scripts/bash ]] && { cp -r scripts/bash "$SPEC_DIR/scripts/"; echo "Copied scripts/bash -> .cmind/scripts"; }
         # Copy any script files that aren't in variant-specific directories
         find scripts -maxdepth 1 -type f -exec cp {} "$SPEC_DIR/scripts/" \; 2>/dev/null || true
         ;;
       ps)
-        [[ -d scripts/powershell ]] && { cp -r scripts/powershell "$SPEC_DIR/scripts/"; echo "Copied scripts/powershell -> .rpgkit/scripts"; }
+        [[ -d scripts/powershell ]] && { cp -r scripts/powershell "$SPEC_DIR/scripts/"; echo "Copied scripts/powershell -> .cmind/scripts"; }
         # Copy any script files that aren't in variant-specific directories
         find scripts -maxdepth 1 -type f -exec cp {} "$SPEC_DIR/scripts/" \; 2>/dev/null || true
         ;;
@@ -178,9 +178,9 @@ build_variant() {
     fi
   fi
   
-  [[ -d templates ]] && { mkdir -p "$SPEC_DIR/templates"; find templates -type f -not -path "templates/commands/*" -not -name "vscode-settings.json" -exec cp --parents {} "$SPEC_DIR"/ \; ; echo "Copied templates -> .rpgkit/templates"; }
+  [[ -d templates ]] && { mkdir -p "$SPEC_DIR/templates"; find templates -type f -not -path "templates/commands/*" -not -name "vscode-settings.json" -exec cp --parents {} "$SPEC_DIR"/ \; ; echo "Copied templates -> .cmind/templates"; }
   
-  [[ -d utils ]] && { cp -r utils "$SPEC_DIR/"; echo "Copied utils -> .rpgkit/utils"; }
+  [[ -d utils ]] && { cp -r utils "$SPEC_DIR/"; echo "Copied utils -> .cmind/utils"; }
   
   case $agent in
     claude)
@@ -245,8 +245,8 @@ SETTINGS
       mkdir -p "$base_dir/.agents/commands"
       generate_commands md "$base_dir/.agents/commands" ;;
   esac
-  create_archive "$base_dir" "$GENRELEASES_DIR/rpgkit-template-${agent}-${script}-${NEW_VERSION}.zip"
-  echo "Created $GENRELEASES_DIR/rpgkit-template-${agent}-${script}-${NEW_VERSION}.zip"
+  create_archive "$base_dir" "$GENRELEASES_DIR/cmind-template-${agent}-${script}-${NEW_VERSION}.zip"
+  echo "Created $GENRELEASES_DIR/cmind-template-${agent}-${script}-${NEW_VERSION}.zip"
 }
 
 # Determine agent list
@@ -296,5 +296,5 @@ for agent in "${AGENT_LIST[@]}"; do
 done
 
 echo "Archives in $GENRELEASES_DIR:"
-ls -1 "$GENRELEASES_DIR"/rpgkit-template-*-"${NEW_VERSION}".zip
+ls -1 "$GENRELEASES_DIR"/cmind-template-*-"${NEW_VERSION}".zip
 

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Git Utilities for RPG-Kit Code Generation.
+"""Git Utilities for CoderMind Code Generation.
 
 Provides Git operations for branch management and version control
 during the code generation phase:
@@ -35,7 +35,7 @@ class GitRunner:
     - Safe directory handling
     """
     
-    # The canonical main branch name used by all RPG-Kit repos.
+    # The canonical main branch name used by all CoderMind repos.
     MAIN_BRANCH = "main"
 
     def __init__(
@@ -431,7 +431,7 @@ class GitRunner:
 # status commands need:
 #   1. No exceptions on missing / shallow / non-git repos (silent failure
 #      with ``None`` return so the caller falls back gracefully).
-#   2. Sub-second timeouts (a slow git call must not stall ``rpgkit init``,
+#   2. Sub-second timeouts (a slow git call must not stall ``cmind init``,
 #      a pre-commit hook, or VS Code's folderOpen task).
 #   3. No mutation of the working tree, index, or any git state.
 #
@@ -531,7 +531,7 @@ def read_head(repo_dir: str | Path) -> Optional[dict]:
 #     "no changes" from "git not available" without consulting
 #     ``read_head`` first — that's intentional, falling back to full
 #     sync in either case is safe);
-#   * filters to ``.py`` files at the source — RPG-Kit doesn't currently
+#   * filters to ``.py`` files at the source — CoderMind doesn't currently
 #     parse anything else.  When that changes, lift the filter into the
 #     caller.
 

@@ -1,18 +1,18 @@
-"""RPG-Kit Workflow Configuration.
+"""CoderMind Workflow Configuration.
 
-Provides configuration management for RPG-Kit workflows.  Settings are
-loaded from ``.rpgkit/config.yaml`` (YAML) and merged with sensible
+Provides configuration management for CoderMind workflows.  Settings are
+loaded from ``.cmind/config.yaml`` (YAML) and merged with sensible
 defaults.
 
-This is an **original** RPG-Kit module -- it is NOT ported from
+This is an **original** CoderMind module -- it is NOT ported from
 RPG-ZeroRepo.
 
 Key class:
-  ``RPGKitConfig`` -- immutable, validated configuration object.
+  ``CMindConfig`` -- immutable, validated configuration object.
 
 Typical usage::
 
-    config = RPGKitConfig.load(repo_dir="/path/to/project")
+    config = CMindConfig.load(repo_dir="/path/to/project")
     print(config.workflow.default_mode)   # "mixed"
     print(config.versioning.max_history)  # 10
 """
@@ -38,7 +38,7 @@ except ImportError:  # pragma: no cover
 # ---------------------------------------------------------------------------
 
 CONFIG_FILE_NAME = "config.yaml"
-RPGKIT_DIR_NAME = ".rpgkit"
+CMIND_DIR_NAME = ".cmind"
 
 
 # Default values as module-level constants (accessible without instances)
@@ -87,18 +87,18 @@ class WorkflowConfig:
 
 
 @dataclass(frozen=True)
-class RPGKitConfig:
-    """Root configuration object for RPG-Kit.
+class CMindConfig:
+    """Root configuration object for CoderMind.
 
     Attributes:
         workflow: Workflow-level settings (mode, encode, codegen, versioning).
-        rpgkit_dir: Absolute path to the ``.rpgkit`` directory.
+        cmind_dir: Absolute path to the ``.cmind`` directory.
         config_path: Absolute path to the loaded config file (may be ``None``
             when no file was found and defaults were used).
     """
 
     workflow: WorkflowConfig = field(default_factory=WorkflowConfig)
-    rpgkit_dir: str = ""
+    cmind_dir: str = ""
     config_path: Optional[str] = None
 
     # ------------------------------------------------------------------
@@ -106,8 +106,8 @@ class RPGKitConfig:
     # ------------------------------------------------------------------
 
     @classmethod
-    def load(cls, repo_dir: str) -> "RPGKitConfig":
-        """Load configuration from ``<repo_dir>/.rpgkit/config.yaml``.
+    def load(cls, repo_dir: str) -> "CMindConfig":
+        """Load configuration from ``<repo_dir>/.cmind/config.yaml``.
 
         If the file does not exist or cannot be parsed, default values are
         returned (no exception is raised).
@@ -116,10 +116,10 @@ class RPGKitConfig:
             repo_dir: Repository root directory.
 
         Returns:
-            Populated ``RPGKitConfig`` instance.
+            Populated ``CMindConfig`` instance.
         """
-        rpgkit_dir = os.path.join(os.path.abspath(repo_dir), RPGKIT_DIR_NAME)
-        config_file = os.path.join(rpgkit_dir, CONFIG_FILE_NAME)
+        cmind_dir = os.path.join(os.path.abspath(repo_dir), CMIND_DIR_NAME)
+        config_file = os.path.join(cmind_dir, CONFIG_FILE_NAME)
 
         raw: Dict[str, Any] = {}
         loaded_path: Optional[str] = None
@@ -147,27 +147,27 @@ class RPGKitConfig:
         workflow = _parse_workflow(raw.get("workflow", {}))
         return cls(
             workflow=workflow,
-            rpgkit_dir=rpgkit_dir,
+            cmind_dir=cmind_dir,
             config_path=loaded_path,
         )
 
     @classmethod
-    def from_dict(cls, data: Dict[str, Any], rpgkit_dir: str = "") -> "RPGKitConfig":
+    def from_dict(cls, data: Dict[str, Any], cmind_dir: str = "") -> "CMindConfig":
         """Create a config from an in-memory dictionary.
 
         Useful for tests and programmatic construction.
 
         Args:
             data: Raw config dictionary (same shape as the YAML file).
-            rpgkit_dir: Override for ``.rpgkit`` directory path.
+            cmind_dir: Override for ``.cmind`` directory path.
 
         Returns:
-            Populated ``RPGKitConfig`` instance.
+            Populated ``CMindConfig`` instance.
         """
         workflow = _parse_workflow(data.get("workflow", {}))
         return cls(
             workflow=workflow,
-            rpgkit_dir=rpgkit_dir,
+            cmind_dir=cmind_dir,
             config_path=None,
         )
 
@@ -200,7 +200,7 @@ class RPGKitConfig:
 
         Args:
             path: Target file path.  Defaults to
-                ``<rpgkit_dir>/config.yaml``.
+                ``<cmind_dir>/config.yaml``.
 
         Returns:
             Absolute path of the written file.
@@ -215,12 +215,12 @@ class RPGKitConfig:
             )
 
         if path is None:
-            if not self.rpgkit_dir:
+            if not self.cmind_dir:
                 raise ValueError(
-                    "Cannot determine save path: rpgkit_dir is empty "
+                    "Cannot determine save path: cmind_dir is empty "
                     "and no explicit path was given."
                 )
-            path = os.path.join(self.rpgkit_dir, CONFIG_FILE_NAME)
+            path = os.path.join(self.cmind_dir, CONFIG_FILE_NAME)
 
         os.makedirs(os.path.dirname(path), exist_ok=True)
         with open(path, "w", encoding="utf-8") as fh:

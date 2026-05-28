@@ -10,7 +10,7 @@ NEW_VERSION="$1"
 LAST_TAG="$2"
 RELEASE_KIND="${3:-stable}"
 REPO_ROOT="${GITHUB_WORKSPACE:-$(git rev-parse --show-toplevel)}"
-PROJECT_DIR="${PROJECT_DIR:-RPG-Kit}"
+PROJECT_DIR="${PROJECT_DIR:-CoderMind}"
 NOTES_FILE="${NOTES_FILE:-$REPO_ROOT/release_notes.md}"
 
 if git rev-parse -q --verify "refs/tags/$LAST_TAG" >/dev/null; then
@@ -19,13 +19,13 @@ else
   COMMITS=$(git log --oneline --pretty=format:"- %s" HEAD -- "$PROJECT_DIR" | head -n 10 || true)
 fi
 
-COMMITS="${COMMITS:-No RPG-Kit changes found.}"
+COMMITS="${COMMITS:-No CoderMind changes found.}"
 
 if [[ "$RELEASE_KIND" == "pre" ]]; then
   BRANCH="${GITHUB_REF_NAME:-unknown}"
   cat > "$NOTES_FILE" << EOF
 > **This is a development pre-release from the \`$BRANCH\` branch.**
-> It is intended for testing purposes only. For stable releases, use \`rpgkit init\` without \`--pre\`.
+> It is intended for testing purposes only. For stable releases, use \`cmind init\` without \`--pre\`.
 
 ## Changelog (since ${LAST_TAG})
 
@@ -33,7 +33,7 @@ $COMMITS
 EOF
 else
   cat > "$NOTES_FILE" << EOF
-This is the latest RPG-Kit template release. We recommend using the RPG-Kit CLI to scaffold projects, but the template archives can also be downloaded and managed manually.
+This is the latest CoderMind template release. We recommend using the CoderMind CLI to scaffold projects, but the template archives can also be downloaded and managed manually.
 
 ## Changelog (since ${LAST_TAG})
 

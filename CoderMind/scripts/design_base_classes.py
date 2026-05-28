@@ -8,9 +8,9 @@ Function: Design shared base classes and data structures for the repository
 - Validates Python code syntax
 
 Input: 
-  - .rpgkit/skeleton.json (file structure)
-  - .rpgkit/data_flow.json (data flow between components)
-Output: .rpgkit/base_classes.json (base class definitions with code)
+  - .cmind/skeleton.json (file structure)
+  - .cmind/data_flow.json (data flow between components)
+Output: .cmind/base_classes.json (base class definitions with code)
 """
 
 import json
@@ -466,7 +466,7 @@ def main():
     if not skeleton_path.exists():
         logger.error(f"Skeleton file not found: {skeleton_path}")
         print(f"ERROR: Skeleton file not found: {skeleton_path}")
-        print("Please run /rpgkit.build_skeleton first.")
+        print("Please run /cmind.build_skeleton first.")
         return 1
 
     with open(skeleton_path, "r", encoding="utf-8") as f:
@@ -484,7 +484,7 @@ def main():
     else:
         logger.warning(f"Data flow file not found: {data_flow_path}")
         print(f"[WARNING] Warning: Data flow file not found: {data_flow_path}")
-        print("  Run /rpgkit.build_data_flow first for better results.")
+        print("  Run /cmind.build_data_flow first for better results.")
 
     # Initialize trajectory
     trajectory = None

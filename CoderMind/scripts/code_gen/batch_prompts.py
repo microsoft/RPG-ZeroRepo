@@ -207,8 +207,8 @@ claim against an independent re-run.
 - Run: `git add -A && git commit -m "<message>"`
 
 [FAIL] You MUST NOT:
-- Modify or read files under `.rpgkit/`
-- Run any `rpgkit script ...` or `rpgkit-mcp` commands
+- Modify or read files under `.cmind/`
+- Run any `cmind script ...` or `cmind-mcp` commands
 - Run arbitrary shell commands beyond pytest/pip/git listed above
 - Install packages that are not genuinely needed by the source code
 - Delete files that are not part of your task
@@ -310,8 +310,8 @@ The core implementation is already complete.
 
 [FAIL] You MUST NOT:
 - Modify existing source code or test files
-- Modify or read files under `.rpgkit/`
-- Run any `rpgkit script ...` or `rpgkit-mcp` commands
+- Modify or read files under `.cmind/`
+- Run any `cmind script ...` or `cmind-mcp` commands
 
 ## Task Details
 
@@ -338,7 +338,7 @@ You are creating documentation for the project. No tests are needed.
 
 [FAIL] You MUST NOT:
 - Modify existing source code or test files
-- Modify or read files under `.rpgkit/`
+- Modify or read files under `.cmind/`
 
 ## Task Details
 

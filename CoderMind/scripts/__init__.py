@@ -8,10 +8,10 @@
 # require Python-package semantics.  Keeping this empty marker file
 # avoids surprising build differences across hatch releases.
 #
-# At runtime ``scripts/`` is NOT imported as ``rpgkit_cli.scripts``
+# At runtime ``scripts/`` is NOT imported as ``cmind_cli.scripts``
 # — the wheel's ``force-include`` rewrites the install target to
-# ``rpgkit_cli/core_pack/scripts/``, and that path is also not imported
+# ``cmind_cli/core_pack/scripts/``, and that path is also not imported
 # as a Python module.  Scripts are executed directly from the packaged
-# location via the ``rpgkit script <name>`` dispatcher, which resolves
-# them through ``rpgkit_cli._assets.scripts_dir()``.
+# location via the ``cmind script <name>`` dispatcher, which resolves
+# them through ``cmind_cli._assets.scripts_dir()``.
 #

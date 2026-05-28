@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Tests for RPG-Kit hook installation (Claude SessionStart, Copilot folderOpen task, and git pre-commit) and the ``update_graphs.py status`` subcommand the hooks invoke.
+"""Tests for CoderMind hook installation (Claude SessionStart, Copilot folderOpen task, and git pre-commit) and the ``update_graphs.py status`` subcommand the hooks invoke.
 
 Verifies:
   - ``_install_claude_hooks`` writes a SessionStart hook that calls
@@ -28,7 +28,7 @@ sys.path.insert(0, str(_project_root))
 sys.path.insert(0, str(_project_root / "src"))
 sys.path.insert(0, str(_project_root / "scripts"))
 
-import rpgkit_cli  # noqa: E402
+import cmind_cli  # noqa: E402
 
 
 # ---------------------------------------------------------------------------
@@ -37,8 +37,8 @@ import rpgkit_cli  # noqa: E402
 
 @pytest.fixture
 def project(tmp_path):
-    """A minimal RPG-Kit workspace with .rpgkit/scripts/update_graphs.py."""
-    scripts_dir = tmp_path / ".rpgkit" / "scripts"
+    """A minimal CoderMind workspace with .cmind/scripts/update_graphs.py."""
+    scripts_dir = tmp_path / ".cmind" / "scripts"
     scripts_dir.mkdir(parents=True)
     # The installers only need the file to exist; we copy the real script
     # so that subprocess invocations later in the test can actually run.
@@ -55,42 +55,42 @@ def project(tmp_path):
 # ---------------------------------------------------------------------------
 
 def test_install_claude_hooks_writes_session_start(project):
-    rpgkit_cli._install_claude_hooks(project)
+    cmind_cli._install_claude_hooks(project)
     data = json.loads((project / ".claude" / "settings.json").read_text())
     assert "hooks" in data
     session_start = data["hooks"]["SessionStart"]
     assert isinstance(session_start, list) and len(session_start) == 1
     cmd = session_start[0]["hooks"][0]["command"]
-    # Hook now invokes the global ``rpgkit`` CLI; no embedded sys.executable.
-    assert "rpgkit script update_graphs.py status" in cmd
+    # Hook now invokes the global ``cmind`` CLI; no embedded sys.executable.
+    assert "cmind script update_graphs.py status" in cmd
     # PATH fallback for GUI-launched session starts (VS Code / IDE git UI).
-    assert "command -v rpgkit" in cmd
-    assert cmd.endswith("status 2>/dev/null || echo '[RPG-Kit] RPG status unavailable'")
+    assert "command -v cmind" in cmd
+    assert cmd.endswith("status 2>/dev/null || echo '[CoderMind] RPG status unavailable'")
 
 
 def test_install_claude_hooks_is_idempotent_across_python_upgrades(project, monkeypatch):
     """Re-installing must not stack duplicate SessionStart entries.
 
     Hooks no longer embed ``sys.executable``; they delegate to the
-    globally-installed ``rpgkit`` CLI.  Re-running install therefore
+    globally-installed ``cmind`` CLI.  Re-running install therefore
     yields the exact same command and must remain a single entry
     (not a duplicate per invocation).
     """
-    rpgkit_cli._install_claude_hooks(project)
+    cmind_cli._install_claude_hooks(project)
     # Simulate any environment change that previously affected hook content;
     # the new hook body is interpreter-independent so this should be a no-op.
-    monkeypatch.setattr(rpgkit_cli.sys, "executable", "/opt/new-python/bin/python")
-    rpgkit_cli._install_claude_hooks(project)
+    monkeypatch.setattr(cmind_cli.sys, "executable", "/opt/new-python/bin/python")
+    cmind_cli._install_claude_hooks(project)
     data = json.loads((project / ".claude" / "settings.json").read_text())
     session_start = data["hooks"]["SessionStart"]
-    rpgkit_entries = [
+    cmind_entries = [
         e for e in session_start
         if any("update_graphs.py" in h.get("command", "") for h in e.get("hooks", []))
     ]
-    assert len(rpgkit_entries) == 1
-    cmd = rpgkit_entries[0]["hooks"][0]["command"]
-    # Always uses the rpgkit-script form regardless of interpreter path.
-    assert "rpgkit script update_graphs.py" in cmd
+    assert len(cmind_entries) == 1
+    cmd = cmind_entries[0]["hooks"][0]["command"]
+    # Always uses the cmind-script form regardless of interpreter path.
+    assert "cmind script update_graphs.py" in cmd
     assert "/opt/new-python/bin/python" not in cmd
 
 
@@ -99,20 +99,20 @@ def test_install_claude_hooks_shell_escapes_special_chars(project, monkeypatch):
 
     Previously the hook embedded ``sys.executable`` and the workspace
     script path, requiring ``shlex.quote`` to survive spaces.  The new
-    hook body invokes the global ``rpgkit`` CLI directly, so paths with
+    hook body invokes the global ``cmind`` CLI directly, so paths with
     special characters can't end up inside the command string.
     """
     monkeypatch.setattr(
-        rpgkit_cli.sys, "executable", "/path with space/python"
+        cmind_cli.sys, "executable", "/path with space/python"
     )
-    rpgkit_cli._install_claude_hooks(project)
+    cmind_cli._install_claude_hooks(project)
     cmd = (
         json.loads((project / ".claude" / "settings.json").read_text())
         ["hooks"]["SessionStart"][0]["hooks"][0]["command"]
     )
     # No path leakage from the interpreter / workspace location.
     assert "/path with space" not in cmd
-    assert "rpgkit script update_graphs.py" in cmd
+    assert "cmind script update_graphs.py" in cmd
 
 
 def test_install_claude_hooks_merges_existing(project):
@@ -127,7 +127,7 @@ def test_install_claude_hooks_merges_existing(project):
         "customField": "preserve me",
     }))
 
-    rpgkit_cli._install_claude_hooks(project)
+    cmind_cli._install_claude_hooks(project)
     data = json.loads((claude_dir / "settings.json").read_text())
     # Existing event preserved
     assert data["hooks"]["PostToolUse"][0]["hooks"][0]["command"] == "echo user"
@@ -144,16 +144,16 @@ def test_install_claude_hooks_merges_existing(project):
 # ---------------------------------------------------------------------------
 
 def test_install_copilot_hooks_writes_folder_open_task(project):
-    rpgkit_cli._install_copilot_hooks(project)
+    cmind_cli._install_copilot_hooks(project)
     tasks = json.loads((project / ".vscode" / "tasks.json").read_text())
     assert tasks["version"] == "2.0.0"
     assert len(tasks["tasks"]) == 1
     t = tasks["tasks"][0]
-    assert t["label"] == "RPG-Kit: load status"
+    assert t["label"] == "CoderMind: load status"
     assert t["runOptions"] == {"runOn": "folderOpen"}
-    # Task now invokes the global ``rpgkit`` CLI; args carry the
+    # Task now invokes the global ``cmind`` CLI; args carry the
     # dispatcher subcommand + script relpath, with ``status`` last.
-    assert t["command"] == "rpgkit"
+    assert t["command"] == "cmind"
     assert t["args"][0] == "script"
     assert t["args"][1] == "update_graphs.py"
     assert t["args"][-1] == "status"
@@ -165,11 +165,11 @@ def test_install_copilot_hooks_writes_folder_open_task(project):
 
 
 def test_install_copilot_hooks_is_idempotent(project):
-    rpgkit_cli._install_copilot_hooks(project)
-    rpgkit_cli._install_copilot_hooks(project)
+    cmind_cli._install_copilot_hooks(project)
+    cmind_cli._install_copilot_hooks(project)
     tasks = json.loads((project / ".vscode" / "tasks.json").read_text())
     labels = [t["label"] for t in tasks["tasks"]]
-    assert labels.count("RPG-Kit: load status") == 1
+    assert labels.count("CoderMind: load status") == 1
 
 
 def test_install_copilot_hooks_preserves_user_tasks(project):
@@ -181,11 +181,11 @@ def test_install_copilot_hooks_preserves_user_tasks(project):
             {"label": "user build", "type": "shell", "command": "make"},
         ],
     }))
-    rpgkit_cli._install_copilot_hooks(project)
+    cmind_cli._install_copilot_hooks(project)
     tasks = json.loads((vscode / "tasks.json").read_text())
     labels = [t["label"] for t in tasks["tasks"]]
     assert "user build" in labels
-    assert "RPG-Kit: load status" in labels
+    assert "CoderMind: load status" in labels
 
 
 # ---------------------------------------------------------------------------
@@ -196,14 +196,14 @@ def test_install_hooks_dispatches_to_copilot(project, monkeypatch):
     # Pretend the project is a git repo so the pre-commit installer fires.
     (project / ".git" / "hooks").mkdir(parents=True)
 
-    rpgkit_cli._install_hooks(project, "copilot", tracker=None)
+    cmind_cli._install_hooks(project, "copilot", tracker=None)
 
     # Copilot tasks.json present, Claude settings.json absent.
     assert (project / ".vscode" / "tasks.json").is_file()
     assert not (project / ".claude" / "settings.json").exists()
     # Pre-commit hook installed.
     pre = (project / ".git" / "hooks" / "pre-commit").read_text()
-    assert "RPG-Kit: incremental RPG sync on commit" in pre
+    assert "CoderMind: incremental RPG sync on commit" in pre
     assert "update_graphs.py" in pre and "sync" in pre
     # Hook must pass ``--staged-only`` so it doesn't pull working-tree
     # changes that the user hasn't ``git add``'d.
@@ -213,7 +213,7 @@ def test_install_hooks_dispatches_to_copilot(project, monkeypatch):
 def test_install_hooks_dispatches_to_claude(project):
     (project / ".git" / "hooks").mkdir(parents=True)
 
-    rpgkit_cli._install_hooks(project, "claude", tracker=None)
+    cmind_cli._install_hooks(project, "claude", tracker=None)
 
     assert (project / ".claude" / "settings.json").is_file()
     assert not (project / ".vscode" / "tasks.json").exists()
@@ -221,13 +221,13 @@ def test_install_hooks_dispatches_to_claude(project):
 
 
 def test_update_command_invokes_install_hooks():
-    """Regression tripwire: ``rpgkit update`` must call ``_install_hooks``.
+    """Regression tripwire: ``cmind update`` must call ``_install_hooks``.
 
     Previously ``update`` re-downloaded templates / refreshed gitignore
     / regenerated MCP config but silently *skipped* hook installation.
-    Result: users running ``rpgkit update`` after upgrading the CLI
+    Result: users running ``cmind update`` after upgrading the CLI
     never received hook fixes \u2014 ``.git/hooks/*`` stayed frozen at
-    whatever version was active during the original ``rpgkit init``.
+    whatever version was active during the original ``cmind init``.
 
     This is a static-source assertion rather than an end-to-end test
     because ``update`` does network I/O (template download) that is
@@ -236,15 +236,15 @@ def test_update_command_invokes_install_hooks():
     call from ``update``, this test fails loudly.
     """
     import inspect
-    source = inspect.getsource(rpgkit_cli.update)
+    source = inspect.getsource(cmind_cli.update)
     assert "_install_hooks(" in source, (
-        "rpgkit update must call _install_hooks(...); "
+        "cmind update must call _install_hooks(...); "
         "without it, hook upgrades never propagate to existing workspaces"
     )
     # And the tracker must declare a 'hooks' step so the user sees it
     # in the live progress output.
     assert '"hooks"' in source, (
-        "rpgkit update tracker must declare a 'hooks' step"
+        "cmind update tracker must declare a 'hooks' step"
     )
 
 
@@ -258,7 +258,7 @@ def test_update_command_invokes_install_hooks():
 # every upgrade was a silent no-op: users kept whatever they were first
 # installed with, and never picked up new behavior.  The tests below
 # pin the upgrade semantics: a fresh install must REPLACE any prior
-# RPG-Kit-owned content rather than refusing to write or stacking copies.
+# CoderMind-owned content rather than refusing to write or stacking copies.
 
 
 def _hooks_dir(project):
@@ -272,20 +272,20 @@ def test_pre_commit_v1_legacy_is_replaced_on_upgrade(project):
     hd = _hooks_dir(project)
     (hd / "pre-commit").write_text(
         "#!/bin/sh\n"
-        "# RPG-Kit: full RPG sync on commit\n"
+        "# CoderMind: full RPG sync on commit\n"
         "/old/python /old/update_graphs.py sync 2>/dev/null || true\n"
     )
 
-    assert rpgkit_cli._install_git_pre_commit_hook(project) is True
+    assert cmind_cli._install_git_pre_commit_hook(project) is True
     text = (hd / "pre-commit").read_text()
 
     # Old marker + old command line are gone.
-    assert "# RPG-Kit: full RPG sync on commit" not in text
+    assert "# CoderMind: full RPG sync on commit" not in text
     assert "/old/python" not in text
     # New sentinel-wrapped block is present exactly once.
-    assert text.count("# RPGKIT-BEGIN pre-commit") == 1
-    assert text.count("# RPGKIT-END pre-commit") == 1
-    assert "# RPG-Kit: incremental RPG sync on commit" in text
+    assert text.count("# CMIND-BEGIN pre-commit") == 1
+    assert text.count("# CMIND-END pre-commit") == 1
+    assert "# CoderMind: incremental RPG sync on commit" in text
     assert "--staged-only" in text
 
 
@@ -294,16 +294,16 @@ def test_post_commit_v1_legacy_is_replaced_on_upgrade(project):
     hd = _hooks_dir(project)
     (hd / "post-commit").write_text(
         "#!/bin/sh\n"
-        "# RPG-Kit: advance meta.git after commit\n"
+        "# CoderMind: advance meta.git after commit\n"
         "/old/python /old/update_graphs.py sync 2>/dev/null || true\n"
     )
 
-    assert rpgkit_cli._install_git_post_commit_hook(project) is True
+    assert cmind_cli._install_git_post_commit_hook(project) is True
     text = (hd / "post-commit").read_text()
 
-    assert "# RPG-Kit: advance meta.git after commit" not in text
+    assert "# CoderMind: advance meta.git after commit" not in text
     assert "/old/python" not in text
-    assert text.count("# RPGKIT-BEGIN post-commit") == 1
+    assert text.count("# CMIND-BEGIN post-commit") == 1
     assert "update-rpg" in text   # phase 2 is now present
 
 
@@ -317,7 +317,7 @@ def test_post_commit_v3_legacy_is_replaced_on_upgrade(project):
     hd = _hooks_dir(project)
     old_body = (
         "#!/bin/sh\n"
-        "# RPG-Kit: advance meta.git + background feature graph update\n"
+        "# CoderMind: advance meta.git + background feature graph update\n"
         "/old/python /old/update_graphs.py sync 2>/dev/null || true\n"
         "if [ ! -f /old/.lock ]; then\n"
         '  setsid env -u GIT_INDEX_FILE -u GIT_DIR sh -c "cd /old; sleep 2; touch /old/.lock; '
@@ -327,33 +327,33 @@ def test_post_commit_v3_legacy_is_replaced_on_upgrade(project):
     )
     (hd / "post-commit").write_text(old_body)
 
-    assert rpgkit_cli._install_git_post_commit_hook(project) is True
+    assert cmind_cli._install_git_post_commit_hook(project) is True
     text = (hd / "post-commit").read_text()
 
     # Old paths are gone — proves the v3 block was actually stripped.
     assert "/old/python" not in text
     assert "/old/.lock" not in text
     # New sentinel block is present exactly once (no duplicate piling).
-    assert text.count("# RPGKIT-BEGIN post-commit") == 1
-    assert text.count("# RPGKIT-END post-commit") == 1
+    assert text.count("# CMIND-BEGIN post-commit") == 1
+    assert text.count("# CMIND-END post-commit") == 1
     # Current marker survives inside the new block.
     assert text.count(
-        "# RPG-Kit: advance meta.git + background feature graph update"
+        "# CoderMind: advance meta.git + background feature graph update"
     ) == 1
 
 
 def test_install_is_idempotent_under_sentinels(project):
     """Repeated installs must not stack sentinel blocks or duplicate content — the second install replaces the first verbatim."""
     hd = _hooks_dir(project)
-    rpgkit_cli._install_git_pre_commit_hook(project)
+    cmind_cli._install_git_pre_commit_hook(project)
     first = (hd / "pre-commit").read_text()
-    rpgkit_cli._install_git_pre_commit_hook(project)
-    rpgkit_cli._install_git_pre_commit_hook(project)
+    cmind_cli._install_git_pre_commit_hook(project)
+    cmind_cli._install_git_pre_commit_hook(project)
     third = (hd / "pre-commit").read_text()
 
     assert first == third
-    assert third.count("# RPGKIT-BEGIN pre-commit") == 1
-    assert third.count("# RPGKIT-END pre-commit") == 1
+    assert third.count("# CMIND-BEGIN pre-commit") == 1
+    assert third.count("# CMIND-END pre-commit") == 1
 
 
 def test_sentinel_block_is_atomically_replaceable(project):
@@ -362,44 +362,44 @@ def test_sentinel_block_is_atomically_replaceable(project):
     (hd / "pre-commit").write_text(
         "#!/bin/sh\n"
         "\n"
-        "# RPGKIT-BEGIN pre-commit\n"
-        "# RPG-Kit: incremental RPG sync on commit\n"
+        "# CMIND-BEGIN pre-commit\n"
+        "# CoderMind: incremental RPG sync on commit\n"
         "/some/older/path/python /some/older/script.py sync --legacy-flag\n"
-        "# RPGKIT-END pre-commit\n"
+        "# CMIND-END pre-commit\n"
     )
 
-    assert rpgkit_cli._install_git_pre_commit_hook(project) is True
+    assert cmind_cli._install_git_pre_commit_hook(project) is True
     text = (hd / "pre-commit").read_text()
 
     # Old body content gone.
     assert "/some/older/path/python" not in text
     assert "--legacy-flag" not in text
     # Exactly one sentinel pair.
-    assert text.count("# RPGKIT-BEGIN pre-commit") == 1
-    assert text.count("# RPGKIT-END pre-commit") == 1
+    assert text.count("# CMIND-BEGIN pre-commit") == 1
+    assert text.count("# CMIND-END pre-commit") == 1
     # New body present.
     assert "--staged-only" in text
 
 
 def test_user_authored_content_outside_block_is_preserved(project):
-    """RPG-Kit owns only its sentinel block; user-authored shell lines before/after the block must survive an install/upgrade."""
+    """CoderMind owns only its sentinel block; user-authored shell lines before/after the block must survive an install/upgrade."""
     hd = _hooks_dir(project)
     (hd / "pre-commit").write_text(
         "#!/bin/sh\n"
         "echo 'user-prelude: about to commit' >&2\n"
-        "# RPGKIT-BEGIN pre-commit\n"
-        "# RPG-Kit: incremental RPG sync on commit\n"
+        "# CMIND-BEGIN pre-commit\n"
+        "# CoderMind: incremental RPG sync on commit\n"
         "/old/python /old/update_graphs.py sync --staged-only\n"
-        "# RPGKIT-END pre-commit\n"
+        "# CMIND-END pre-commit\n"
         "echo 'user-postlude: still going' >&2\n"
     )
 
-    assert rpgkit_cli._install_git_pre_commit_hook(project) is True
+    assert cmind_cli._install_git_pre_commit_hook(project) is True
     text = (hd / "pre-commit").read_text()
 
     assert "user-prelude" in text
     assert "user-postlude" in text
-    # And the RPG-Kit content was actually upgraded (old python path gone).
+    # And the CoderMind content was actually upgraded (old python path gone).
     assert "/old/python" not in text
 
 
@@ -410,11 +410,11 @@ def test_user_authored_content_outside_block_is_preserved(project):
 def _run_status(workspace: Path, json_mode: bool = False) -> subprocess.CompletedProcess:
     """Run the real source ``update_graphs.py status`` with explicit ``--rpg`` and ``--dep-graph`` paths pointing into ``workspace``.
 
-    We invoke the source script (not the copy in ``workspace/.rpgkit/
+    We invoke the source script (not the copy in ``workspace/.cmind/
     scripts``) so the test doesn't need to vendor the ``common/`` and
     ``rpg/`` packages alongside it.
     """
-    data_dir = workspace / ".rpgkit" / "data"
+    data_dir = workspace / ".cmind" / "data"
     cmd = [
         sys.executable,
         str(_project_root / "scripts" / "update_graphs.py"),
@@ -430,13 +430,13 @@ def _run_status(workspace: Path, json_mode: bool = False) -> subprocess.Complete
 def test_update_graphs_status_empty_workspace(project):
     result = _run_status(project)
     assert result.returncode == 0, result.stderr
-    # No RPG yet → guidance points the agent to /rpgkit.encode.
+    # No RPG yet → guidance points the agent to /cmind.encode.
     assert "No RPG found" in result.stdout
-    assert "/rpgkit.encode" in result.stdout
+    assert "/cmind.encode" in result.stdout
 
 
 def test_update_graphs_status_with_rpg(project):
-    data_dir = project / ".rpgkit" / "data"
+    data_dir = project / ".cmind" / "data"
     data_dir.mkdir(parents=True)
     (data_dir / "rpg.json").write_text(json.dumps({
         "repo_name": "demo",
@@ -473,7 +473,7 @@ def test_update_graphs_status_with_rpg(project):
 
 
 def test_update_graphs_status_handles_corrupt_files(project):
-    data_dir = project / ".rpgkit" / "data"
+    data_dir = project / ".cmind" / "data"
     data_dir.mkdir(parents=True)
     (data_dir / "rpg.json").write_text("{ this is not json")
     (data_dir / "dep_graph.json").write_text("also broken")
@@ -489,14 +489,14 @@ def test_update_graphs_status_handles_corrupt_files(project):
 
 def test_update_graphs_status_text_on_corrupt_rpg_says_unavailable(project):
     """A corrupt rpg.json must NOT produce 'Repository Program Graph is available' text — that would mislead the AI agent into calling rpg-tools MCP queries that would all fail."""
-    data_dir = project / ".rpgkit" / "data"
+    data_dir = project / ".cmind" / "data"
     data_dir.mkdir(parents=True)
     (data_dir / "rpg.json").write_text("not json at all")
 
     text = _run_status(project).stdout
     assert "is available" not in text
     assert "could not be parsed" in text
-    assert "/rpgkit.encode" in text
+    assert "/cmind.encode" in text
 
 
 # ---------------------------------------------------------------------------
@@ -504,8 +504,8 @@ def test_update_graphs_status_text_on_corrupt_rpg_says_unavailable(project):
 # ---------------------------------------------------------------------------
 
 def test_setup_gitignore_greenfield_writes_full_template(tmp_path):
-    """No .git/, no .gitignore → Python standard template + all RPG-Kit rules."""
-    rpgkit_cli._setup_gitignore(tmp_path, "copilot")
+    """No .git/, no .gitignore → Python standard template + all CoderMind rules."""
+    cmind_cli._setup_gitignore(tmp_path, "copilot")
     content = (tmp_path / ".gitignore").read_text()
     # Python conventions (matches github/gitignore/Python.gitignore verbatim)
     assert "__pycache__/" in content
@@ -515,8 +515,8 @@ def test_setup_gitignore_greenfield_writes_full_template(tmp_path):
     assert "PyInstaller" in content
     assert "Jupyter Notebook" in content
     assert ".ipynb_checkpoints" in content
-    # RPG-Kit common (runtime + machine-specific)
-    assert ".rpgkit/" in content
+    # CoderMind common (runtime + machine-specific)
+    assert ".cmind/" in content
     assert ".vscode/mcp.json" in content
     assert ".vscode/tasks.json" in content
     assert ".mcp.json" in content
@@ -529,7 +529,7 @@ def test_setup_gitignore_greenfield_writes_full_template(tmp_path):
 
 def test_setup_gitignore_greenfield_claude(tmp_path):
     """Claude path uses .claude/commands/ instead of .github/*."""
-    rpgkit_cli._setup_gitignore(tmp_path, "claude")
+    cmind_cli._setup_gitignore(tmp_path, "claude")
     content = (tmp_path / ".gitignore").read_text()
     assert ".claude/commands/" in content
     # Copilot directories must NOT be ignored on a Claude project
@@ -537,13 +537,13 @@ def test_setup_gitignore_greenfield_claude(tmp_path):
     assert ".github/prompts/" not in content
 
 
-def test_setup_gitignore_existing_git_no_ignore_writes_rpgkit_only(tmp_path):
-    """Existing .git/, no .gitignore → RPG-Kit rules only, NO Python template."""
+def test_setup_gitignore_existing_git_no_ignore_writes_cmind_only(tmp_path):
+    """Existing .git/, no .gitignore → CoderMind rules only, NO Python template."""
     (tmp_path / ".git").mkdir()
-    rpgkit_cli._setup_gitignore(tmp_path, "copilot")
+    cmind_cli._setup_gitignore(tmp_path, "copilot")
     content = (tmp_path / ".gitignore").read_text()
-    # RPG-Kit rules present
-    assert ".rpgkit/" in content
+    # CoderMind rules present
+    assert ".cmind/" in content
     assert ".github/agents/" in content
     # Python conventions NOT imposed on existing repo
     assert "__pycache__/" not in content
@@ -555,46 +555,46 @@ def test_setup_gitignore_existing_gitignore_preserves_user_entries(tmp_path):
     """Pre-existing .gitignore content must be preserved verbatim."""
     user_content = "# My custom rules\nnode_modules/\n*.tmp\n"
     (tmp_path / ".gitignore").write_text(user_content)
-    rpgkit_cli._setup_gitignore(tmp_path, "copilot")
+    cmind_cli._setup_gitignore(tmp_path, "copilot")
     content = (tmp_path / ".gitignore").read_text()
     # User's entries preserved at the top, untouched
     assert content.startswith(user_content)
     assert "node_modules/" in content
     assert "*.tmp" in content
-    # RPG-Kit rules appended
-    assert ".rpgkit/" in content
+    # CoderMind rules appended
+    assert ".cmind/" in content
     assert ".github/agents/" in content
 
 
 def test_setup_gitignore_is_idempotent(tmp_path):
     """Running _setup_gitignore twice must not duplicate entries or headers."""
-    rpgkit_cli._setup_gitignore(tmp_path, "copilot")
+    cmind_cli._setup_gitignore(tmp_path, "copilot")
     first = (tmp_path / ".gitignore").read_text()
-    rpgkit_cli._setup_gitignore(tmp_path, "copilot")
+    cmind_cli._setup_gitignore(tmp_path, "copilot")
     second = (tmp_path / ".gitignore").read_text()
     assert first == second  # second call is a no-op
-    # No duplicate RPG-Kit header
-    assert second.count(rpgkit_cli._GITIGNORE_RPGKIT_HEADER) == 1
-    # No duplicate .rpgkit/ directory entry.  Count actual lines (after
+    # No duplicate CoderMind header
+    assert second.count(cmind_cli._GITIGNORE_CMIND_HEADER) == 1
+    # No duplicate .cmind/ directory entry.  Count actual lines (after
     # stripping) because the appended block also contains
-    # `!.rpgkit/config.toml` which holds .rpgkit/ as a substring.
+    # `!.cmind/config.toml` which holds .cmind/ as a substring.
     lines = [l.strip() for l in second.splitlines()]
-    assert lines.count(".rpgkit/") == 1
+    assert lines.count(".cmind/") == 1
 
 
 def test_setup_gitignore_partial_existing_rules_only_appends_missing(tmp_path):
-    """If user already has SOME RPG-Kit rules, only missing ones get appended."""
-    # User has manually added .rpgkit/ but nothing else
-    (tmp_path / ".gitignore").write_text(".rpgkit/\n")
-    rpgkit_cli._setup_gitignore(tmp_path, "copilot")
+    """If user already has SOME CoderMind rules, only missing ones get appended."""
+    # User has manually added .cmind/ but nothing else
+    (tmp_path / ".gitignore").write_text(".cmind/\n")
+    cmind_cli._setup_gitignore(tmp_path, "copilot")
     content = (tmp_path / ".gitignore").read_text()
-    # .rpgkit/ directory entry must NOT be duplicated.  Compare exact
+    # .cmind/ directory entry must NOT be duplicated.  Compare exact
     # lines (after stripping) because the appended block also contains
-    # `!.rpgkit/config.toml` which holds .rpgkit/ as a substring.
+    # `!.cmind/config.toml` which holds .cmind/ as a substring.
     lines = [l.strip() for l in content.splitlines()]
-    assert lines.count(".rpgkit/") == 1
+    assert lines.count(".cmind/") == 1
     # The new managed config.toml un-ignore line is present
-    assert "!.rpgkit/config.toml" in lines
+    assert "!.cmind/config.toml" in lines
     # Missing rules are now present
     assert ".vscode/mcp.json" in content
     assert ".github/agents/" in content
@@ -605,8 +605,8 @@ def test_setup_gitignore_partial_existing_rules_only_appends_missing(tmp_path):
 # ---------------------------------------------------------------------------
 
 def test_install_claude_hooks_adds_mcp_rpg_tools_permission(project):
-    """Rpgkit init should pre-authorize mcp__rpg-tools so Claude Code does not prompt for every search_rpg / explore_rpg / get_node_detail / list_rpg_tree call."""
-    rpgkit_cli._install_claude_hooks(project)
+    """Cmind init should pre-authorize mcp__rpg-tools so Claude Code does not prompt for every search_rpg / explore_rpg / get_node_detail / list_rpg_tree call."""
+    cmind_cli._install_claude_hooks(project)
     data = json.loads((project / ".claude" / "settings.json").read_text())
     assert "mcp__rpg-tools" in data["permissions"]["allow"]
 
@@ -622,7 +622,7 @@ def test_install_claude_hooks_preserves_existing_permissions(project):
         }
     }))
 
-    rpgkit_cli._install_claude_hooks(project)
+    cmind_cli._install_claude_hooks(project)
     data = json.loads((claude_dir / "settings.json").read_text())
     allow = data["permissions"]["allow"]
     # User entries preserved
@@ -635,7 +635,7 @@ def test_install_claude_hooks_preserves_existing_permissions(project):
     assert "mcp__rpg-tools" in allow
 
     # Idempotent: second call must not re-append
-    rpgkit_cli._install_claude_hooks(project)
+    cmind_cli._install_claude_hooks(project)
     data2 = json.loads((claude_dir / "settings.json").read_text())
     assert data2["permissions"]["allow"].count("mcp__rpg-tools") == 1
 
@@ -643,7 +643,7 @@ def test_install_claude_hooks_preserves_existing_permissions(project):
 def test_generate_mcp_config_copilot_omits_sandbox(tmp_path):
     """Copilot ``.vscode/mcp.json`` must NOT include sandbox keys.
 
-    Earlier versions of RPG-Kit enabled the VS Code MCP sandbox to
+    Earlier versions of CoderMind enabled the VS Code MCP sandbox to
     auto-approve tool confirmations, but the sandbox needs ``bwrap``
     and ``socat`` on PATH — missing on WSL, minimal Docker, and stock
     macOS — and missing deps cause the server to crash with a useless
@@ -651,11 +651,11 @@ def test_generate_mcp_config_copilot_omits_sandbox(tmp_path):
     and rely on VS Code's 'Always allow this server' setting for the
     UX win.
     """
-    scripts_dir = tmp_path / ".rpgkit" / "scripts"
+    scripts_dir = tmp_path / ".cmind" / "scripts"
     scripts_dir.mkdir(parents=True)
     (scripts_dir / "mcp_server.py").write_text("# placeholder\n")
 
-    rpgkit_cli._generate_mcp_config(tmp_path, "copilot")
+    cmind_cli._generate_mcp_config(tmp_path, "copilot")
     cfg = json.loads((tmp_path / ".vscode" / "mcp.json").read_text())
     server = cfg["servers"]["rpg-tools"]
     assert "sandboxEnabled" not in server
@@ -667,11 +667,11 @@ def test_generate_mcp_config_copilot_omits_sandbox(tmp_path):
 
 def test_generate_mcp_config_claude_has_no_sandbox_field(tmp_path):
     """Claude uses .claude/settings.json permissions, not mcp.json sandbox.  The .mcp.json file should stay clean of Copilot-specific keys to avoid confusion."""
-    scripts_dir = tmp_path / ".rpgkit" / "scripts"
+    scripts_dir = tmp_path / ".cmind" / "scripts"
     scripts_dir.mkdir(parents=True)
     (scripts_dir / "mcp_server.py").write_text("# placeholder\n")
 
-    rpgkit_cli._generate_mcp_config(tmp_path, "claude")
+    cmind_cli._generate_mcp_config(tmp_path, "claude")
     cfg = json.loads((tmp_path / ".mcp.json").read_text())
     server = cfg["mcpServers"]["rpg-tools"]
     assert "sandboxEnabled" not in server

@@ -807,13 +807,13 @@ class TestMergeCodeToEvolution:
     def test_save_and_load_workflow(self, rpg_with_structure):
         """Full save-load-verify cycle with WorkflowIntegration."""
         with tempfile.TemporaryDirectory() as tmpdir:
-            rpgkit_dir = os.path.join(tmpdir, ".rpgkit")
-            os.makedirs(rpgkit_dir, exist_ok=True)
+            cmind_dir = os.path.join(tmpdir, ".cmind")
+            os.makedirs(cmind_dir, exist_ok=True)
 
             # Save
             save_result = WorkflowIntegration.save_rpg(
                 rpg=rpg_with_structure,
-                rpgkit_dir=rpgkit_dir,
+                cmind_dir=cmind_dir,
                 message="Integration test save",
                 source="encoded",
             )
@@ -821,7 +821,7 @@ class TestMergeCodeToEvolution:
             assert save_result["version"] == 1
 
             # Load
-            loaded = WorkflowIntegration.load_rpg(rpgkit_dir)
+            loaded = WorkflowIntegration.load_rpg(cmind_dir)
             assert loaded is not None
             assert loaded.repo_name == "test_project"
 

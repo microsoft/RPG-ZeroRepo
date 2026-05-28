@@ -1,6 +1,6 @@
 ---
 description: Design shared base classes and data structures
-name: rpgkit.design_base_classes
+name: cmind.design_base_classes
 ---
 
 ## User Input
@@ -14,13 +14,13 @@ proceed with default behavior.
 
 ## **Outline**
 
-The text entered by the user after `/rpgkit.design_base_classes` **is the adjustment suggestion**.
+The text entered by the user after `/cmind.design_base_classes` **is the adjustment suggestion**.
 Unless it is explicitly empty, you may assume it is always available as `$ARGUMENTS`.
 **Do not** ask the user to repeat the input.
 
 ### Step 1: Pre-check
 
-Run the script `rpgkit script check_base_classes.py` to verify the current state.
+Run the script `cmind script check_base_classes.py` to verify the current state.
 
 1. Inspect the `state` field in the output:
 
@@ -52,7 +52,7 @@ Run the script `rpgkit script check_base_classes.py` to verify the current state
 1. Display the following prompt and wait for user confirmation:
 
    ```text
-   Description: Run the script `rpgkit script design_base_classes.py` to:
+   Description: Run the script `cmind script design_base_classes.py` to:
      - Design functional base classes (behavioral abstractions)
      - Design global data structures (shared data formats)
    
@@ -66,7 +66,7 @@ Run the script `rpgkit script check_base_classes.py` to verify the current state
 2. Execute the following command with the selected iteration count:
 
    ```bash
-   rpgkit script design_base_classes.py --max-iterations <default_or_user_defined>
+   cmind script design_base_classes.py --max-iterations <default_or_user_defined>
    ```
 
    The script writes a structured log automatically;
@@ -84,7 +84,7 @@ Run the script `rpgkit script check_base_classes.py` to verify the current state
    Classes:
    <list class names, types, and file paths>
    
-   Output: .rpgkit/data/base_classes.json
+   Output: .cmind/data/base_classes.json
    ```
 
 ### Step 3: Validation
@@ -92,7 +92,7 @@ Run the script `rpgkit script check_base_classes.py` to verify the current state
 Run the validation script:
 
 ```bash
-rpgkit script check_base_classes.py --verbose
+cmind script check_base_classes.py --verbose
 ```
 
 Display the validation results to the user:
@@ -112,19 +112,19 @@ Report:
 
 * Status of base class design
 * Summary of classes and files
-* Preparedness for next stage (`/rpgkit.design_interfaces`)
+* Preparedness for next stage (`/cmind.design_interfaces`)
 
 Prompt the user:
 
 ```text
 Base classes have been designed. Review the file at:
-.rpgkit/data/base_classes.json
+.cmind/data/base_classes.json
 
 To proceed with interface design, run:
-/rpgkit.design_interfaces
+/cmind.design_interfaces
 
 To regenerate with adjustments, run:
-/rpgkit.design_base_classes <adjustment instructions>
+/cmind.design_base_classes <adjustment instructions>
 ```
 
 **If keeping existing:**
@@ -136,7 +136,7 @@ Current base classes:
 - Base Classes: <class_count>
 - Files: <file_count>
 
-Next step: Run /rpgkit.design_interfaces
+Next step: Run /cmind.design_interfaces
 ```
 
 If no base classes file, display an error:
@@ -145,5 +145,5 @@ If no base classes file, display an error:
 ✗ Error: base_classes.json not found.
 
 This step is required before proceeding to interface design.
-Please run /rpgkit.design_base_classes to generate base classes.
+Please run /cmind.design_base_classes to generate base classes.
 ```

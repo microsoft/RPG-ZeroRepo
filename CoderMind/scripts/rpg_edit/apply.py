@@ -133,7 +133,7 @@ def main():
     parser.add_argument("--rollback-branch", type=str, default=None,
                         help="Together with --rollback: also force-delete the "
                              "named git branch in the project repo (typically the "
-                             "rpg-edit/<id> branch created by /rpgkit.rpg_edit). "
+                             "rpg-edit/<id> branch created by /cmind.rpg_edit). "
                              "Has no effect without --rollback.")
     parser.add_argument("--repo-dir", type=Path, default=None,
                         help="Project repo for --rollback-branch operation. "

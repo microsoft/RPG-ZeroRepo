@@ -44,7 +44,7 @@ from .git_utils import (
 )
 
 from .paths import (
-    RPGKIT_DIR,
+    CMIND_DIR,
 
     SKELETON_FILE,
     DATA_FLOW_FILE,
@@ -58,7 +58,7 @@ from .paths import (
     CODE_GEN_STATE_FILE,
     TRAJECTORY_DIR,
     SKELETON_SUMMARY_FILE,
-    ensure_rpgkit_dir,
+    ensure_cmind_dir,
     get_trajectory_file,
 )
 
@@ -156,7 +156,7 @@ __all__ = [
     "create_task_branch",
     "complete_task_branch",
     # Paths
-    "RPGKIT_DIR",
+    "CMIND_DIR",
 
     "SKELETON_FILE",
     "DATA_FLOW_FILE",
@@ -170,7 +170,7 @@ __all__ = [
     "CODE_GEN_STATE_FILE",
     "TRAJECTORY_DIR",
     "SKELETON_SUMMARY_FILE",
-    "ensure_rpgkit_dir",
+    "ensure_cmind_dir",
     "get_trajectory_file",
     # Utils
     "print_unicode_table",

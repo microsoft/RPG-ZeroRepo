@@ -1,5 +1,5 @@
 ---
-name: rpgkit.design_interfaces
+name: cmind.design_interfaces
 description: Design interfaces (functions/classes) for repository files
 ---
 
@@ -16,7 +16,7 @@ Design function and class interfaces for your repository files based on the skel
 Run the check script to determine current state:
 
 ```bash
-rpgkit script check_interfaces.py --json
+cmind script check_interfaces.py --json
 ```
 
 **If type is "error"**:
@@ -62,7 +62,7 @@ rpgkit script check_interfaces.py --json
 Run the interface designer:
 
 ```bash
-rpgkit script design_interfaces.py
+cmind script design_interfaces.py
 ```
 
 The script writes a structured log automatically; stdout carries the
@@ -76,7 +76,7 @@ This will:
 4. For each file, design the appropriate functions and classes
 5. Generate signatures with type hints and comprehensive docstrings
 6. Map each unit to the features it implements
-7. Save the results to `.rpgkit/data/interfaces.json`
+7. Save the results to `.cmind/data/interfaces.json`
 
 Note: If data_flow.json exists, components are processed in the subtree order
 defined by the data flow DAG. This ensures dependencies are resolved correctly.
@@ -86,7 +86,7 @@ defined by the data flow DAG. This ensures dependencies are resolved correctly.
 After generation, run the check script again:
 
 ```bash
-rpgkit script check_interfaces.py --json
+cmind script check_interfaces.py --json
 ```
 
 Verify:
@@ -111,5 +111,5 @@ Guide user to the next step:
 ```text
 > Interface design complete! Your next step is:
 > 
-> **/rpgkit.plan_tasks** - Create implementation tasks
+> **/cmind.plan_tasks** - Create implementation tasks
 ```

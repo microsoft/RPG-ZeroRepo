@@ -133,7 +133,7 @@ def determine_state(
     if not valid:
         result["type"] = "error"
         result["message"] = "; ".join(errors)
-        result["next_action"] = "Fix the reported issues. If tasks.json is missing, run /rpgkit.plan_tasks first."
+        result["next_action"] = "Fix the reported issues. If tasks.json is missing, run /cmind.plan_tasks first."
         return result
     
     # Get all task IDs
@@ -443,13 +443,13 @@ def print_status(result: Dict[str, Any], json_output: bool = False) -> None:
     
     if state_type == "error":
         print("   Fix the errors above before proceeding.")
-        print("   Run /rpgkit.plan_tasks to generate tasks.json")
+        print("   Run /cmind.plan_tasks to generate tasks.json")
     elif state_type == "init":
-        print("   Run /rpgkit.code_gen to start code generation")
+        print("   Run /cmind.code_gen to start code generation")
     elif state_type == "in_progress":
-        print("   Run /rpgkit.code_gen to continue current batch")
+        print("   Run /cmind.code_gen to continue current batch")
     elif state_type == "continue":
-        print("   Run /rpgkit.code_gen to process next batch")
+        print("   Run /cmind.code_gen to process next batch")
     elif state_type == "complete":
         print("   All done! Review the generated code.")
 

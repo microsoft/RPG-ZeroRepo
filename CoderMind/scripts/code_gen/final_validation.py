@@ -10,7 +10,7 @@ pytest passes, we also run the smoke test (import sweep + entry-point
 check + stub detection); if the smoke test reports actionable findings,
 a repair sub-agent is dispatched and the full pytest is re-run.
 
-The stage's outcome is persisted to ``.rpgkit/logs/codegen_final_test.json``
+The stage's outcome is persisted to ``.cmind/logs/codegen_final_test.json``
 (and ``codegen_smoke_test.json``) via
 :mod:`scripts.code_gen.stage_io` so that the global-review stage can
 consume the results without re-running pytest.

@@ -1,5 +1,5 @@
 ---
-name: rpgkit.encode
+name: cmind.encode
 description: Encode a repository into an RPG (Repository Program Graph)
 ---
 
@@ -23,7 +23,7 @@ code entities) and edges (dependencies, containment).
 Run the check script to determine the current encode state:
 
 ```bash
-rpgkit script rpg_encoder/check_encode.py --json
+cmind script rpg_encoder/check_encode.py --json
 ```
 
 Inspect the `type` field in the output:
@@ -31,7 +31,7 @@ Inspect the `type` field in the output:
 **If type is "error"**:
 
 * Display the error message and stop. The RPG file may be corrupted.
-* Suggest deleting the invalid file and re-running `/rpgkit.encode`.
+* Suggest deleting the invalid file and re-running `/cmind.encode`.
 
 **If type is "init"**:
 
@@ -49,12 +49,12 @@ Inspect the `type` field in the output:
 
   Choose an action:
   - R: Full re-encode (rebuild RPG from scratch)
-  - U: Incremental update (use /rpgkit.update_rpg instead)
+  - U: Incremental update (use /cmind.update_rpg instead)
   - Q: Quit
   ```
 
 * If user chooses **R**: proceed to Step 2.
-* If user chooses **U**: instruct user to run `/rpgkit.update_rpg` instead. Terminate.
+* If user chooses **U**: instruct user to run `/cmind.update_rpg` instead. Terminate.
 * If user chooses **Q**: terminate.
 
 ### Step 2: Full Encode
@@ -62,7 +62,7 @@ Inspect the `type` field in the output:
 Run the full encode script:
 
 ```bash
-rpgkit script rpg_encoder/run_encode.py --json
+cmind script rpg_encoder/run_encode.py --json
 ```
 
 This may take several minutes depending on repository size and LLM response times.
@@ -96,8 +96,8 @@ Display suggestions for what the user can do next:
 
 ```text
 Next steps:
-  - /rpgkit.update_rpg  — Incrementally update after code changes
+  - /cmind.update_rpg  — Incrementally update after code changes
   - The MCP server exposes search_rpg and explore_rpg tools
     for AI agents to query the RPG interactively.
-  - RPG data is saved at .rpgkit/data/rpg.json
+  - RPG data is saved at .cmind/data/rpg.json
 ```

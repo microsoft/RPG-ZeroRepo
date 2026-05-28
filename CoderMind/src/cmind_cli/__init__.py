@@ -1,15 +1,15 @@
-"""RPG-Kit CLI - Setup tool for RPG-Kit projects.
+"""CoderMind CLI - Provision and manage Repository Planning Graph (RPG) workspaces for AI coding agents.
 
 Usage:
-    uvx rpgkit-cli init <project-name>
-    uvx rpgkit-cli init .
-    uvx rpgkit-cli init --here
+    uvx cmind-cli init <project-name>
+    uvx cmind-cli init .
+    uvx cmind-cli init --here
 
 Or install globally:
-    uv tool install rpgkit-cli --from "git+https://github.com/microsoft/RPG-ZeroRepo.git#subdirectory=RPG-Kit"
-    rpgkit init <project-name>
-    rpgkit init .
-    rpgkit init --here
+    uv tool install cmind-cli --from "git+https://github.com/microsoft/RPG-ZeroRepo.git#subdirectory=CoderMind"
+    cmind init <project-name>
+    cmind init .
+    cmind init --here
 """
 
 import os
@@ -62,19 +62,19 @@ client = httpx.Client(verify=ssl_context)
 # Default fallback values — only used when git remote and pyproject.toml are unavailable
 _FALLBACK_REPO_OWNER = "microsoft"
 _FALLBACK_REPO_NAME = "RPG-ZeroRepo"
-_RPGKIT_RELEASE_TAG_PREFIX = "rpgkit-v"
+_CMIND_RELEASE_TAG_PREFIX = "cmind-v"
 
 
 # ---------------------------------------------------------------------------
 # DEPRECATED: GitHub release-zip provisioning helpers.
 #
-# As of v0.1.4 ``rpgkit init`` / ``rpgkit update`` are bundle-only and no
+# As of v0.1.4 ``cmind init`` / ``cmind update`` are bundle-only and no
 # longer fetch templates from GitHub releases at runtime — users upgrade
 # the CLI itself to pick up newer prompts.  The helpers below
 # (``_parse_github_owner_repo``, ``_github_token``,
 # ``_github_auth_headers``, ``_parse_rate_limit_headers``,
 # ``_format_rate_limit_error``, ``_is_private_repo``,
-# ``_get_asset_download_url``, ``_fetch_latest_rpgkit_release``,
+# ``_get_asset_download_url``, ``_fetch_latest_cmind_release``,
 # ``download_template_from_github``, ``_download_and_extract_release_zip``)
 # are kept temporarily so the change is reversible and so any third-party
 # callers don't break on upgrade.  They are slated for removal in v0.2.0
@@ -106,7 +106,7 @@ def _parse_github_owner_repo(url: str) -> Tuple[str, str] | None:
 
 
 def _get_repo_info() -> Tuple[str, str]:
-    """Resolve the GitHub owner/repo for RPG-Kit template downloads.
+    """Resolve the GitHub owner/repo for CoderMind template downloads.
 
     Priority:
       1. git remote 'upstream' (fork scenario — points to original repo)
@@ -322,29 +322,29 @@ CLAUDE_LOCAL_PATH = Path.home() / ".claude" / "local" / "claude"
 # Bundle mode (packaged assets) — added in 0.1.3
 # ---------------------------------------------------------------------------
 #
-# rpgkit-cli ships ``scripts/`` and ``templates/commands/`` as packaged
-# assets under ``rpgkit_cli/core_pack/`` so that ``rpgkit init`` works
+# cmind-cli ships ``scripts/`` and ``templates/commands/`` as packaged
+# assets under ``cmind_cli/core_pack/`` so that ``cmind init`` works
 # offline.  This block exposes:
 #
 #   _AI_TO_CLI_CMD        — single source of truth for "selected AI" →
 #                           "AI CLI command to invoke from scripts".
 #                           Must stay in sync with the corresponding case
 #                           statement in
-#                           ``.github/workflows/scripts/rpgkit/create-release-packages.sh``
+#                           ``.github/workflows/scripts/cmind/create-release-packages.sh``
 #                           (the release-zip pipeline) and with
 #                           ``scripts/common/llm_client.py:_CLI_TO_AGENT``
 #                           (the reverse mapping consumed by detect_agent_type()).
 #
 #   _SOURCE_BUNDLE / _SOURCE_LEGACY  — provisioning channel; persisted as
-#                                       ``channel`` in ``~/.rpgkit/workspaces/
+#                                       ``channel`` in ``~/.cmind/workspaces/
 #                                       <workspace-id>/.meta.toml`` so subsequent
-#                                       ``rpgkit update`` calls honour the
+#                                       ``cmind update`` calls honour the
 #                                       user's original choice.  Mirrors the
-#                                       constants in :mod:`rpgkit_cli._storage`.
+#                                       constants in :mod:`cmind_cli._storage`.
 
 _AI_TO_CLI_CMD = {
     # NOTE: values below are copied verbatim from
-    # .github/workflows/scripts/rpgkit/create-release-packages.sh lines ~142-169
+    # .github/workflows/scripts/cmind/create-release-packages.sh lines ~142-169
     # to guarantee bundle mode and legacy-download mode behave identically.
     "copilot":      "copilot",
     "claude":       "claude",
@@ -360,14 +360,14 @@ _AI_TO_CLI_CMD = {
 }
 
 # Re-exported (under the older names) to minimise churn at call sites;
-# the canonical strings now live in :mod:`rpgkit_cli._storage`.
+# the canonical strings now live in :mod:`cmind_cli._storage`.
 _SOURCE_BUNDLE = _storage.CHANNEL_BUNDLE
 _SOURCE_LEGACY = _storage.CHANNEL_LEGACY
 _CONFIG_RELPATH = _storage.WORKSPACE_MARKER_RELPATH
 
 
 def _current_cli_version() -> str:
-    """Return the installed ``rpgkit-cli`` version, or ``"dev"`` on failure.
+    """Return the installed ``cmind-cli`` version, or ``"dev"`` on failure.
 
     Used to stamp ``.meta.toml`` with the version that last touched a
     given workspace.  Failures (editable install, missing METADATA,
@@ -375,7 +375,7 @@ def _current_cli_version() -> str:
     field is purely informational.
     """
     try:
-        return importlib.metadata.version("rpgkit-cli")
+        return importlib.metadata.version("cmind-cli")
     except importlib.metadata.PackageNotFoundError:
         return "dev"
 
@@ -383,7 +383,7 @@ def _current_cli_version() -> str:
 def _read_source_marker(project_path: Path) -> str | None:
     """Return the recorded provisioning channel for ``project_path``.
 
-    Reads ``channel`` from ``~/.rpgkit/workspaces/<workspace-id>/.meta.toml``.
+    Reads ``channel`` from ``~/.cmind/workspaces/<workspace-id>/.meta.toml``.
     Returns ``None`` when no meta file exists (fresh workspace) or the
     channel field is missing.
     """
@@ -399,21 +399,21 @@ def _read_source_marker(project_path: Path) -> str | None:
 def _write_source_marker(project_path: Path, source: str) -> None:
     """Persist the provisioning channel in the home-side ``.meta.toml``.
 
-    Replaces the legacy ``workspace/.rpgkit/.source`` text file with a
-    structured TOML record under ``~/.rpgkit/workspaces/<workspace-id>/`` that
-    also carries timestamps and the version of rpgkit-cli that last
-    touched the workspace.  See :mod:`rpgkit_cli._storage` for the
+    Replaces the legacy ``workspace/.cmind/.source`` text file with a
+    structured TOML record under ``~/.cmind/workspaces/<workspace-id>/`` that
+    also carries timestamps and the version of cmind-cli that last
+    touched the workspace.  See :mod:`cmind_cli._storage` for the
     layout rationale.
     """
     _storage.write_meta(
         project_path,
         channel=source,
-        rpgkit_cli_version=_current_cli_version(),
+        cmind_cli_version=_current_cli_version(),
     )
 
 
 def _write_workspace_config(project_path: Path, selected_ai: str) -> None:
-    """Materialise ``.rpgkit/config.toml`` with the selected AI's CLI command.
+    """Materialise ``.cmind/config.toml`` with the selected AI's CLI command.
 
     Idempotent: if the file already exists and already contains
     ``ai_cli_cmd``, leave it alone (the user may have customised it).
@@ -431,27 +431,27 @@ def _write_workspace_config(project_path: Path, selected_ai: str) -> None:
     cfg_path.parent.mkdir(parents=True, exist_ok=True)
     cfg_path.write_text(
         "# CoderMind workspace configuration\n"
-        "# Managed by `rpgkit init` / `rpgkit update`.  Safe to commit.\n"
+        "# Managed by `cmind init` / `cmind update`.  Safe to commit.\n"
         "# See: https://github.com/microsoft/RPG-ZeroRepo (CoderMind/docs/configuration.md)\n"
         "\n"
-        "[rpgkit]\n"
+        "[cmind]\n"
         f'ai_cli_cmd = "{cli_cmd}"\n',
         encoding="utf-8",
     )
 
 
 def _detect_install_method() -> str:
-    """Best-effort detection of how ``rpgkit-cli`` was installed.
+    """Best-effort detection of how ``cmind-cli`` was installed.
 
     Returns one of ``"uv"``, ``"pipx"``, ``"pip-user"``, ``"pip-system"``,
-    ``"editable"``, ``"unknown"``.  Used by ``rpgkit update`` to pick the
+    ``"editable"``, ``"unknown"``.  Used by ``cmind update`` to pick the
     right self-upgrade command.
     """
     try:
         # Do not call ``.resolve()`` here.  The python
         # interpreter inside a uv tool venv is typically a symlink to
         # the system python (``/usr/bin/python3.12`` on Linux); resolving
-        # it discards the ``~/.local/share/uv/tools/rpgkit-cli/`` prefix
+        # it discards the ``~/.local/share/uv/tools/cmind-cli/`` prefix
         # we depend on for installer detection.  We want the path *as*
         # the kernel saw it for ``sys.executable``, not the underlying
         # interpreter binary it points to.
@@ -464,12 +464,12 @@ def _detect_install_method() -> str:
 
     # IMPORTANT: editable detection must run FIRST.  An editable install
     # placed inside a uv-managed venv would otherwise be reported as
-    # "uv" and ``rpgkit update`` would try to upgrade from the
+    # "uv" and ``cmind update`` would try to upgrade from the
     # registry instead of leaving the local checkout alone.
     try:
         import importlib.metadata as _im
 
-        dist = _im.distribution("rpgkit-cli")
+        dist = _im.distribution("cmind-cli")
         durl = dist.read_text("direct_url.json")
         if durl and '"editable": true' in durl:
             return "editable"
@@ -517,18 +517,18 @@ def _upgrade_command(method: str) -> list[str] | None:
     install, or unknown installer).
     """
     if method == "uv":
-        return ["uv", "tool", "upgrade", "rpgkit-cli"]
+        return ["uv", "tool", "upgrade", "cmind-cli"]
     if method == "pipx":
-        return ["pipx", "upgrade", "rpgkit-cli"]
+        return ["pipx", "upgrade", "cmind-cli"]
     if method == "pip-user":
-        return [sys.executable, "-m", "pip", "install", "-U", "--user", "rpgkit-cli"]
+        return [sys.executable, "-m", "pip", "install", "-U", "--user", "cmind-cli"]
     if method == "pip-system":
-        return [sys.executable, "-m", "pip", "install", "-U", "rpgkit-cli"]
+        return [sys.executable, "-m", "pip", "install", "-U", "cmind-cli"]
     return None
 
 
 def _install_source() -> str:
-    """Identify *where* the installed ``rpgkit-cli`` came from.
+    """Identify *where* the installed ``cmind-cli`` came from.
 
     Used by the default-on auto-upgrade flow to skip dev-mode installs
     (local checkout, editable) that the user is actively iterating on —
@@ -554,7 +554,7 @@ def _install_source() -> str:
     """
     try:
         import importlib.metadata as _im
-        dist = _im.distribution("rpgkit-cli")
+        dist = _im.distribution("cmind-cli")
         raw = dist.read_text("direct_url.json")
     except Exception:
         return "unknown"
@@ -586,7 +586,7 @@ def _install_source() -> str:
 
 
 #: Sources where auto-upgrade is safe to run by default in
-#: ``rpgkit update``.  Matches the values returned by
+#: ``cmind update``.  Matches the values returned by
 #: :func:`_install_source`.
 _AUTO_UPGRADE_SOURCES: frozenset[str] = frozenset({"git", "pypi"})
 
@@ -598,9 +598,9 @@ _AUTO_UPGRADE_SOURCES: frozenset[str] = frozenset({"git", "pypi"})
 #                         absent (greenfield), so we don't impose Python
 #                         conventions on an existing repo that already has
 #                         its own .gitignore preferences.
-#   * RPGKIT_COMMON    → always injected; these files must be ignored
+#   * CMIND_COMMON    → always injected; these files must be ignored
 #                         (runtime data, machine-specific config).
-#   * RPGKIT_AI[ai]    → always injected for the selected AI assistant.
+#   * CMIND_AI[ai]    → always injected for the selected AI assistant.
 #
 # The Python template is a verbatim copy of GitHub's official
 # ``github/gitignore/Python.gitignore`` (220-line community baseline).
@@ -835,18 +835,18 @@ __marimo__/
 .streamlit/secrets.toml
 """
 
-_GITIGNORE_RPGKIT_HEADER = "# RPG-Kit ignores (managed by `rpgkit init/update`)"
+_GITIGNORE_CMIND_HEADER = "# CoderMind ignores (managed by `cmind init/update`)"
 
-_GITIGNORE_RPGKIT_COMMON = """\
+_GITIGNORE_CMIND_COMMON = """\
 # Runtime workspace (logs, generated data, trajectory)
-.rpgkit/
+.cmind/
 # but DO track the workspace AI config so collaborators see the same
 # default — see docs/configuration.md
-!.rpgkit/config.toml
+!.cmind/config.toml
 
 # Codegen dev environments
 .venv_dev/
-.rpgkit_dev_env/
+.cmind_dev_env/
 
 # Machine-specific config (absolute interpreter paths)
 .vscode/mcp.json
@@ -854,19 +854,19 @@ _GITIGNORE_RPGKIT_COMMON = """\
 .mcp.json
 """
 
-# AI-specific slash-command directories that RPG-Kit regenerates each time
-# `rpgkit init/update` runs. Each entry covers only a sub-directory of
+# AI-specific slash-command directories that CoderMind regenerates each time
+# `cmind init/update` runs. Each entry covers only a sub-directory of
 # the agent folder so unrelated assets in ``.github/`` (workflows,
 # CODEOWNERS, …) or ``.claude/`` (settings.json with team-shared
 # permissions) remain trackable.
-_GITIGNORE_RPGKIT_AI = {
+_GITIGNORE_CMIND_AI = {
     "copilot": """\
-# Copilot slash command definitions (regenerated by rpgkit)
+# Copilot slash command definitions (regenerated by cmind)
 .github/agents/
 .github/prompts/
 """,
     "claude": """\
-# Claude Code slash command definitions (regenerated by rpgkit)
+# Claude Code slash command definitions (regenerated by cmind)
 .claude/commands/
 """,
 }
@@ -881,8 +881,7 @@ BANNER = """
 """
 
 TAGLINE = (
-    "CoderMind — Plan-first coding for Claude Code & GitHub Copilot\n"
-    "(formerly RPG-Kit — CLI commands rename in a future release)"
+    "CoderMind — Repository Planning Graphs for AI coding agents"
 )
 
 
@@ -1104,8 +1103,8 @@ class BannerGroup(TyperGroup):
 
 
 app = typer.Typer(
-    name="rpgkit",
-    help="Setup tool for CoderMind (formerly RPG-Kit) — repository planning graph workspaces",
+    name="cmind",
+    help="Provision and manage Repository Planning Graph (RPG) workspaces for AI coding agents.",
     add_completion=False,
     invoke_without_command=True,
     cls=BannerGroup,
@@ -1137,7 +1136,7 @@ def callback(ctx: typer.Context):
     ):
         show_banner()
         console.print(
-            Align.center("[dim]Run 'rpgkit --help' for usage information[/dim]")
+            Align.center("[dim]Run 'cmind --help' for usage information[/dim]")
         )
         console.print()
 
@@ -1222,24 +1221,24 @@ def is_git_repo(path: Path = None) -> bool:
 
 
 def _setup_gitignore(project_path: Path, selected_ai: str) -> None:
-    """Materialize ``.gitignore`` with RPG-Kit's required rules.
+    """Materialize ``.gitignore`` with CoderMind's required rules.
 
-    This is the single injection point for all RPG-Kit gitignore
+    This is the single injection point for all CoderMind gitignore
     management.  Other init steps (``_generate_mcp_config``,
     ``_install_copilot_hooks``) must not modify ``.gitignore``
     themselves; all rules they used to inject have been folded into
-    ``_GITIGNORE_RPGKIT_COMMON`` / ``_GITIGNORE_RPGKIT_AI``.
+    ``_GITIGNORE_CMIND_COMMON`` / ``_GITIGNORE_CMIND_AI``.
 
     Behavior:
 
     * **Greenfield** — both ``.git/`` and ``.gitignore`` are absent:
-      write Python standard template + RPG-Kit common + AI-specific
+      write Python standard template + CoderMind common + AI-specific
       rules.  Gives new projects a complete, sensible default.
 
     * **Existing repo or existing ``.gitignore``** — do not overwrite
-      the user's Python conventions.  Only append RPG-Kit rules
+      the user's Python conventions.  Only append CoderMind rules
       (deduplicated by exact line match) under a single
-      ``# RPG-Kit ignores`` header.
+      ``# CoderMind ignores`` header.
 
     Args:
         project_path: Project root that may or may not be a git repo.
@@ -1249,25 +1248,25 @@ def _setup_gitignore(project_path: Path, selected_ai: str) -> None:
     gitignore = project_path / ".gitignore"
     git_dir = project_path / ".git"
 
-    rpgkit_block = _GITIGNORE_RPGKIT_COMMON
-    ai_rules = _GITIGNORE_RPGKIT_AI.get(selected_ai)
+    cmind_block = _GITIGNORE_CMIND_COMMON
+    ai_rules = _GITIGNORE_CMIND_AI.get(selected_ai)
     if ai_rules:
-        rpgkit_block += "\n" + ai_rules
+        cmind_block += "\n" + ai_rules
 
     # Greenfield: brand-new project, no git, no existing .gitignore.
-    # Lay down the full template (Python conventions + RPG-Kit rules).
+    # Lay down the full template (Python conventions + CoderMind rules).
     if not git_dir.exists() and not gitignore.exists():
         gitignore.write_text(
             _GITIGNORE_PYTHON_TEMPLATE
             + "\n"
-            + _GITIGNORE_RPGKIT_HEADER
+            + _GITIGNORE_CMIND_HEADER
             + "\n"
-            + rpgkit_block,
+            + cmind_block,
             encoding="utf-8",
         )
         return
 
-    # Brownfield: respect the user's existing setup, only ensure RPG-Kit
+    # Brownfield: respect the user's existing setup, only ensure CoderMind
     # rules are present.  Parse existing entries (strip whitespace, drop
     # comments and leading ``/``) so we can compare line-by-line.
     if gitignore.exists():
@@ -1286,11 +1285,11 @@ def _setup_gitignore(project_path: Path, selected_ai: str) -> None:
         if line.strip() and not line.strip().startswith("#")
     }
 
-    # Collect RPG-Kit pattern lines (skip comments and blanks in the
+    # Collect CoderMind pattern lines (skip comments and blanks in the
     # block — comments are kept for the appended section but not used
     # for dedup checks).
     missing_lines: list[str] = []
-    for line in rpgkit_block.splitlines():
+    for line in cmind_block.splitlines():
         stripped = line.strip()
         if not stripped or stripped.startswith("#"):
             continue
@@ -1300,15 +1299,15 @@ def _setup_gitignore(project_path: Path, selected_ai: str) -> None:
     if not missing_lines:
         return
 
-    # Append under a single, idempotent RPG-Kit header so repeated runs
+    # Append under a single, idempotent CoderMind header so repeated runs
     # don't create duplicate section markers.
     parts: list[str] = []
     if existing_text and not existing_text.endswith("\n"):
         parts.append("\n")
     if existing_text:
         parts.append("\n")
-    if _GITIGNORE_RPGKIT_HEADER not in existing_text:
-        parts.append(_GITIGNORE_RPGKIT_HEADER + "\n")
+    if _GITIGNORE_CMIND_HEADER not in existing_text:
+        parts.append(_GITIGNORE_CMIND_HEADER + "\n")
     parts.extend(line + "\n" for line in missing_lines)
 
     with open(gitignore, "a", encoding="utf-8") as f:
@@ -1465,10 +1464,10 @@ def _load_json_dict(path: Path) -> dict:
 def _cleanup_legacy_vscode_mcp(project_path: Path) -> None:
     """Remove a stale ``mcp.servers.rpg-tools`` entry from ``.vscode/settings.json``.
 
-    Earlier versions of ``rpgkit init`` registered the MCP server inside
+    Earlier versions of ``cmind init`` registered the MCP server inside
     ``settings.json``.  We've since moved to ``.vscode/mcp.json``; this
     helper deletes only the stale entry so users upgrading via
-    ``rpgkit update`` don't end up with two registrations.
+    ``cmind update`` don't end up with two registrations.
 
     Other settings — and any non-rpg-tools MCP servers the user may have
     added — are preserved untouched.
@@ -1500,21 +1499,21 @@ def _cleanup_legacy_vscode_mcp(project_path: Path) -> None:
 
 
 def _cleanup_legacy_codegen_persistent(project_path: Path) -> list[str]:
-    """Delete obsolete ``rpgkit-codegen.*`` persistent-instruction files.
+    """Delete obsolete ``cmind-codegen.*`` persistent-instruction files.
 
-    Earlier versions of ``rpgkit init`` (pre-C4 cleanup) wrote a
+    Earlier versions of ``cmind init`` (pre-C4 cleanup) wrote a
     codegen-specific instructions file that AI agents would auto-load on
     every session, polluting unrelated commands (rpg_edit, encode, plain
     Q&A) with codegen workflow noise.
 
     This helper:
 
-    * Removes ``<project>/.claude/rules/rpgkit-codegen.md``
-    * Removes ``<project>/.github/instructions/rpgkit-codegen.instructions.md``
+    * Removes ``<project>/.claude/rules/cmind-codegen.md``
+    * Removes ``<project>/.github/instructions/cmind-codegen.instructions.md``
     * Also cleans the legacy ``<project>/repo/.claude/...`` and
       ``<project>/repo/.github/...`` paths, so workspaces created
       under the old ``<workspace>/repo`` layout are upgraded on the
-      next ``rpgkit init`` / ``rpgkit update`` run.
+      next ``cmind init`` / ``cmind update`` run.
     * Tidies up empty parent directories the file leaves behind.
     * Returns the list of paths actually removed (for tracker reporting).
 
@@ -1524,12 +1523,12 @@ def _cleanup_legacy_codegen_persistent(project_path: Path) -> list[str]:
     legacy_repo_dir = project_path / "repo"
     candidates = [
         # New layout (workspace == repo)
-        project_path / ".claude" / "rules" / "rpgkit-codegen.md",
-        project_path / ".github" / "instructions" / "rpgkit-codegen.instructions.md",
+        project_path / ".claude" / "rules" / "cmind-codegen.md",
+        project_path / ".github" / "instructions" / "cmind-codegen.instructions.md",
         # Legacy layout (<workspace>/repo) — keep scanning so users who
         # upgrade from old workspaces still get the file removed.
-        legacy_repo_dir / ".claude" / "rules" / "rpgkit-codegen.md",
-        legacy_repo_dir / ".github" / "instructions" / "rpgkit-codegen.instructions.md",
+        legacy_repo_dir / ".claude" / "rules" / "cmind-codegen.md",
+        legacy_repo_dir / ".github" / "instructions" / "cmind-codegen.instructions.md",
     ]
 
     removed: list[str] = []
@@ -1562,7 +1561,7 @@ def _generate_mcp_config(
     """Generate MCP server configuration for the selected AI assistant.
 
     Both Claude and VS Code Copilot launch the MCP server via the
-    ``rpgkit-mcp`` console script installed alongside ``rpgkit-cli``.
+    ``cmind-mcp`` console script installed alongside ``cmind-cli``.
     This keeps the config portable across machines (no absolute paths
     to a workspace-local copy) and ensures the server always runs
     against the bundled scripts that match the installed CLI version.
@@ -1571,7 +1570,7 @@ def _generate_mcp_config(
     - Copilot: ``.vscode/mcp.json``  (key ``servers.rpg-tools``,
       VS Code 1.102+ standard layout)
 
-    The ``rpgkit-mcp`` command must be on ``PATH``.  ``rpgkit init``
+    The ``cmind-mcp`` command must be on ``PATH``.  ``cmind init``
     emits a warning at the end of the run when it isn't, so MCP
     clients fail with a clear cause rather than the opaque
     ``Connection closed`` error.
@@ -1579,7 +1578,7 @@ def _generate_mcp_config(
     project_path = project_path.resolve()
 
     mcp_server_config = {
-        "command": "rpgkit-mcp",
+        "command": "cmind-mcp",
         "args": [],
     }
 
@@ -1649,20 +1648,20 @@ def _register_copilot_cli_global_mcp(tracker=None) -> None:
     inline JSON via ``--additional-mcp-config``).
 
     To make ``copilot`` find ``rpg-tools`` automatically in any
-    rpgkit-initialised workspace, we register the server globally on
-    first ``rpgkit init --ai copilot`` (or ``rpgkit update``).
+    cmind-initialised workspace, we register the server globally on
+    first ``cmind init --ai copilot`` (or ``cmind update``).
 
-    This is safe because ``rpgkit-mcp`` is cwd-aware (it walks up to
+    This is safe because ``cmind-mcp`` is cwd-aware (it walks up to
     find ``rpg.json``) and stateless across workspaces — one global
     registration serves every workspace the user ``cd``-s into.  In
     workspaces without ``rpg.json`` the server starts in degraded mode
     and tool calls return a ``rpg_unavailable`` hint instructing the
-    user to run ``/rpgkit.encode``.
+    user to run ``/cmind.encode``.
 
     Safety rules (see audit decisions D-globalmcp-1..4):
       - **No-op when in-sync.**  If the file already contains exactly
         the entry we'd write, we don't touch it at all (no mtime bump,
-        no .bak).  This makes ``rpgkit update`` cheap to run repeatedly.
+        no .bak).  This makes ``cmind update`` cheap to run repeatedly.
       - **Refuse to wipe a malformed config.**  If the file exists but
         isn't valid JSON we abort with a clear error instead of
         overwriting; the user is expected to fix it (or run with
@@ -1684,7 +1683,7 @@ def _register_copilot_cli_global_mcp(tracker=None) -> None:
     tmp_path = config_path.with_suffix(".json.tmp")
     desired = {
         "type": "stdio",
-        "command": "rpgkit-mcp",
+        "command": "cmind-mcp",
         "args": [],
     }
 
@@ -1755,13 +1754,13 @@ def _register_copilot_cli_global_mcp(tracker=None) -> None:
             return
 
         # Respect a user-customised entry — only touch entries that
-        # either don't exist or already point at our `rpgkit-mcp`
+        # either don't exist or already point at our `cmind-mcp`
         # console script (the latter happens on a version bump where
         # we'd want to e.g. add new default args).
         if (
             isinstance(current, dict)
             and current.get("command")
-            and current.get("command") != "rpgkit-mcp"
+            and current.get("command") != "cmind-mcp"
         ):
             _report_skip(
                 f"existing entry uses custom command "
@@ -1807,20 +1806,20 @@ def _register_copilot_cli_global_mcp(tracker=None) -> None:
 # ---------------------------------------------------------------------------
 
 def _workspace_has_python_code(project_path: Path) -> bool:
-    """Return True if the workspace contains any ``*.py`` file outside ``.rpgkit/``.
+    """Return True if the workspace contains any ``*.py`` file outside ``.cmind/``.
 
-    Used to decide whether ``rpgkit init`` should offer to build the RPG
+    Used to decide whether ``cmind init`` should offer to build the RPG
     immediately.  Greenfield workspaces (or repos that don't ship Python
     code) skip the prompt because the encoder would produce an empty
     graph and waste LLM tokens.
 
-    The walk prunes the ``.rpgkit`` directory in-place so workspace
+    The walk prunes the ``.cmind`` directory in-place so workspace
     runtime state (``data/``, ``logs/``) doesn't influence the detection.
     Common boilerplate dirs (``.git``, ``.venv``, ``node_modules``,
     ``__pycache__``) are pruned too — a ``*.py`` under any of them
     would not indicate user code.
     """
-    PRUNE = {".rpgkit", ".git", ".venv", "venv", "node_modules",
+    PRUNE = {".cmind", ".git", ".venv", "venv", "node_modules",
              "__pycache__", ".tox", ".mypy_cache", ".pytest_cache",
              ".ruff_cache", "dist", "build"}
     for dirpath, dirnames, filenames in os.walk(project_path):
@@ -1979,7 +1978,7 @@ def _run_initial_encode(project_path: Path) -> bool:
     of lines of ``RPGParser - INFO - ...``), so instead we:
 
       * Capture stderr in a reader thread and write it verbatim to
-        ``~/.rpgkit/workspaces/<workspace-id>/logs/encode.log`` — power users
+        ``~/.cmind/workspaces/<workspace-id>/logs/encode.log`` — power users
         can ``tail -f`` it for the full firehose.
       * Parse a handful of phase markers off each line to drive a
         :class:`rich.progress.Progress` bar with a spinner + current
@@ -1988,16 +1987,16 @@ def _run_initial_encode(project_path: Path) -> bool:
         failure so the user has something concrete to debug.
 
     Returns True on success (exit code 0), False otherwise.  Never
-    raises: ``rpgkit init`` itself has already succeeded by the time we
+    raises: ``cmind init`` itself has already succeeded by the time we
     get here and we don't want a flaky LLM call to make the whole
     command look like it failed.
     """
-    encoder = project_path / ".rpgkit" / "scripts" / "rpg_encoder" / "run_encode.py"
+    encoder = project_path / ".cmind" / "scripts" / "rpg_encoder" / "run_encode.py"
     if not encoder.is_file():
         # Scripts live inside the installed wheel under
-        # ``rpgkit_cli/core_pack/scripts/``.  Resolve the encoder
+        # ``cmind_cli/core_pack/scripts/``.  Resolve the encoder
         # from there so the optional initial-encode kickoff works after
-        # ``rpgkit init`` — which no longer copies scripts into the
+        # ``cmind init`` — which no longer copies scripts into the
         # workspace.
         from . import _assets
         candidate = _assets.scripts_dir() / "rpg_encoder" / "run_encode.py"
@@ -2006,13 +2005,13 @@ def _run_initial_encode(project_path: Path) -> bool:
         else:
             console.print(
                 f"[yellow]Encoder script not found at {candidate}; "
-                f"run [cyan]/rpgkit.encode[/] in your AI agent later.[/yellow]"
+                f"run [cyan]/cmind.encode[/] in your AI agent later.[/yellow]"
             )
             return False
 
     # Keep all generated artefacts (logs/data/inner-git) in the
-    # per-workspace home dir under ~/.rpgkit/workspaces/<workspace-id>/.  The
-    # workspace tree should stay clean — no .rpgkit/logs/ written here.
+    # per-workspace home dir under ~/.cmind/workspaces/<workspace-id>/.  The
+    # workspace tree should stay clean — no .cmind/logs/ written here.
     from . import _storage
     log_dir = _storage.workspace_logs_dir(project_path)
     try:
@@ -2029,7 +2028,7 @@ def _run_initial_encode(project_path: Path) -> bool:
             "Building [cyan]rpg.json[/] from your code via the LLM.  "
             "Verbose logs stream to [cyan]" + str(log_path) + "[/] — "
             "`tail -f` it in another terminal for the gory details.  "
-            "Press Ctrl-C to abort; re-run later with [cyan]/rpgkit.encode[/].",
+            "Press Ctrl-C to abort; re-run later with [cyan]/cmind.encode[/].",
             title="[bold]Initial encode[/bold]",
             border_style="cyan",
             padding=(1, 2),
@@ -2215,7 +2214,7 @@ def _run_initial_encode(project_path: Path) -> bool:
     if interrupted:
         console.print(
             "\n[yellow]Encoder interrupted. Re-run later with "
-            "[cyan]/rpgkit.encode[/].[/yellow]"
+            "[cyan]/cmind.encode[/].[/yellow]"
         )
         return False
 
@@ -2248,7 +2247,7 @@ def _run_initial_encode(project_path: Path) -> bool:
         Panel(
             f"[red]Encoder exited with code {proc.returncode}.[/]\n\n"
             f"Check [cyan]{log_path}[/] for the full log.  You can retry "
-            "with [cyan]/rpgkit.encode[/] after fixing the issue."
+            "with [cyan]/cmind.encode[/] after fixing the issue."
             f"{summary_blurb}",
             title="[bold red]Encode failed[/bold red]",
             border_style="red",
@@ -2274,11 +2273,11 @@ def _maybe_offer_initial_encode(
       hasn't been built before.  Defaults to "No" so an accidental
       Enter doesn't kick off a long LLM job.
 
-    Failures never propagate — ``rpgkit init`` is already done and we
+    Failures never propagate — ``cmind init`` is already done and we
     don't want a flaky encoder to taint the exit code.
     """
     # Already encoded: nothing to do.
-    rpg_file = project_path / ".rpgkit" / "data" / "rpg.json"
+    rpg_file = project_path / ".cmind" / "data" / "rpg.json"
     if rpg_file.exists():
         return
 
@@ -2297,11 +2296,11 @@ def _maybe_offer_initial_encode(
             Panel(
                 "CoderMind can build the initial graph for this repo now by "
                 "running the encoder against your existing code.  This is "
-                "what the [cyan]/rpgkit.encode[/] slash command does — kicking "
+                "what the [cyan]/cmind.encode[/] slash command does — kicking "
                 "it off here saves you a step.\n\n"
                 "[yellow]Heads up:[/] the encoder calls an LLM and can take "
                 "a few minutes on a real-sized repo.  You can always say "
-                "No and run [cyan]/rpgkit.encode[/] in your AI agent later.",
+                "No and run [cyan]/cmind.encode[/] in your AI agent later.",
                 title="[bold]Build the RPG now?[/bold]",
                 border_style="cyan",
                 padding=(1, 2),
@@ -2324,9 +2323,9 @@ def _install_claude_hooks(project_path: Path) -> None:
     Merges with existing hooks/permissions without overwriting
     user-defined entries.  A backup of the original file is created
     before any modification.  Idempotent across Python interpreter
-    upgrades and repeated ``rpgkit init/update`` runs:
+    upgrades and repeated ``cmind init/update`` runs:
 
-    * Any prior RPG-Kit SessionStart entry (identified by the
+    * Any prior CoderMind SessionStart entry (identified by the
       ``update_graphs.py`` marker in its command) is replaced rather
       than duplicated.
     * The ``mcp__rpg-tools`` allow rule is added only if absent.
@@ -2334,7 +2333,7 @@ def _install_claude_hooks(project_path: Path) -> None:
     Why pre-authorize ``mcp__rpg-tools``?
         Claude Code prompts the user before each MCP tool invocation
         unless the rule is present in ``permissions.allow``.  Since
-        the RPG-Kit server only exposes four read-only graph-query
+        the CoderMind server only exposes four read-only graph-query
         tools (``search_rpg``, ``explore_rpg``, ``get_node_detail``,
         ``list_rpg_tree``) that touch no external state, requiring
         confirmation for every call is pure friction.  The
@@ -2350,7 +2349,7 @@ def _install_claude_hooks(project_path: Path) -> None:
 
     # The command is executed by Claude Code via ``sh -c``, so we inline
     # the same PATH-fallback used by git hooks (see _HOOK_PATH_FALLBACK).
-    # Use ``;`` rather than ``&&`` so the rpgkit call always runs after
+    # Use ``;`` rather than ``&&`` so the cmind call always runs after
     # the (possibly no-op) PATH adjustment.
     marker = "update_graphs.py"  # used for idempotent dedupe across upgrades
 
@@ -2361,7 +2360,7 @@ def _install_claude_hooks(project_path: Path) -> None:
                 "type": "command",
                 "command": (
                     f"{_HOOK_PATH_FALLBACK}; "
-                    "rpgkit script update_graphs.py status 2>/dev/null"
+                    "cmind script update_graphs.py status 2>/dev/null"
                     " || echo '[CoderMind] RPG status unavailable'"
                 ),
                 "timeout": 10,
@@ -2378,11 +2377,11 @@ def _install_claude_hooks(project_path: Path) -> None:
     if not isinstance(session_start, list):
         session_start = []
 
-    def _is_rpgkit_entry(entry: object) -> bool:
-        """Detect a previously-installed RPG-Kit SessionStart entry.
+    def _is_cmind_entry(entry: object) -> bool:
+        """Detect a previously-installed CoderMind SessionStart entry.
 
         Matches both the current (shlex-quoted) and earlier
-        (json.dumps-quoted) command shapes, plus any custom RPG-Kit
+        (json.dumps-quoted) command shapes, plus any custom CoderMind
         entry the user may have added that still calls update_graphs.py.
         """
         if not isinstance(entry, dict):
@@ -2393,8 +2392,8 @@ def _install_claude_hooks(project_path: Path) -> None:
                 return True
         return False
 
-    # Drop any stale RPG-Kit entry before appending the fresh one.
-    session_start = [e for e in session_start if not _is_rpgkit_entry(e)]
+    # Drop any stale CoderMind entry before appending the fresh one.
+    session_start = [e for e in session_start if not _is_cmind_entry(e)]
     session_start.append(rpg_session_entry)
     merged["SessionStart"] = session_start
 
@@ -2411,9 +2410,9 @@ def _install_claude_hooks(project_path: Path) -> None:
     allow = permissions.get("allow")
     if not isinstance(allow, list):
         allow = []
-    rpgkit_rule = "mcp__rpg-tools"
-    if rpgkit_rule not in allow:
-        allow.append(rpgkit_rule)
+    cmind_rule = "mcp__rpg-tools"
+    if cmind_rule not in allow:
+        allow.append(cmind_rule)
     permissions["allow"] = allow
     existing["permissions"] = permissions
 
@@ -2436,7 +2435,7 @@ def _read_core_hooks_path(project_path: Path) -> Optional[Path]:
     Why this matters: teams using ``pre-commit``, ``husky``, ``lefthook``
     and similar hook frameworks routinely override ``core.hooksPath`` to
     point at a checked-in directory (e.g. ``.husky/``).  Without this
-    lookup, ``rpgkit init`` would write into ``.git/hooks/`` where git
+    lookup, ``cmind init`` would write into ``.git/hooks/`` where git
     never reads from, leaving the user with a silent no-op install.
     """
     try:
@@ -2518,7 +2517,7 @@ def _resolve_git_hooks_dir(project_path: Path) -> Optional[Path]:
     return None
 
 
-# Each entry describes one shape of legacy (pre-sentinel) RPG-Kit snippet
+# Each entry describes one shape of legacy (pre-sentinel) CoderMind snippet
 # that may exist in a user's hook file from an older release.  The first
 # element is a substring of the snippet's first line (a marker comment);
 # the second is the *total* number of consecutive lines that snippet
@@ -2533,15 +2532,15 @@ def _strip_hook_block(
     block_name: str,
     legacy_blocks: Tuple[LegacyBlock, ...] = (),
 ) -> str:
-    """Return ``text`` with any RPG-Kit-owned hook content removed.
+    """Return ``text`` with any CoderMind-owned hook content removed.
 
     Two cleanup passes:
 
     1. Strip the new-style sentinel block::
 
-           # RPGKIT-BEGIN <block_name>
+           # CMIND-BEGIN <block_name>
            ...
-           # RPGKIT-END <block_name>
+           # CMIND-END <block_name>
 
        Range-based, so multi-line bodies of any shape are atomically
        removed in one shot.
@@ -2555,8 +2554,8 @@ def _strip_hook_block(
     Lines outside both passes are preserved verbatim so user-authored
     hook content (and shebangs) survive untouched.
     """
-    begin_sent = f"# RPGKIT-BEGIN {block_name}"
-    end_sent = f"# RPGKIT-END {block_name}"
+    begin_sent = f"# CMIND-BEGIN {block_name}"
+    end_sent = f"# CMIND-END {block_name}"
     lines = text.splitlines()
 
     # Pass 1: strip sentinel block (matching pair).
@@ -2599,19 +2598,19 @@ def _strip_hook_block(
 # PATH fallback for hook bodies
 # ---------------------------------------------------------------------------
 #
-# Hooks invoke ``rpgkit`` (the globally-installed CLI) rather than a
+# Hooks invoke ``cmind`` (the globally-installed CLI) rather than a
 # workspace-local script copy.  When the hook is triggered from a GUI
 # editor's source-control panel (VS Code, IntelliJ, GitHub Desktop, ...)
 # the process environment may not include the user's shell PATH, so
-# ``rpgkit`` is unresolvable and the hook silently fails.
+# ``cmind`` is unresolvable and the hook silently fails.
 #
-# This snippet is prepended to every hook body.  When ``rpgkit`` is
+# This snippet is prepended to every hook body.  When ``cmind`` is
 # already on PATH (terminal invocations) the test short-circuits and
 # the ``export`` is skipped — zero overhead.  When it isn't, we
 # prepend ``$HOME/.local/bin`` which is ``uv tool install``'s default
 # bin directory.
 _HOOK_PATH_FALLBACK = (
-    'command -v rpgkit >/dev/null 2>&1 || '
+    'command -v cmind >/dev/null 2>&1 || '
     'export PATH="$HOME/.local/bin:$PATH"'
 )
 
@@ -2624,19 +2623,19 @@ def _install_hook_snippet(
     *,
     legacy_blocks: Tuple[LegacyBlock, ...] = (),
 ) -> bool:
-    """Install or replace an RPG-Kit-owned block in ``<hooks_dir>/<hook_name>``.
+    """Install or replace an CoderMind-owned block in ``<hooks_dir>/<hook_name>``.
 
     File layout written::
 
         #!/bin/sh
         <any pre-existing user content>
 
-        # RPGKIT-BEGIN <block_name>
+        # CMIND-BEGIN <block_name>
         <body>
-        # RPGKIT-END <block_name>
+        # CMIND-END <block_name>
 
-    The block is **atomically replaceable**: subsequent ``rpgkit init`` /
-    ``rpgkit update`` runs find the existing sentinels and replace the
+    The block is **atomically replaceable**: subsequent ``cmind init`` /
+    ``cmind update`` runs find the existing sentinels and replace the
     whole block, so behavior upgrades land cleanly without piling new
     snippets on top of old ones.  ``legacy_blocks`` is used **once** to
     migrate pre-sentinel installs (released through v0.0.99-dev.72) onto
@@ -2663,8 +2662,8 @@ def _install_hook_snippet(
     else:
         prefix = "#!/bin/sh\n" + cleaned + "\n"
 
-    begin = f"# RPGKIT-BEGIN {block_name}"
-    end = f"# RPGKIT-END {block_name}"
+    begin = f"# CMIND-BEGIN {block_name}"
+    end = f"# CMIND-END {block_name}"
     block = f"\n{begin}\n{body.rstrip()}\n{end}\n"
 
     hook_path.write_text(prefix + block, encoding="utf-8")
@@ -2673,13 +2672,13 @@ def _install_hook_snippet(
 
 
 def _uninstall_git_pre_commit_hook(project_path: Path) -> bool:
-    """Remove any previously-installed RPG-Kit ``pre-commit`` block.
+    """Remove any previously-installed CoderMind ``pre-commit`` block.
 
     Pre-commit was retired in favour of ``post-commit`` only: the
     pre-commit sync ran ``--staged-only`` and was immediately followed
     by the full post-commit sync, so its output had a ~1 sec lifetime
     and added latency to every ``git commit`` for no observable benefit.
-    Existing workspaces upgraded via ``rpgkit init`` / ``rpgkit update``
+    Existing workspaces upgraded via ``cmind init`` / ``cmind update``
     have their pre-commit block stripped here; user-authored hook
     content (and other tools' blocks such as husky / pre-commit /
     lefthook) is preserved untouched.
@@ -2697,9 +2696,9 @@ def _uninstall_git_pre_commit_hook(project_path: Path) -> bool:
 
     existing = hook_path.read_text(encoding="utf-8")
     legacy = (
-        ("# RPG-Kit: pre-commit dispatcher", 3),
-        ("# RPG-Kit: full RPG sync on commit", 2),
-        ("# RPG-Kit: incremental RPG sync on commit", 3),
+        ("# CoderMind: pre-commit dispatcher", 3),
+        ("# CoderMind: full RPG sync on commit", 2),
+        ("# CoderMind: incremental RPG sync on commit", 3),
     )
     cleaned = _strip_hook_block(existing, "pre-commit", legacy).rstrip("\n")
 
@@ -2732,12 +2731,12 @@ def _install_git_post_merge_hook(project_path: Path) -> bool:
     if hooks_dir is None:
         return False
 
-    # Level-1 hook: stub delegates to ``rpgkit hook post-merge``.
-    marker = "# RPG-Kit: post-merge dispatcher"
+    # Level-1 hook: stub delegates to ``cmind hook post-merge``.
+    marker = "# CoderMind: post-merge dispatcher"
     body = (
         f"{marker}\n"
         f"{_HOOK_PATH_FALLBACK}\n"
-        f"rpgkit hook post-merge 2>/dev/null || true"
+        f"cmind hook post-merge 2>/dev/null || true"
     )
     return _install_hook_snippet(
         hooks_dir,
@@ -2745,7 +2744,7 @@ def _install_git_post_merge_hook(project_path: Path) -> bool:
         "post-merge",
         body,
         legacy_blocks=(
-            ("# RPG-Kit: incremental RPG sync after merge / pull", 3),
+            ("# CoderMind: incremental RPG sync after merge / pull", 3),
         ),
     )
 
@@ -2754,20 +2753,20 @@ def _install_git_post_commit_hook(project_path: Path) -> bool:
     """Install the Level-1 ``post-commit`` dispatcher stub.
 
     The on-disk hook is now a 3-line shell snippet that ``exec``s
-    ``rpgkit hook post-commit``.  All orchestration lives in the
+    ``cmind hook post-commit``.  All orchestration lives in the
     :func:`hook` Python command:
 
     * **Phase 1 (foreground)**: ``update_graphs.py sync`` advances
       ``meta.git`` to the new HEAD.  Output is teed into
-      ``~/.rpgkit/workspaces/<workspace-id>/logs/hooks.log``.
+      ``~/.cmind/workspaces/<workspace-id>/logs/hooks.log``.
 
     * **Phase 2 (background)**: ``update_graphs.py update-rpg`` is
       detached via ``subprocess.Popen(start_new_session=True)``.  A
       mkdir-based directory lock at
-      ``~/.rpgkit/workspaces/<workspace-id>/logs/.update_rpg.lock`` serialises
+      ``~/.cmind/workspaces/<workspace-id>/logs/.update_rpg.lock`` serialises
       overlapping commits; locks older than 60 minutes are treated as
       orphaned and removed.  The worker's stdout/stderr land in
-      ``~/.rpgkit/workspaces/<workspace-id>/logs/update_rpg.log``.
+      ``~/.cmind/workspaces/<workspace-id>/logs/update_rpg.log``.
 
     Both phases are best-effort: every failure path is swallowed inside
     :func:`hook` so a hook misbehaviour never blocks ``git commit``.
@@ -2780,11 +2779,11 @@ def _install_git_post_commit_hook(project_path: Path) -> bool:
     if hooks_dir is None:
         return False
 
-    marker = "# RPG-Kit: post-commit dispatcher"
+    marker = "# CoderMind: post-commit dispatcher"
     body = (
         f"{marker}\n"
         f"{_HOOK_PATH_FALLBACK}\n"
-        f"rpgkit hook post-commit 2>/dev/null || true"
+        f"cmind hook post-commit 2>/dev/null || true"
     )
     return _install_hook_snippet(
         hooks_dir,
@@ -2793,11 +2792,11 @@ def _install_git_post_commit_hook(project_path: Path) -> bool:
         body,
         legacy_blocks=(
             # v1 (pre-Step-3): two-line sync-only snippet.
-            ("# RPG-Kit: advance meta.git after commit", 2),
+            ("# CoderMind: advance meta.git after commit", 2),
             # v3 (release 0576393): five-line snippet with phase-1 sync
             # + phase-2 setsid background under the same marker we used
             # before Level-1.
-            ("# RPG-Kit: advance meta.git + background feature graph update", 5),
+            ("# CoderMind: advance meta.git + background feature graph update", 5),
         ),
     )
 
@@ -2830,13 +2829,13 @@ def _install_copilot_hooks(project_path: Path) -> None:
             pass
 
     rpg_status_task = {
-        "label": "RPG-Kit: load status",
+        "label": "CoderMind: load status",
         "type": "shell",
         # Invoke the globally-installed CLI rather than a workspace
         # script copy (which no longer exists).  Same
         # rationale as the git-hook bodies: portable command name,
         # auto-tracks the installed wheel's scripts.
-        "command": "rpgkit",
+        "command": "cmind",
         "args": ["script", "update_graphs.py", "status"],
         "presentation": {
             "echo": False,
@@ -2850,7 +2849,7 @@ def _install_copilot_hooks(project_path: Path) -> None:
         "runOptions": {"runOn": "folderOpen"},
         "problemMatcher": [],
         "detail": (
-            "Prints RPG-Kit status and rpg-tools MCP usage guidance "
+            "Prints CoderMind status and rpg-tools MCP usage guidance "
             "so GitHub Copilot can locate and generate code against "
             "the Repository Program Graph."
         ),
@@ -2861,8 +2860,8 @@ def _install_copilot_hooks(project_path: Path) -> None:
     if not isinstance(tasks_list, list):
         tasks_list = []
 
-    # Replace any prior RPG-Kit task with the same label rather than
-    # appending duplicates on repeated ``rpgkit update`` runs.
+    # Replace any prior CoderMind task with the same label rather than
+    # appending duplicates on repeated ``cmind update`` runs.
     label = rpg_status_task["label"]
     tasks_list = [t for t in tasks_list if not (isinstance(t, dict) and t.get("label") == label)]
     tasks_list.append(rpg_status_task)
@@ -2987,27 +2986,27 @@ def _release_sort_key(release: dict) -> str:
     return release.get("published_at") or release.get("created_at") or ""
 
 
-def _select_latest_rpgkit_release(releases: List[dict], *, pre: bool) -> dict | None:
+def _select_latest_cmind_release(releases: List[dict], *, pre: bool) -> dict | None:
     candidates = [
         release
         for release in releases
         if not release.get("draft")
         and release.get("prerelease", False) is pre
-        and release.get("tag_name", "").startswith(_RPGKIT_RELEASE_TAG_PREFIX)
+        and release.get("tag_name", "").startswith(_CMIND_RELEASE_TAG_PREFIX)
     ]
     candidates.sort(key=_release_sort_key, reverse=True)
     return candidates[0] if candidates else None
 
 
-def _format_rpgkit_version(tag_name: str) -> str:
-    if tag_name.startswith(_RPGKIT_RELEASE_TAG_PREFIX):
-        return tag_name[len(_RPGKIT_RELEASE_TAG_PREFIX) :]
+def _format_cmind_version(tag_name: str) -> str:
+    if tag_name.startswith(_CMIND_RELEASE_TAG_PREFIX):
+        return tag_name[len(_CMIND_RELEASE_TAG_PREFIX) :]
     if tag_name.startswith("v"):
         return tag_name[1:]
     return tag_name
 
 
-def _fetch_latest_rpgkit_release(
+def _fetch_latest_cmind_release(
     repo_owner: str,
     repo_name: str,
     client: httpx.Client,
@@ -3041,12 +3040,12 @@ def _fetch_latest_rpgkit_release(
     if not isinstance(releases, list):
         raise RuntimeError("Unexpected response format when fetching releases list.")
 
-    release_data = _select_latest_rpgkit_release(releases, pre=pre)
+    release_data = _select_latest_cmind_release(releases, pre=pre)
     if release_data is None:
         release_type = "pre-release" if pre else "release"
         raise RuntimeError(
             f"No CoderMind {release_type} found in {repo_owner}/{repo_name}. "
-            f"Expected tags to start with {_RPGKIT_RELEASE_TAG_PREFIX}."
+            f"Expected tags to start with {_CMIND_RELEASE_TAG_PREFIX}."
         )
     return release_data
 
@@ -3081,7 +3080,7 @@ def download_template_from_github(
             console.print("[cyan]Fetching latest release information...[/cyan]")
 
     try:
-        release_data = _fetch_latest_rpgkit_release(
+        release_data = _fetch_latest_cmind_release(
             repo_owner,
             repo_name,
             client,
@@ -3096,7 +3095,7 @@ def download_template_from_github(
         raise typer.Exit(1)
 
     assets = release_data.get("assets", [])
-    pattern = f"rpgkit-template-{ai_assistant}-{script_type}"
+    pattern = f"cmind-template-{ai_assistant}-{script_type}"
     matching_assets = [
         asset
         for asset in assets
@@ -3212,9 +3211,9 @@ def download_and_extract_template(
     """Provision the workspace with scripts + command templates.
 
     Bundle-only as of v0.1.4: templates are always sourced from the
-    packaged assets shipped inside ``rpgkit_cli/core_pack/``.  To pick
+    packaged assets shipped inside ``cmind_cli/core_pack/``.  To pick
     up newer prompts the user upgrades the CLI itself (``uv tool
-    upgrade rpgkit-cli`` etc.), which ``rpgkit update`` does
+    upgrade cmind-cli`` etc.), which ``cmind update`` does
     automatically by default.
 
     The ``github_token`` / ``pre`` / ``legacy_download`` parameters and
@@ -3247,9 +3246,9 @@ def _install_from_bundle(
     """Materialise per-AI command templates into the workspace.
 
     The pipeline scripts themselves live inside the installed wheel at
-    ``rpgkit_cli/core_pack/scripts/`` and are invoked via ``rpgkit
-    script <name>`` (and ``rpgkit-mcp`` for the MCP server) — they are
-    NOT copied to ``<workspace>/.rpgkit/scripts/`` anymore.  This gives
+    ``cmind_cli/core_pack/scripts/`` and are invoked via ``cmind
+    script <name>`` (and ``cmind-mcp`` for the MCP server) — they are
+    NOT copied to ``<workspace>/.cmind/scripts/`` anymore.  This gives
     one source of truth per CLI install, no
     risk of workspace/wheel drift, and no per-workspace scripts dir
     to keep in sync.
@@ -3274,8 +3273,8 @@ def _install_from_bundle(
         tracker.start("extract")
 
     try:
-        rpgkit_root = project_path / ".rpgkit"
-        rpgkit_root.mkdir(parents=True, exist_ok=True)
+        cmind_root = project_path / ".cmind"
+        cmind_root.mkdir(parents=True, exist_ok=True)
 
         # 1. Materialise slash-command templates into the AI-specific
         #    directory.  _materialise_commands_for_agent owns the
@@ -3284,7 +3283,7 @@ def _install_from_bundle(
             ai_assistant, _assets.commands_dir(), project_path
         )
 
-        # 2. Record the provisioning source so subsequent ``rpgkit update``
+        # 2. Record the provisioning source so subsequent ``cmind update``
         #    invocations default to the same channel.
         _write_source_marker(project_path, _SOURCE_BUNDLE)
 
@@ -3311,18 +3310,18 @@ def _materialise_commands_for_agent(
     """Place command templates into the agent-specific workspace location.
 
     This intentionally mirrors what the legacy release-zip path produces
-    (see ``.github/workflows/scripts/rpgkit/create-release-packages.sh``
+    (see ``.github/workflows/scripts/cmind/create-release-packages.sh``
     ``generate_commands`` / ``generate_copilot_prompts``), so that
     downstream consumers see the same layout regardless of provisioning
     source.
 
     Layout produced:
-      claude  → ``.claude/commands/rpgkit.<name>.md``
-      copilot → ``.github/agents/rpgkit.<name>.agent.md``
-                ``.github/prompts/rpgkit.<name>.prompt.md`` (frontmatter
+      claude  → ``.claude/commands/cmind.<name>.md``
+      copilot → ``.github/agents/cmind.<name>.agent.md``
+                ``.github/prompts/cmind.<name>.prompt.md`` (frontmatter
                 points at the corresponding agent)
-      others  → fallback: ``.rpgkit/commands/rpgkit.<name>.md`` (same
-                ``rpgkit.<name>.md`` prefix for consistency with the
+      others  → fallback: ``.cmind/commands/cmind.<name>.md`` (same
+                ``cmind.<name>.md`` prefix for consistency with the
                 supported agents above)
 
     NOTE: ``claude`` and ``copilot`` are the only verified agents in
@@ -3336,7 +3335,7 @@ def _materialise_commands_for_agent(
         dest = project_path / ".claude" / "commands"
         dest.mkdir(parents=True, exist_ok=True)
         for src in src_commands_dir.glob("*.md"):
-            target = dest / f"rpgkit.{src.stem}.md"
+            target = dest / f"cmind.{src.stem}.md"
             target.write_text(_read_body(src), encoding="utf-8")
     elif ai_assistant == "copilot":
         agents = project_path / ".github" / "agents"
@@ -3344,7 +3343,7 @@ def _materialise_commands_for_agent(
         agents.mkdir(parents=True, exist_ok=True)
         prompts.mkdir(parents=True, exist_ok=True)
         for src in src_commands_dir.glob("*.md"):
-            stem = f"rpgkit.{src.stem}"
+            stem = f"cmind.{src.stem}"
             body = _read_body(src)
             (agents / f"{stem}.agent.md").write_text(body, encoding="utf-8")
             # Copilot prompt files reference the agent by name in
@@ -3357,10 +3356,10 @@ def _materialise_commands_for_agent(
         # Unknown agent (init() validates against AGENT_CONFIG so this
         # branch is unreachable from the public CLI, but provides a
         # well-defined behaviour if a future caller bypasses validation).
-        dest = project_path / ".rpgkit" / "commands"
+        dest = project_path / ".cmind" / "commands"
         dest.mkdir(parents=True, exist_ok=True)
         for src in src_commands_dir.glob("*.md"):
-            (dest / f"rpgkit.{src.stem}.md").write_text(_read_body(src), encoding="utf-8")
+            (dest / f"cmind.{src.stem}.md").write_text(_read_body(src), encoding="utf-8")
 
 
 # DEPRECATED: legacy release-zip provisioning path — no longer reachable
@@ -3383,7 +3382,7 @@ def _download_and_extract_release_zip(
 
     Kept available for users that need the very latest prompts before the
     next CLI release, or to bypass packaging glitches.  Activated via
-    ``rpgkit init --legacy-download``.
+    ``cmind init --legacy-download``.
     """
     current_dir = Path.cwd()
 
@@ -3564,51 +3563,51 @@ def _download_and_extract_release_zip(
             elif verbose:
                 console.print(f"Cleaned up: {zip_path.name}")
 
-    # Record provisioning source so a later ``rpgkit update`` defaults
+    # Record provisioning source so a later ``cmind update`` defaults
     # to the same channel.  Counterpart to ``_install_from_bundle`` which
     # writes ``bundle``.
     _write_source_marker(project_path, _SOURCE_LEGACY)
 
     # Discard the scripts copy extracted from the zip — they're not
-    # used at runtime anymore (the workspace invokes ``rpgkit script
+    # used at runtime anymore (the workspace invokes ``cmind script
     # <name>`` which resolves to the packaged scripts dir).  Keeping
     # them would just be dead weight that drifts vs the installed CLI.
     # Legacy zip contributes commands only.
-    legacy_scripts_dir = project_path / ".rpgkit" / "scripts"
+    legacy_scripts_dir = project_path / ".cmind" / "scripts"
     if legacy_scripts_dir.is_dir():
         shutil.rmtree(legacy_scripts_dir, ignore_errors=True)
 
     return project_path
 
 
-def ensure_rpgkit_runtime_dirs(
+def ensure_cmind_runtime_dirs(
     project_path: Path, tracker: StepTracker | None = None
 ) -> None:
-    """Pre-create RPG-Kit runtime directories under ``~/.rpgkit/``.
+    """Pre-create CoderMind runtime directories under ``~/.cmind/``.
 
     The per-workspace data, logs, and inner-git snapshot repo live
-    under the user's home directory at ``~/.rpgkit/workspaces/<workspace-id>/``
+    under the user's home directory at ``~/.cmind/workspaces/<workspace-id>/``
     rather than inside the workspace.  Reports stay in the workspace
-    (``<workspace>/.rpgkit/reports/``) because they're user-facing
+    (``<workspace>/.cmind/reports/``) because they're user-facing
     artefacts.
 
     This function is the central bootstrap for the home layout: it's
-    idempotent and safe to call from both ``rpgkit init`` (when the
-    channel was just chosen) and ``rpgkit update`` (when the channel
+    idempotent and safe to call from both ``cmind init`` (when the
+    channel was just chosen) and ``cmind update`` (when the channel
     is read from the existing meta file).  Some early-pipeline prompts
     redirect stdout/stderr to ``<logs>/<stage>.log`` via shell ``>``
     before any Python code runs, so we must create the directories
     upfront rather than lazily.
 
     Created (idempotent):
-        - ``~/.rpgkit/workspaces/<workspace-id>/data/``
-        - ``~/.rpgkit/workspaces/<workspace-id>/data/trajectory/``
-        - ``~/.rpgkit/workspaces/<workspace-id>/logs/``
-        - ``<workspace>/.rpgkit/reports/``
-        - ``~/.rpgkit/workspaces/<workspace-id>/.meta.toml`` (refreshed)
+        - ``~/.cmind/workspaces/<workspace-id>/data/``
+        - ``~/.cmind/workspaces/<workspace-id>/data/trajectory/``
+        - ``~/.cmind/workspaces/<workspace-id>/logs/``
+        - ``<workspace>/.cmind/reports/``
+        - ``~/.cmind/workspaces/<workspace-id>/.meta.toml`` (refreshed)
 
     The inner ``.git/`` directory is NOT created here; that's
-    the responsibility of :mod:`rpgkit_cli._inner_git`, which seeds an
+    the responsibility of :mod:`cmind_cli._inner_git`, which seeds an
     initial commit with a meaningful message.
     """
     # Resolve channel: prefer what's already recorded, fall back to
@@ -3622,14 +3621,14 @@ def ensure_rpgkit_runtime_dirs(
         home_dir = _storage.ensure_workspace_storage(
             project_path,
             channel=channel,
-            rpgkit_cli_version=_current_cli_version(),
+            cmind_cli_version=_current_cli_version(),
         )
     except _storage.WorkspaceMetaMismatch as exc:
         # Hash collision or manual rename.  Surface clearly: silently
         # writing into the wrong workspace would corrupt the other
         # one's data.
         if tracker:
-            tracker.add("runtime-dirs", "Ensure ~/.rpgkit/{logs,data} directories")
+            tracker.add("runtime-dirs", "Ensure ~/.cmind/{logs,data} directories")
             tracker.error("runtime-dirs", str(exc))
         else:
             console.print(f"[red]error:[/red] {exc}")
@@ -3637,7 +3636,7 @@ def ensure_rpgkit_runtime_dirs(
     except OSError as exc:
         # Filesystem read-only / permission issue — non-blocking.
         if tracker:
-            tracker.add("runtime-dirs", "Ensure ~/.rpgkit/{logs,data} directories")
+            tracker.add("runtime-dirs", "Ensure ~/.cmind/{logs,data} directories")
             tracker.error("runtime-dirs", f"could not create: {exc}")
         return
 
@@ -3650,7 +3649,7 @@ def ensure_rpgkit_runtime_dirs(
         pass
 
     if tracker:
-        tracker.add("runtime-dirs", "Ensure ~/.rpgkit/{logs,data} directories")
+        tracker.add("runtime-dirs", "Ensure ~/.cmind/{logs,data} directories")
         tracker.complete(
             "runtime-dirs",
             f"home dir at {home_dir}",
@@ -3661,20 +3660,20 @@ def _detect_ai_agent(project_path: Path) -> str | None:
     """Detect AI agent from existing project directory.
 
     Scans for known agent folders (from AGENT_CONFIG) and checks if they
-    contain rpgkit.* command files. Returns the agent key or None.
+    contain cmind.* command files. Returns the agent key or None.
     """
     found = []
     for key, config in AGENT_CONFIG.items():
         agent_dir = project_path / config["folder"]
         if agent_dir.is_dir():
-            # Check common command subdirectories for rpgkit.* files
+            # Check common command subdirectories for cmind.* files
             for sub in ("commands", "agents", "prompts"):
                 candidate = agent_dir / sub
-                if candidate.is_dir() and any(candidate.glob("rpgkit.*")):
+                if candidate.is_dir() and any(candidate.glob("cmind.*")):
                     found.append(key)
                     break
             else:
-                # Folder exists even without rpgkit commands subdirectory
+                # Folder exists even without cmind commands subdirectory
                 found.append(key)
     if len(found) == 1:
         return found[0]
@@ -3748,13 +3747,13 @@ def init(
             "prompt and run, or --no-encode to skip the prompt and not run."
         ),
     ),
-    no_rpgkit_git: bool = typer.Option(
+    no_cmind_git: bool = typer.Option(
         False,
-        "--no-rpgkit-git",
+        "--no-cmind-git",
         help=(
-            "Skip initialising a private git repository inside .rpgkit/. "
-            "Default is ON: rpgkit init seeds .rpgkit/.git "
-            "so every subsequent `rpgkit script` invocation auto-snapshots "
+            "Skip initialising a private git repository inside .cmind/. "
+            "Default is ON: cmind init seeds .cmind/.git "
+            "so every subsequent `cmind script` invocation auto-snapshots "
             "the workspace state, letting you `git log` / `git diff` "
             "between pipeline stages without extra tooling.  This flag "
             "disables the feature for the current init only."
@@ -3772,17 +3771,17 @@ def init(
     6. Optionally set up AI assistant commands
 
     Examples:
-        rpgkit init my-project
-        rpgkit init my-project --ai claude
-        rpgkit init my-project --ai copilot --no-git
-        rpgkit init --ignore-agent-tools my-project
-        rpgkit init . --ai claude         # Initialize in current directory
-        rpgkit init .                     # Initialize in current directory (interactive AI selection)
-        rpgkit init --here --ai claude    # Alternative syntax for current directory
-        rpgkit init --here --ai codex
-        rpgkit init --here --ai codebuddy
-        rpgkit init --here
-        rpgkit init --here --force  # Skip confirmation when current directory not empty
+        cmind init my-project
+        cmind init my-project --ai claude
+        cmind init my-project --ai copilot --no-git
+        cmind init --ignore-agent-tools my-project
+        cmind init . --ai claude         # Initialize in current directory
+        cmind init .                     # Initialize in current directory (interactive AI selection)
+        cmind init --here --ai claude    # Alternative syntax for current directory
+        cmind init --here --ai codex
+        cmind init --here --ai codebuddy
+        cmind init --here
+        cmind init --here --force  # Skip confirmation when current directory not empty
     """
     show_banner()
 
@@ -3926,7 +3925,7 @@ def init(
 
     tracker = StepTracker("Initialize CoderMind Project")
 
-    sys._rpgkit_tracker_active = True
+    sys._cmind_tracker_active = True
 
     tracker.add("precheck", "Check required tools")
     tracker.complete("precheck", "ok")
@@ -3970,10 +3969,10 @@ def init(
                 debug=debug,
             )
 
-            # .rpgkit/.source is written by whichever provisioning path
+            # .cmind/.source is written by whichever provisioning path
             # actually ran (_install_from_bundle / _download_and_extract_release_zip).
 
-            # Materialise .rpgkit/config.toml with the resolved AI CLI
+            # Materialise .cmind/config.toml with the resolved AI CLI
             # command.  llm_client.py reads this at runtime to invoke
             # the right sub-agent.
             _write_workspace_config(project_path, selected_ai)
@@ -4010,7 +4009,7 @@ def init(
                 _register_copilot_cli_global_mcp(tracker=tracker)
 
             # Migrate workspaces created before C4: drop the auto-loaded
-            # rpgkit-codegen.* persistent-instruction files.
+            # cmind-codegen.* persistent-instruction files.
             tracker.start("legacy-cleanup")
             try:
                 removed = _cleanup_legacy_codegen_persistent(project_path)
@@ -4077,26 +4076,26 @@ def init(
     console.print(tracker.render())
     console.print("\n[bold green]Project ready.[/bold green]")
 
-    # PATH self-check: hooks and MCP rely on ``rpgkit`` / ``rpgkit-mcp``
+    # PATH self-check: hooks and MCP rely on ``cmind`` / ``cmind-mcp``
     # being resolvable.  If they aren't on PATH, the user will hit
     # opaque failures from git hooks and MCP clients later — surface
     # the actionable hint now.
     import shutil as _shutil
-    if _shutil.which("rpgkit-mcp") is None or _shutil.which("rpgkit") is None:
+    if _shutil.which("cmind-mcp") is None or _shutil.which("cmind") is None:
         reinstall_cmd: Optional[list[str]] = _upgrade_command(_detect_install_method())
         # ``--force`` reinstalls in place which fixes most PATH issues
         # caused by partial installs / corrupted shim links.
         if reinstall_cmd and reinstall_cmd[:3] == ["uv", "tool", "upgrade"]:
-            reinstall_hint = "uv tool install rpgkit-cli --force"
+            reinstall_hint = "uv tool install cmind-cli --force"
         elif reinstall_cmd and reinstall_cmd[:2] == ["pipx", "upgrade"]:
-            reinstall_hint = "pipx install rpgkit-cli --force"
+            reinstall_hint = "pipx install cmind-cli --force"
         elif reinstall_cmd:
             reinstall_hint = " ".join(reinstall_cmd)
         else:
-            reinstall_hint = "uv tool install rpgkit-cli --force  # or your installer's equivalent"
+            reinstall_hint = "uv tool install cmind-cli --force  # or your installer's equivalent"
         console.print()
         path_panel = Panel(
-            "[yellow]Warning:[/yellow] [cyan]rpgkit[/cyan] / [cyan]rpgkit-mcp[/cyan] "
+            "[yellow]Warning:[/yellow] [cyan]cmind[/cyan] / [cyan]cmind-mcp[/cyan] "
             "not found on PATH.\n\n"
             "Git hooks and the MCP server invoke these commands; they will "
             "fail until PATH is fixed.\n\n"
@@ -4135,8 +4134,8 @@ def init(
         else:
             ignored_path_desc = agent_config["folder"]
         security_notice = Panel(
-            f"CoderMind's slash command definitions under [cyan]{ignored_path_desc}[/cyan] are regenerated by [cyan]rpgkit init/update[/cyan] and are excluded from git by default.\n"
-            f"Collaborators should run [cyan]rpgkit init[/cyan] in their clone to materialize the prompt files locally.",
+            f"CoderMind's slash command definitions under [cyan]{ignored_path_desc}[/cyan] are regenerated by [cyan]cmind init/update[/cyan] and are excluded from git by default.\n"
+            f"Collaborators should run [cyan]cmind init[/cyan] in their clone to materialize the prompt files locally.",
             title="[yellow]Agent Folder Notice[/yellow]",
             border_style="yellow",
             padding=(1, 2),
@@ -4145,8 +4144,8 @@ def init(
         console.print(security_notice)
 
     # Pre-create runtime directories so early pipeline prompts that redirect
-    # to ~/.rpgkit/workspaces/<workspace-id>/logs/<stage>.log don't fail with "No such file or directory".
-    ensure_rpgkit_runtime_dirs(project_path)
+    # to ~/.cmind/workspaces/<workspace-id>/logs/<stage>.log don't fail with "No such file or directory".
+    ensure_cmind_runtime_dirs(project_path)
 
     steps_lines = []
     if not here:
@@ -4175,26 +4174,26 @@ def init(
     steps_lines.append(f"{step_num}. Start using slash commands with your AI agent:")
 
     steps_lines.extend([
-        f"   {step_num}.1  [cyan]/rpgkit.feature_spec[/] - Create feature spec from docs",
-        f"   {step_num}.2  [cyan]/rpgkit.feature_build[/] - Generate and Expand Feature Tree",
-        f"   {step_num}.3  [cyan]/rpgkit.feature_refactor[/] - Refactor Feature Tree",
-        f"   {step_num}.4  [cyan]/rpgkit.feature_edit[/] - Edit Feature Tree Nodes",
-        f"   {step_num}.5  [cyan]/rpgkit.build_skeleton[/] - Repository Skeleton Structure",
-        f"   {step_num}.6  [cyan]/rpgkit.build_data_flow[/] - Data Flow Design",
-        f"   {step_num}.7  [cyan]/rpgkit.design_base_classes[/] - Base Classes Design",
-        f"   {step_num}.8  [cyan]/rpgkit.design_interfaces[/] - Interface Design",
-        f"   {step_num}.9  [cyan]/rpgkit.plan_tasks[/] - Task Planning",
-        f"   {step_num}.10 [cyan]/rpgkit.code_gen[/] - Code Generation",
-        f"   {step_num}.11 [cyan]/rpgkit.rpg_edit[/] - Surgical RPG/code edit",
-        f"   {step_num}.12 [cyan]/rpgkit.encode[/] - Encode repo into RPG",
-        f"   {step_num}.13 [cyan]/rpgkit.update_rpg[/] - Incremental RPG update",
+        f"   {step_num}.1  [cyan]/cmind.feature_spec[/] - Create feature spec from docs",
+        f"   {step_num}.2  [cyan]/cmind.feature_build[/] - Generate and Expand Feature Tree",
+        f"   {step_num}.3  [cyan]/cmind.feature_refactor[/] - Refactor Feature Tree",
+        f"   {step_num}.4  [cyan]/cmind.feature_edit[/] - Edit Feature Tree Nodes",
+        f"   {step_num}.5  [cyan]/cmind.build_skeleton[/] - Repository Skeleton Structure",
+        f"   {step_num}.6  [cyan]/cmind.build_data_flow[/] - Data Flow Design",
+        f"   {step_num}.7  [cyan]/cmind.design_base_classes[/] - Base Classes Design",
+        f"   {step_num}.8  [cyan]/cmind.design_interfaces[/] - Interface Design",
+        f"   {step_num}.9  [cyan]/cmind.plan_tasks[/] - Task Planning",
+        f"   {step_num}.10 [cyan]/cmind.code_gen[/] - Code Generation",
+        f"   {step_num}.11 [cyan]/cmind.rpg_edit[/] - Surgical RPG/code edit",
+        f"   {step_num}.12 [cyan]/cmind.encode[/] - Encode repo into RPG",
+        f"   {step_num}.13 [cyan]/cmind.update_rpg[/] - Incremental RPG update",
     ])
 
     step_num += 1
     steps_lines.append(
-        f"{step_num}. You can inspect each step's output under [cyan]~/.rpgkit/workspaces/<workspace-id>/data/[/cyan], "
-        f"and review detailed execution trajectories under [cyan]~/.rpgkit/workspaces/<workspace-id>/data/trajectory/[/cyan]. "
-        f"Run [cyan]rpgkit version[/cyan] from inside the workspace to see the resolved Data / Logs / Inner-git paths."
+        f"{step_num}. You can inspect each step's output under [cyan]~/.cmind/workspaces/<workspace-id>/data/[/cyan], "
+        f"and review detailed execution trajectories under [cyan]~/.cmind/workspaces/<workspace-id>/data/trajectory/[/cyan]. "
+        f"Run [cyan]cmind version[/cyan] from inside the workspace to see the resolved Data / Logs / Inner-git paths."
     )
 
     step_num += 1
@@ -4206,10 +4205,10 @@ def init(
     # First-run note: the MCP tools are wired up at init time, but they
     # only return useful data once the encoder has built rpg.json.  Make
     # the requirement loud-and-clear here so users don't hit the silent
-    # "rpg_unavailable" payload on their first /rpgkit.* call.
+    # "rpg_unavailable" payload on their first /cmind.* call.
     steps_lines.append(
         "   [yellow]Note:[/] the MCP tools query [cyan]rpg.json[/] in the workspace's home-dir "
-        "store, which is created by the encoder. For existing codebases, run [cyan]/rpgkit.encode[/] "
+        "store, which is created by the encoder. For existing codebases, run [cyan]/cmind.encode[/] "
         "once now to populate it; the post-commit hook keeps it in sync afterwards."
     )
 
@@ -4235,15 +4234,15 @@ def init(
         console.print()
         console.print(permissions_hint)
 
-    # Initialise the private snapshot repo inside .rpgkit/.  Done BEFORE
+    # Initialise the private snapshot repo inside .cmind/.  Done BEFORE
     # the optional initial encode so the encoder's output, if it runs,
     # becomes a fresh commit on top of the [init] baseline — a useful
     # diff target.
-    if not no_rpgkit_git:
+    if not no_cmind_git:
         from . import _inner_git
         from importlib.metadata import version as _pkg_version, PackageNotFoundError
         try:
-            ver = _pkg_version("rpgkit-cli")
+            ver = _pkg_version("cmind-cli")
         except PackageNotFoundError:
             ver = "dev"
         channel = "bundle"
@@ -4255,8 +4254,8 @@ def init(
         ):
             console.print(
                 "[dim]Inner snapshot repo initialised at "
-                "[cyan]~/.rpgkit/workspaces/<workspace-id>/.git[/cyan] \u2014 "
-                "run [cyan]rpgkit version[/cyan] for the exact path "
+                "[cyan]~/.cmind/workspaces/<workspace-id>/.git[/cyan] \u2014 "
+                "run [cyan]cmind version[/cyan] for the exact path "
                 "and a ready-to-paste `git -C` invocation.[/dim]"
             )
 
@@ -4307,13 +4306,13 @@ def update(
             "installed the CLI manually."
         ),
     ),
-    no_rpgkit_git: bool = typer.Option(
+    no_cmind_git: bool = typer.Option(
         False,
-        "--no-rpgkit-git",
+        "--no-cmind-git",
         help=(
-            "Skip backfilling the private snapshot repo at .rpgkit/.git "
+            "Skip backfilling the private snapshot repo at .cmind/.git "
             "for older workspaces that don't have one yet.  Default is ON: "
-            "if the inner repo is missing, `rpgkit update` creates it and "
+            "if the inner repo is missing, `cmind update` creates it and "
             "commits a catch-up snapshot.  Pre-existing inner repos are "
             "never touched."
         ),
@@ -4325,26 +4324,26 @@ def update(
     config, gitignore rules, and git hooks in the current directory.
     It auto-detects the AI assistant from existing project configuration.
 
-    Equivalent to re-running 'rpgkit init --here --force' but with proper
+    Equivalent to re-running 'cmind init --here --force' but with proper
     semantics and automatic detection of existing settings.
 
     Examples:
-        rpgkit update
-        rpgkit update --ai claude
-        rpgkit update --no-upgrade
+        cmind update
+        cmind update --ai claude
+        cmind update --no-upgrade
     """
     show_banner()
 
     project_path = Path.cwd()
 
-    # Verify this is an existing RPG-Kit project
-    rpgkit_dir = project_path / ".rpgkit"
-    if not rpgkit_dir.is_dir():
+    # Verify this is an existing CoderMind project
+    cmind_dir = project_path / ".cmind"
+    if not cmind_dir.is_dir():
         console.print(
             Panel(
-                "No [cyan].rpgkit/[/cyan] directory found in the current directory.\n"
+                "No [cyan].cmind/[/cyan] directory found in the current directory.\n"
                 "This command updates an existing CoderMind project.\n\n"
-                "To create a new project, use: [cyan]rpgkit init[/cyan]",
+                "To create a new project, use: [cyan]cmind init[/cyan]",
                 title="[red]Not a CoderMind Project[/red]",
                 border_style="red",
                 padding=(1, 2),
@@ -4411,8 +4410,8 @@ def update(
 
     # Pre-update CLI upgrade -------------------------------------------------
     #
-    # By default, ``rpgkit update`` first runs the appropriate upgrade
-    # command (``uv tool upgrade rpgkit-cli`` for uv installs etc.) so
+    # By default, ``cmind update`` first runs the appropriate upgrade
+    # command (``uv tool upgrade cmind-cli`` for uv installs etc.) so
     # the workspace's prompts/scripts/templates always match the
     # *latest* released version of the CLI.  Without this, users who
     # never re-install the CLI would silently drift behind upstream.
@@ -4427,16 +4426,16 @@ def update(
     # re-installed manually).
     #
     # After a successful upgrade we ``os.execvp`` the (now-upgraded)
-    # rpgkit binary so the rest of update runs against the freshly
+    # cmind binary so the rest of update runs against the freshly
     # installed code + assets.  Mixing old in-memory logic with new
     # on-disk core_pack/ used to cause logic vs assets drift bugs.
     #
-    # Loop guard: ``RPGKIT_UPGRADE_DONE`` is set on the re-exec'd
+    # Loop guard: ``CMIND_UPGRADE_DONE`` is set on the re-exec'd
     # process's environment.  When present, this block skips the
     # upgrade attempt unconditionally so an idempotent ``uv tool
     # upgrade`` (which returns 0 even when there's nothing to upgrade)
     # doesn't loop forever.
-    _UPGRADE_DONE_ENV = "RPGKIT_UPGRADE_DONE"
+    _UPGRADE_DONE_ENV = "CMIND_UPGRADE_DONE"
     already_upgraded = bool(os.environ.get(_UPGRADE_DONE_ENV))
 
     method = _detect_install_method()
@@ -4466,7 +4465,7 @@ def update(
 
     if do_upgrade:
         console.print(
-            f"[cyan]Upgrading rpgkit-cli via {method} (source={source})...[/cyan]"
+            f"[cyan]Upgrading cmind-cli via {method} (source={source})...[/cyan]"
         )
         try:
             rc = subprocess.call(cmd)  # type: ignore[arg-type]
@@ -4474,7 +4473,7 @@ def update(
             # Upgrade tool (uv, pipx, pip) not on PATH — surface, then
             # carry on with the current build.  Stripping the upgrade
             # is a worse user experience than failing fast here would
-            # be, but ``rpgkit update`` is "make my workspace match the
+            # be, but ``cmind update`` is "make my workspace match the
             # installed CLI", and the installed CLI is still functional.
             console.print(
                 f"[yellow]Upgrade tool {cmd[0]!r} not found on PATH; "
@@ -4495,14 +4494,14 @@ def update(
             # loop-guard env var so the re-exec'd process doesn't
             # immediately try to upgrade again.
             new_argv = list(sys.argv)
-            rpgkit_bin = shutil.which("rpgkit") or new_argv[0]
+            cmind_bin = shutil.which("cmind") or new_argv[0]
             console.print(
                 "[cyan]CLI upgrade complete; re-exec'ing to apply "
                 "new templates...[/cyan]"
             )
             try:
                 os.environ[_UPGRADE_DONE_ENV] = "1"
-                os.execvp(rpgkit_bin, [rpgkit_bin, *new_argv[1:]])
+                os.execvp(cmind_bin, [cmind_bin, *new_argv[1:]])
             except OSError as exc:
                 # execvp failed — fall back to running the update
                 # in-process with the (now-on-disk) new code.  This
@@ -4529,7 +4528,7 @@ def update(
     # Build step tracker
     tracker = StepTracker("Update CoderMind Project")
 
-    sys._rpgkit_tracker_active = True
+    sys._cmind_tracker_active = True
 
     tracker.add("ai-select", "Select AI assistant")
     tracker.complete("ai-select", f"{selected_ai}")
@@ -4567,22 +4566,22 @@ def update(
                 debug=debug,
             )
 
-            # .rpgkit/.source is written by whichever provisioning path
+            # .cmind/.source is written by whichever provisioning path
             # actually ran (_install_from_bundle / _download_and_extract_release_zip).
 
-            # Refresh .rpgkit/config.toml only when missing (preserves
+            # Refresh .cmind/config.toml only when missing (preserves
             # user customisations on re-update).
             _write_workspace_config(project_path, selected_ai)
 
             # Pre-create runtime directories so stage prompts that redirect
-            # to ~/.rpgkit/workspaces/<workspace-id>/logs/<stage>.log don't fail when the folder is
+            # to ~/.cmind/workspaces/<workspace-id>/logs/<stage>.log don't fail when the folder is
             # missing (e.g. user removed it, or workspace was created by an
-            # older rpgkit init that didn't pre-create logs/).
-            ensure_rpgkit_runtime_dirs(project_path, tracker=tracker)
+            # older cmind init that didn't pre-create logs/).
+            ensure_cmind_runtime_dirs(project_path, tracker=tracker)
 
-            # Ensure RPG-Kit gitignore rules are in place — re-runs are
+            # Ensure CoderMind gitignore rules are in place — re-runs are
             # idempotent (existing rules are detected and skipped) and this
-            # also fixes workspaces created by older rpgkit versions that
+            # also fixes workspaces created by older cmind versions that
             # didn't manage gitignore at all.
             tracker.start("gitignore")
             try:
@@ -4609,7 +4608,7 @@ def update(
                 _register_copilot_cli_global_mcp(tracker=tracker)
 
             # Migrate workspaces created before C4: drop the auto-loaded
-            # rpgkit-codegen.* persistent-instruction files.
+            # cmind-codegen.* persistent-instruction files.
             tracker.start("legacy-cleanup")
             try:
                 removed = _cleanup_legacy_codegen_persistent(project_path)
@@ -4626,7 +4625,7 @@ def update(
             # Re-install hooks so behavior fixes propagate to existing
             # workspaces.  Without this, the .git/hooks/* files stay
             # frozen at whatever version was active during the original
-            # `rpgkit init`, and the sentinel-block migration in
+            # `cmind init`, and the sentinel-block migration in
             # _install_hook_snippet (the upgrade mechanism for hooks)
             # never gets a chance to run.
             _install_hooks(project_path, selected_ai, tracker=tracker)
@@ -4671,13 +4670,13 @@ def update(
     )
 
     # Backfill inner snapshot repo for workspaces created before
-    # this feature shipped.  Idempotent — does nothing if .rpgkit/.git
-    # already exists, and silently noops if --no-rpgkit-git was passed.
-    if not no_rpgkit_git:
+    # this feature shipped.  Idempotent — does nothing if .cmind/.git
+    # already exists, and silently noops if --no-cmind-git was passed.
+    if not no_cmind_git:
         from . import _inner_git
         from importlib.metadata import version as _pkg_version, PackageNotFoundError
         try:
-            ver = _pkg_version("rpgkit-cli")
+            ver = _pkg_version("cmind-cli")
         except PackageNotFoundError:
             ver = "dev"
         if _inner_git.ensure_inner_git(
@@ -4686,7 +4685,7 @@ def update(
         ):
             console.print(
                 "[dim]Initialised inner snapshot repo at "
-                "[cyan]~/.rpgkit/workspaces/<workspace-id>/.git[/cyan] for this workspace.[/dim]"
+                "[cyan]~/.cmind/workspaces/<workspace-id>/.git[/cyan] for this workspace.[/dim]"
             )
 
 
@@ -4695,8 +4694,8 @@ def update(
         "allow_extra_args": True,
         "ignore_unknown_options": True,
         # Disable click's auto-help so ``--help`` is forwarded to the
-        # target script.  Use ``rpgkit script`` (no args) or
-        # ``rpgkit --help script`` to see this command's own help.
+        # target script.  Use ``cmind script`` (no args) or
+        # ``cmind --help script`` to see this command's own help.
         "help_option_names": [],
     },
 )
@@ -4728,10 +4727,10 @@ def script(
 
     Examples::
 
-        rpgkit script smoke_test.py --json
-        rpgkit script rpg_edit/validate.py
-        rpgkit script --list
-        rpgkit script --where mcp_server.py
+        cmind script smoke_test.py --json
+        cmind script rpg_edit/validate.py
+        cmind script --list
+        cmind script --where mcp_server.py
     """
     from . import _assets
 
@@ -4752,7 +4751,7 @@ def script(
     if not relpath:
         console.print(
             "[red]error:[/red] missing script path. "
-            "Use [cyan]rpgkit script --list[/cyan] to see available scripts."
+            "Use [cyan]cmind script --list[/cyan] to see available scripts."
         )
         raise typer.Exit(2)
 
@@ -4769,7 +4768,7 @@ def script(
     # Tee stdout to a per-stage log file so the workspace has a persistent
     # record of every script invocation.  The log path is resolved from
     # _storage at run time; if the home-side dir doesn't exist yet (e.g.
-    # rpgkit init hasn't run), skip silently — no log is better than
+    # cmind init hasn't run), skip silently — no log is better than
     # crashing.
     log_path: Optional[Path] = None
     from . import _inner_git as _ig
@@ -4803,13 +4802,13 @@ def script(
         cmd = [sys.executable, str(path), *ctx.args]
         proc = subprocess.run(cmd, env=env)
 
-    # Snapshot the current state of .rpgkit/ into the inner git
+    # Snapshot the current state of .cmind/ into the inner git
     # repo so users can `git log` / `git diff` between pipeline stages.
     # No-op (silently) when the script is read-only (check_*, *_validation),
-    # the inner repo is absent (--no-rpgkit-git on init), or git is busy.
+    # the inner repo is absent (--no-cmind-git on init), or git is busy.
     #
     # Use the *resolved* path (always carries .py) for the commit message
-    # so `rpgkit script smoke_test` and `rpgkit script smoke_test.py`
+    # so `cmind script smoke_test` and `cmind script smoke_test.py`
     # produce identical history entries.
     from . import _inner_git, _assets
     ws_root = _inner_git.find_workspace_root()
@@ -4860,7 +4859,7 @@ def _resolve_script_path(relpath: str) -> Optional[Path]:
 
 
 # ---------------------------------------------------------------------------
-# Git-hook dispatch: ``rpgkit hook <name>``
+# Git-hook dispatch: ``cmind hook <name>``
 # ---------------------------------------------------------------------------
 #
 # Python entry-point for git hooks.  The on-disk hook files in
@@ -4868,8 +4867,8 @@ def _resolve_script_path(relpath: str) -> Optional[Path]:
 # path resolution, logging, locking, and detach logic live here so they
 # can be updated by upgrading the CLI rather than reinstalling hooks.
 
-_HOOK_ENV_NAME = "RPGKIT_HOOK"
-_HOOK_ENV_SHA = "RPGKIT_HOOK_SHA"
+_HOOK_ENV_NAME = "CMIND_HOOK"
+_HOOK_ENV_SHA = "CMIND_HOOK_SHA"
 _HOOK_LOG_FILENAME = "hooks.log"
 _HOOK_BACKGROUND_LOG = "update_rpg.log"
 _HOOK_LOCK_DIRNAME = ".update_rpg.lock"
@@ -4910,12 +4909,12 @@ def _hook_run_foreground(
     script_args: List[str],
     label: str,
 ) -> int:
-    """Run ``rpgkit script <script_args>`` and tee output into ``log_path``."""
+    """Run ``cmind script <script_args>`` and tee output into ``log_path``."""
     _hook_log_line(log_path, f"{label}: start ({' '.join(script_args)})")
     try:
         with open(log_path, "a", encoding="utf-8") as fh:
             proc = subprocess.run(
-                ["rpgkit", "script", *script_args],
+                ["cmind", "script", *script_args],
                 cwd=str(workspace),
                 env=env,
                 stdout=fh, stderr=subprocess.STDOUT,
@@ -4977,7 +4976,7 @@ def _hook_spawn_background(
     workspace_q = shlex.quote(str(workspace))
     shell_cmd = (
         f"cd {workspace_q}; sleep 2; "
-        f"rpgkit script update_graphs.py update-rpg --json >> {log_q} 2>&1; "
+        f"cmind script update_graphs.py update-rpg --json >> {log_q} 2>&1; "
         f"rmdir {lock_q}"
     )
     # Strip GIT_INDEX_FILE / GIT_DIR which git sets during hooks -
@@ -5013,7 +5012,7 @@ def hook(name: str = typer.Argument(..., help="Hook name: post-commit | post-mer
     """Dispatch from ``.git/hooks/<name>`` to the matching Python handler.
 
     Resolves the current workspace via the standard cwd-walk, attaches
-    a hook log under ``~/.rpgkit/workspaces/<workspace-id>/logs/hooks.log``,
+    a hook log under ``~/.cmind/workspaces/<workspace-id>/logs/hooks.log``,
     and runs the per-hook orchestration.  Every failure path is
     swallowed (logged, never raised) so a misbehaving hook never blocks
     the user's git operation.
@@ -5021,16 +5020,16 @@ def hook(name: str = typer.Argument(..., help="Hook name: post-commit | post-mer
     Supported hooks: ``post-commit`` and ``post-merge``. The dispatcher
     also accepts ``pre-commit`` as a deliberate no-op for backward
     compatibility — old workspaces whose hook file still calls
-    ``rpgkit hook pre-commit`` should be cleaned up on the next
-    ``rpgkit init`` / ``rpgkit update`` run, which strips the block.
+    ``cmind hook pre-commit`` should be cleaned up on the next
+    ``cmind init`` / ``cmind update`` run, which strips the block.
 
-    All ``rpgkit script`` subprocess invocations inherit two env vars:
+    All ``cmind script`` subprocess invocations inherit two env vars:
 
-      * ``RPGKIT_HOOK`` -- the hook name (``post-commit`` etc.)
-      * ``RPGKIT_HOOK_SHA`` -- short SHA of the user-facing commit
+      * ``CMIND_HOOK`` -- the hook name (``post-commit`` etc.)
+      * ``CMIND_HOOK_SHA`` -- short SHA of the user-facing commit
 
     The inner-git snapshot's commit message picks these up
-    (:func:`rpgkit_cli._inner_git._build_message`) so ``git log`` in the
+    (:func:`cmind_cli._inner_git._build_message`) so ``git log`` in the
     home-side repo reads as a timeline of *user activity*, e.g.::
 
         [hook:post-commit @ a1b2c3d] sync
@@ -5041,7 +5040,7 @@ def hook(name: str = typer.Argument(..., help="Hook name: post-commit | post-mer
     try:
         ws = _storage.find_workspace_root_from(Path.cwd())
         if ws is None:
-            # Not in an rpgkit workspace -- silently exit success;
+            # Not in an cmind workspace -- silently exit success;
             # the hook may be running in a repo that was provisioned
             # then un-init'd, and we never want to block git.
             raise typer.Exit(0)
@@ -5053,7 +5052,7 @@ def hook(name: str = typer.Argument(..., help="Hook name: post-commit | post-mer
         env = os.environ.copy()
         env[_HOOK_ENV_NAME] = name
         env[_HOOK_ENV_SHA] = sha
-        # Ensure ``rpgkit`` itself is on PATH when the hook is fired
+        # Ensure ``cmind`` itself is on PATH when the hook is fired
         # from a GUI editor that lacks the user's interactive shell PATH.
         local_bin = str(Path.home() / ".local" / "bin")
         if local_bin not in env.get("PATH", ""):
@@ -5159,7 +5158,7 @@ def version():
     # Get CLI version from package metadata
     cli_version = "unknown"
     try:
-        cli_version = importlib.metadata.version("rpgkit-cli")
+        cli_version = importlib.metadata.version("cmind-cli")
     except Exception:
         # Fallback: try reading from pyproject.toml if running from source
         try:
@@ -5180,13 +5179,13 @@ def version():
     fetch_error: str | None = None
 
     try:
-        release_data = _fetch_latest_rpgkit_release(
+        release_data = _fetch_latest_cmind_release(
             repo_owner,
             repo_name,
             client,
             timeout=10,
         )
-        latest_version = _format_rpgkit_version(release_data.get("tag_name", "unknown"))
+        latest_version = _format_cmind_version(release_data.get("tag_name", "unknown"))
         release_date = release_data.get("published_at", "unknown")
         if release_date != "unknown":
             # Format the date nicely
@@ -5212,7 +5211,7 @@ def version():
         status_label = "[yellow]offline[/yellow]"
         status_hint = (
             f"Could not query GitHub for the latest release: {fetch_error}. "
-            "Local install is still usable; rerun `rpgkit version` when "
+            "Local install is still usable; rerun `cmind version` when "
             "you have network access to compare."
         )
     elif cli_version != "unknown" and latest_version != "unknown":
@@ -5232,10 +5231,10 @@ def version():
             status_hint = (
                 f"A newer release ([cyan]{latest_version}[/cyan]) is "
                 f"available.  Upgrade with one of:\n"
-                f"  [cyan]uv tool upgrade rpgkit-cli[/cyan]\n"
-                f"  [cyan]pipx upgrade rpgkit-cli[/cyan]\n"
-                f"  [cyan]pip install -U rpgkit-cli[/cyan]\n"
-                f"After upgrading, run [cyan]rpgkit update[/cyan] in each "
+                f"  [cyan]uv tool upgrade cmind-cli[/cyan]\n"
+                f"  [cyan]pipx upgrade cmind-cli[/cyan]\n"
+                f"  [cyan]pip install -U cmind-cli[/cyan]\n"
+                f"After upgrading, run [cyan]cmind update[/cyan] in each "
                 f"existing workspace to apply the new prompts."
             )
         else:
@@ -5261,9 +5260,9 @@ def version():
     info_table.add_row("OS Version", platform.version())
 
     # Surface the per-workspace home-side storage when
-    # invoked from inside an rpgkit workspace.  Without this the user
+    # invoked from inside an cmind workspace.  Without this the user
     # has no obvious way to find their generated artefacts / logs after
-    # we moved them out of the repo tree into ``~/.rpgkit/workspaces/
+    # we moved them out of the repo tree into ``~/.cmind/workspaces/
     # <workspace-id>/`` — they'd have to derive the workspace id themselves.
     try:
         from . import _inner_git
@@ -5275,7 +5274,7 @@ def version():
             # Annotate each row when the dir doesn't exist yet so the
             # user doesn't mistake a computed path for a real artefact.
             # Important after partial cleanup or before the first
-            # ``rpgkit init`` populates the home-side store — we used
+            # ``cmind init`` populates the home-side store — we used
             # to print non-existent paths as if they were live.
             def _tag(p: Path) -> str:
                 return str(p) if p.exists() else f"{p}  [dim](not created yet)[/dim]"
@@ -5288,7 +5287,7 @@ def version():
             # (.git exists but zero commits).  snapshot_count returns
             # None for both, so probe has_inner_git directly.
             if not home_dir.exists():
-                inner_git_value = f"{home_dir}  [dim](home-side dir not created — run `rpgkit init` here)[/dim]"
+                inner_git_value = f"{home_dir}  [dim](home-side dir not created — run `cmind init` here)[/dim]"
             elif not _inner_git.has_inner_git(ws):
                 inner_git_value = f"{home_dir}  [dim](no inner-git repo)[/dim]"
             else:

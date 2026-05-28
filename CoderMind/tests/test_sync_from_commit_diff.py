@@ -88,7 +88,7 @@ def synced_repo(tmp_path):
     head = _head_sha(repo)
 
     # Build the RPG fresh and seed meta.git so we're at "in sync".
-    data_dir = repo / ".rpgkit" / "data"
+    data_dir = repo / ".cmind" / "data"
     data_dir.mkdir(parents=True)
     rpg_path = data_dir / "rpg.json"
     dep_graph_path = data_dir / "dep_graph.json"
@@ -145,7 +145,7 @@ def test_first_sync_runs_full(tmp_path):
     _sh(repo, "add", ".")
     _sh(repo, "commit", "-q", "-m", "c1")
 
-    data_dir = repo / ".rpgkit" / "data"
+    data_dir = repo / ".cmind" / "data"
     data_dir.mkdir(parents=True)
     rpg_path = data_dir / "rpg.json"
     dep_graph_path = data_dir / "dep_graph.json"
@@ -291,7 +291,7 @@ def test_over_limit_falls_back_to_full(synced_repo, monkeypatch):
 
 
 def test_no_git_meta_env_var_skips_meta_write(synced_repo, monkeypatch):
-    """``RPGKIT_NO_GIT_META=1`` must not advance ``meta.git``."""
+    """``CMIND_NO_GIT_META=1`` must not advance ``meta.git``."""
     repo, rpg_path, dep_graph_path, code, original_head = synced_repo
 
     # Make a real commit so HEAD changes
@@ -300,7 +300,7 @@ def test_no_git_meta_env_var_skips_meta_write(synced_repo, monkeypatch):
     _sh(repo, "commit", "-q", "-m", "y")
     new_head = _head_sha(repo)
 
-    monkeypatch.setenv("RPGKIT_NO_GIT_META", "1")
+    monkeypatch.setenv("CMIND_NO_GIT_META", "1")
     svc = _load(rpg_path)
     result = svc.sync_from_commit_diff(
         code_dir=str(code),
@@ -448,7 +448,7 @@ def test_sync_from_file_list_bootstraps_full_when_no_dep_graph(tmp_path):
     _sh(repo, "add", ".")
     _sh(repo, "commit", "-q", "-m", "c1")
 
-    data_dir = repo / ".rpgkit" / "data"
+    data_dir = repo / ".cmind" / "data"
     data_dir.mkdir(parents=True)
     rpg_path = data_dir / "rpg.json"
     dep_graph_path = data_dir / "dep_graph.json"
@@ -525,7 +525,7 @@ def test_cli_sync_force_full(synced_repo):
 
 
 def test_cli_sync_missing_rpg_returns_actionable_error(tmp_path):
-    """``sync`` must early-return with a /rpgkit.encode hint when rpg.json is absent.
+    """``sync`` must early-return with a /cmind.encode hint when rpg.json is absent.
 
     Regression guard: previously ``RPGService.load`` raised
     ``FileNotFoundError`` which the post-commit hook silently swallowed
@@ -549,5 +549,5 @@ def test_cli_sync_missing_rpg_returns_actionable_error(tmp_path):
         payload = json.loads(result.stdout)
         assert payload["mode"] == sub
         assert "error" in payload, payload
-        assert "/rpgkit.encode" in payload["error"], payload["error"]
+        assert "/cmind.encode" in payload["error"], payload["error"]
         assert str(missing) in payload["error"]

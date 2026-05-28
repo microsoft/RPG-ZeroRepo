@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Test Runner Utilities for RPG-Kit Code Generation.
+"""Test Runner Utilities for CoderMind Code Generation.
 
 Provides utilities for:
 - Finding test files related to source changes

@@ -1,9 +1,9 @@
 """Inner-git snapshotting for the user-home workspace directory.
 
-Every successful (or failed) ``rpgkit script <X>`` invocation
+Every successful (or failed) ``cmind script <X>`` invocation
 auto-commits the current state of the per-workspace home directory at
-``~/.rpgkit/workspaces/<workspace-id>/`` into a dedicated git repo at
-``~/.rpgkit/workspaces/<workspace-id>/.git/``. This lets ``git log`` and
+``~/.cmind/workspaces/<workspace-id>/`` into a dedicated git repo at
+``~/.cmind/workspaces/<workspace-id>/.git/``. This lets ``git log`` and
 ``git diff`` show how pipeline stages change between runs.
 
 What gets tracked:
@@ -14,7 +14,7 @@ What gets tracked:
   tracking them lets users ``git log -p logs/<stage>.log`` to debug
   pipeline regressions across snapshots.
 * ``.meta.toml`` — captures channel + CLI version at each snapshot;
-  changes only on ``rpgkit init/update``.
+  changes only on ``cmind init/update``.
 
 What is NOT tracked (see :data:`_INNER_GIT_IGNORE` below):
 
@@ -37,7 +37,7 @@ Design choices:
   otherwise spam the history).
 
 All public functions swallow their own exceptions — this module must
-never be a reason ``rpgkit script`` itself fails.
+never be a reason ``cmind script`` itself fails.
 """
 
 from __future__ import annotations
@@ -52,15 +52,15 @@ from typing import Optional
 from . import _storage
 
 
-# Environment variables set by ``rpgkit hook <name>`` before invoking
-# any ``rpgkit script`` calls.  They flow through every subprocess so
+# Environment variables set by ``cmind hook <name>`` before invoking
+# any ``cmind script`` calls.  They flow through every subprocess so
 # the snapshot commit message can record *which* git hook fired *which*
 # user-facing commit instead of just naming the underlying script.
 #
-# Set only by :func:`rpgkit_cli.hook` -- never by manual invocations -
-# so the presence of ``RPGKIT_HOOK`` is a reliable trigger-source flag.
-_ENV_HOOK_NAME = "RPGKIT_HOOK"        # e.g. "post-commit" / "pre-commit"
-_ENV_HOOK_SHA = "RPGKIT_HOOK_SHA"     # short SHA of the user-facing commit
+# Set only by :func:`cmind_cli.hook` -- never by manual invocations -
+# so the presence of ``CMIND_HOOK`` is a reliable trigger-source flag.
+_ENV_HOOK_NAME = "CMIND_HOOK"        # e.g. "post-commit" / "pre-commit"
+_ENV_HOOK_SHA = "CMIND_HOOK_SHA"     # short SHA of the user-facing commit
 
 
 # ---------------------------------------------------------------------------
@@ -69,8 +69,8 @@ _ENV_HOOK_SHA = "RPGKIT_HOOK_SHA"     # short SHA of the user-facing commit
 
 # Inner repo identity.  Per-call (-c user.X) so this never touches the
 # user's ~/.gitconfig.
-_AUTHOR_EMAIL = "rpgkit@local"
-_AUTHOR_NAME = "rpgkit-snapshot"
+_AUTHOR_EMAIL = "cmind@local"
+_AUTHOR_NAME = "cmind-snapshot"
 
 
 def _author_args() -> list[str]:
@@ -99,7 +99,7 @@ _SKIP_NAMES: frozenset[str] = frozenset({
 # ``logs/copilot/`` is excluded: it contains full LLM session traces
 # (typically MB per session) and would dominate the snapshot history.
 _INNER_GIT_IGNORE = """\
-# Managed by rpgkit-cli: do not edit.
+# Managed by cmind-cli: do not edit.
 # Logs are tracked to support `git log -p logs/<stage>.log` debugging.
 # Exception: logs/copilot/ holds LLM session traces (large, not useful
 # in history); inspect those files directly.
@@ -150,7 +150,7 @@ def categorise_script(relpath: str) -> str:
 def _inner_git_dir(workspace: Path) -> Path:
     """Return the home directory used as ``git -C <dir>`` for the snapshots.
 
-    The directory is ``~/.rpgkit/workspaces/<workspace-id>/``; the inner repo's
+    The directory is ``~/.cmind/workspaces/<workspace-id>/``; the inner repo's
     ``.git`` sits directly inside it.
     """
     return _storage.home_workspace_dir(workspace)
@@ -160,15 +160,15 @@ def _inner_git_dir(workspace: Path) -> Path:
 # used in earlier docstrings.  No external caller should rely on this;
 # it stays only to keep grep-friendly when reading older commit
 # messages and plan documents.
-_rpgkit_dir = _inner_git_dir
+_cmind_dir = _inner_git_dir
 
 
 def find_workspace_root(start: Optional[Path] = None) -> Optional[Path]:
     """Walk up from ``start`` (default cwd) looking for a workspace marker.
 
-    Returns the directory containing ``.rpgkit/config.toml`` (the
+    Returns the directory containing ``.cmind/config.toml`` (the
     workspace marker), or ``None`` if not found.  Used by
-    ``rpgkit script`` to figure out which workspace's inner git repo to
+    ``cmind script`` to figure out which workspace's inner git repo to
     snapshot into when the caller's cwd is a subdirectory.
     """
     return _storage.find_workspace_root_from(start)
@@ -200,7 +200,7 @@ def _run_git(workspace: Path, *args: str, check: bool = False, timeout: int = 30
     # Strip inherited git env vars: a foreground hook caller may have set
     # GIT_INDEX_FILE / GIT_DIR / GIT_WORK_TREE pointing at the outer repo.
     # If we leak those into the inner-git call the outer repo's index gets
-    # corrupted (entries from $HOME/.rpgkit get written into the outer index.lock).
+    # corrupted (entries from $HOME/.cmind get written into the outer index.lock).
     for _v in ("GIT_INDEX_FILE", "GIT_DIR", "GIT_WORK_TREE", "GIT_OBJECT_DIRECTORY"):
         env.pop(_v, None)
     cmd = ["git", "-C", str(_inner_git_dir(workspace))] + list(args)
@@ -219,14 +219,14 @@ def _run_git(workspace: Path, *args: str, check: bool = False, timeout: int = 30
 # ---------------------------------------------------------------------------
 
 def ensure_inner_git(workspace: Path, *, initial_msg: Optional[str] = None) -> bool:
-    """Create ``~/.rpgkit/workspaces/<workspace-id>/.git`` if missing.
+    """Create ``~/.cmind/workspaces/<workspace-id>/.git`` if missing.
 
     Returns ``True`` when a fresh repo was created, ``False`` when it
     already existed or when setup was skipped (git missing, home dir
     unavailable, …).
 
     The home dir must already exist — it's the responsibility of
-    ``ensure_workspace_storage`` (called from ``rpgkit init/update``
+    ``ensure_workspace_storage`` (called from ``cmind init/update``
     earlier in the bootstrap) to create it.  We don't create it here
     because that requires picking a ``channel`` (bundle vs legacy),
     which is information only the caller has.
@@ -260,7 +260,7 @@ def ensure_inner_git(workspace: Path, *, initial_msg: Optional[str] = None) -> b
         pass
 
     # Initial commit — even if empty, it gives `git log` a starting point.
-    initial_msg = initial_msg or "[init] rpgkit workspace"
+    initial_msg = initial_msg or "[init] cmind workspace"
     _commit_all(workspace, initial_msg, allow_empty=True)
     return True
 
@@ -303,7 +303,7 @@ def _commit_all(workspace: Path, message: str, *, allow_empty: bool = False) -> 
     """Stage everything and commit.  Returns True iff a commit was created.
 
     Concurrent-safe: if the index lock is held by a parallel git process
-    (e.g. the post-commit hook firing ``rpgkit script update_graphs.py``
+    (e.g. the post-commit hook firing ``cmind script update_graphs.py``
     in the background), we retry once after a short sleep, then give up
     silently.  The next successful commit will fold in any deferred
     changes — no data is lost.
@@ -339,15 +339,15 @@ def _commit_all(workspace: Path, message: str, *, allow_empty: bool = False) -> 
 
 
 # ---------------------------------------------------------------------------
-# Public entry: after a `rpgkit script <X>` call
+# Public entry: after a `cmind script <X>` call
 # ---------------------------------------------------------------------------
 
 def _build_message(script_relpath: str, args: list[str], exit_code: int) -> str:
-    """Compose the inner-git commit message for a ``rpgkit script`` call.
+    """Compose the inner-git commit message for a ``cmind script`` call.
 
     Two output shapes:
 
-    * **Hook-triggered** (``RPGKIT_HOOK`` is set by ``rpgkit hook``)::
+    * **Hook-triggered** (``CMIND_HOOK`` is set by ``cmind hook``)::
 
           [hook:post-commit @ a1b2c3d] update-rpg
           [hook:pre-commit  @ a1b2c3d] sync --staged-only
@@ -356,7 +356,7 @@ def _build_message(script_relpath: str, args: list[str], exit_code: int) -> str:
       SHA are surfaced so ``git log`` in the inner repo reads as a
       timeline of *user activity*, not a timeline of internal scripts.
 
-    * **Manual** (no ``RPGKIT_HOOK``)::
+    * **Manual** (no ``CMIND_HOOK``)::
 
           [decoder] feature_build.py
           [encoder] rpg_encoder/run_encode.py --json
@@ -402,10 +402,10 @@ def auto_commit_after_script(
     args: list[str],
     exit_code: int,
 ) -> None:
-    """Snapshot ``.rpgkit/`` after a ``rpgkit script`` call completes.
+    """Snapshot ``.cmind/`` after a ``cmind script`` call completes.
 
     No-ops (silently) when any of:
-      * ``.rpgkit/.git`` is missing
+      * ``.cmind/.git`` is missing
       * the script matches a skip pattern
       * git is unavailable
       * the index is locked and the retry still fails
@@ -424,7 +424,7 @@ def auto_commit_after_script(
 
 
 # ---------------------------------------------------------------------------
-# `rpgkit version` helper
+# `cmind version` helper
 # ---------------------------------------------------------------------------
 
 def snapshot_count(workspace: Path) -> Optional[int]:

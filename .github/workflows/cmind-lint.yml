@@ -8,14 +8,14 @@ on:
     branches: [main]
     paths:
       - "CoderMind/**"
-      - ".github/workflows/rpgkit-*.yml"
-      - ".github/workflows/scripts/rpgkit/**"
+      - ".github/workflows/cmind-*.yml"
+      - ".github/workflows/scripts/cmind/**"
       - ".markdownlint-cli2.jsonc"
   pull_request:
     paths:
       - "CoderMind/**"
-      - ".github/workflows/rpgkit-*.yml"
-      - ".github/workflows/scripts/rpgkit/**"
+      - ".github/workflows/cmind-*.yml"
+      - ".github/workflows/scripts/cmind/**"
       - ".markdownlint-cli2.jsonc"
   workflow_dispatch:
 

@@ -2,7 +2,7 @@
 """BM25 Search Model for RPG Agent.
 
 Provides BM25-based retrieval for code entities and code content,
-using `rank_bm25` (already an RPG-Kit dependency) instead of the
+using `rank_bm25` (already an CoderMind dependency) instead of the
 heavier llama_index-based implementation in RPG-ZeroRepo.
 
 Ported from: RPG-ZeroRepo/zerorepo/rpg_encoder/rpg_agent/ops/bm25_model.py

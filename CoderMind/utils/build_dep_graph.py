@@ -8,8 +8,8 @@ dependency analysis (imports, invokes, inherits).
 Usage:
     python3 utils/build_dep_graph.py \
         --repo-dir ./repo \
-        --rpg-in .rpgkit/data/repo_rpg.json \
-        --rpg-out .rpgkit/data/rpg.json
+        --rpg-in .cmind/data/repo_rpg.json \
+        --rpg-out .cmind/data/rpg.json
 """
 
 import argparse
@@ -144,7 +144,7 @@ def _filter_build(file_id: str) -> bool:
         ".git", "__pycache__", "node_modules",
         ".venv", "venv", ".idea", ".vscode",
         ".pytest_cache", ".mypy_cache", "build", "dist",
-        ".rpgkit", ".venv_dev",
+        ".cmind", ".venv_dev",
     }
     FILE_BL = {
         "Makefile", "CMakeLists.txt", "Dockerfile",

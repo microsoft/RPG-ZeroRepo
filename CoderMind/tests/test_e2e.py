@@ -168,9 +168,9 @@ def sample_repo(tmp_path):
 
 
 @pytest.fixture
-def rpgkit_dir(tmp_path):
-    """Create a temporary .rpgkit directory."""
-    d = tmp_path / ".rpgkit"
+def cmind_dir(tmp_path):
+    """Create a temporary .cmind directory."""
+    d = tmp_path / ".cmind"
     d.mkdir()
     return str(d)
 
@@ -594,7 +594,7 @@ class TestE2EUpdate:
 class TestE2EFullPipeline:
     """Test the complete encode -> search -> update -> search cycle."""
 
-    def test_full_encode_search_update_cycle(self, encoded_rpg, rpgkit_dir):
+    def test_full_encode_search_update_cycle(self, encoded_rpg, cmind_dir):
         """Complete lifecycle test: encode, search, update, save, load."""
         rpg = encoded_rpg
 
@@ -642,14 +642,14 @@ class TestE2EFullPipeline:
         # Phase 5: Save the RPG
         save_result = WorkflowIntegration.save_rpg(
             rpg=rpg,
-            rpgkit_dir=rpgkit_dir,
+            cmind_dir=cmind_dir,
             message="E2E test save after update",
             source="mixed",
         )
         assert os.path.isfile(save_result["rpg_path"])
 
         # Phase 6: Load and verify
-        loaded = WorkflowIntegration.load_rpg(rpgkit_dir)
+        loaded = WorkflowIntegration.load_rpg(cmind_dir)
         assert loaded is not None
         assert loaded.repo_name == "sample_repo"
 
@@ -662,7 +662,7 @@ class TestE2EFullPipeline:
         assert context["repo_name"] == "sample_repo"
         assert "existing_interfaces" in context
 
-    def test_multi_step_evolution(self, encoded_rpg, rpgkit_dir):
+    def test_multi_step_evolution(self, encoded_rpg, cmind_dir):
         """Multiple sequential updates maintain RPG consistency."""
         rpg = encoded_rpg
 
@@ -711,10 +711,10 @@ class TestE2EFullPipeline:
 
         # Save and verify
         save_result = WorkflowIntegration.save_rpg(
-            rpg=rpg, rpgkit_dir=rpgkit_dir,
+            rpg=rpg, cmind_dir=cmind_dir,
             message="Multi-step evolution", source="mixed",
         )
-        loaded = WorkflowIntegration.load_rpg(rpgkit_dir)
+        loaded = WorkflowIntegration.load_rpg(cmind_dir)
         assert loaded.find_node_by_path("src/payment.py") is not None
         assert loaded.find_node_by_path("src/notification.py") is not None
         assert loaded.find_node_by_path("src/utils/helpers.py") is None
@@ -773,12 +773,12 @@ class TestE2ECLISimulation:
 
 
 # ============================================================================
-# 6. Compatibility: existing RPG-Kit features unaffected
+# 6. Compatibility: existing CoderMind features unaffected
 # ============================================================================
 
 
 class TestCompatibility:
-    """Verify that existing RPG-Kit functionality works alongside encoder."""
+    """Verify that existing CoderMind functionality works alongside encoder."""
 
     def test_rpg_basic_operations(self):
         """Basic RPG operations (add node, add edge, to_dict) still work.

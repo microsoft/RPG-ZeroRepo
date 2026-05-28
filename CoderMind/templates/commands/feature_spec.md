@@ -1,6 +1,6 @@
 ---
 description: Create structured feature specifications from user input or documentation files
-name: rpgkit.feature_spec
+name: cmind.feature_spec
 ---
 
 ## User Input
@@ -9,7 +9,7 @@ name: rpgkit.feature_spec
 $ARGUMENTS
 ```
 
-Text provided after `/rpgkit.feature_spec` will be used as the feature description. If empty, the agent will automatically detect and use files in the `docs/` directory.
+Text provided after `/cmind.feature_spec` will be used as the feature description. If empty, the agent will automatically detect and use files in the `docs/` directory.
 
 ## Capabilities
 
@@ -22,7 +22,7 @@ Text provided after `/rpgkit.feature_spec` will be used as the feature descripti
 ## Output Directory Structure
 
 ```text
-.rpgkit/data/feature_spec/
+.cmind/data/feature_spec/
 ├── evidence/                      # Step 2 output
 │   ├── user_input.md              # (from user input) or
 │   ├── 01_project_charter.md      # (from docs/)
@@ -50,7 +50,7 @@ If `$ARGUMENTS` is **not empty**:
 
 - **Mode**: User-provided description
 - **Input Length**: <character count> characters
-- **Output Directory**: .rpgkit/data/feature_spec/
+- **Output Directory**: .cmind/data/feature_spec/
 
 Processing user-provided feature description.
 ```
@@ -93,13 +93,13 @@ The feature specification process requires one of the following:
 
 1. **Provide a feature description as input:**
 
-   `/rpgkit.feature_spec <your feature description>`
+   `/cmind.feature_spec <your feature description>`
 
 2. **Place documentation files in the `docs/` directory:**
 
    Add requirement or design documents to the `docs/` directory, then run:
 
-   `/rpgkit.feature_spec`
+   `/cmind.feature_spec`
 ```
 
 → **Terminate agent execution**
@@ -126,7 +126,7 @@ Convert user input to Evidence file format.
 
 #### 2A.2: Generate Evidence File
 
-Create `.rpgkit/data/feature_spec/evidence/user_input.md`:
+Create `.cmind/data/feature_spec/evidence/user_input.md`:
 
 ```markdown
 # Evidence: user_input.md
@@ -163,7 +163,7 @@ Create `.rpgkit/data/feature_spec/evidence/user_input.md`:
 ```markdown
 ## ✓ User Input Processing Complete
 
-- **Evidence File**: .rpgkit/data/feature_spec/evidence/user_input.md
+- **Evidence File**: .cmind/data/feature_spec/evidence/user_input.md
 - **Background Entries**: <count>
 - **FR Entries**: <count>
 - **NFR Entries**: <count>
@@ -285,7 +285,7 @@ Project risks, external risks, operational processes, inter-document references,
 
 #### 2B.4: **Generate Evidence Files**
 
-For each document, create `.rpgkit/data/feature_spec/evidence/{document_name}.md`:
+For each document, create `.cmind/data/feature_spec/evidence/{document_name}.md`:
 
 ```markdown
 # Evidence: {document_name}.md
@@ -330,11 +330,11 @@ After processing each document:
 ## Document Processing Progress
 
 ### ✓ <filename1>.md
-- **Evidence File**: .rpgkit/data/feature_spec/evidence/<filename1>.md
+- **Evidence File**: .cmind/data/feature_spec/evidence/<filename1>.md
 - **Background**: <count> | **FR**: <count> | **NFR**: <count>
 
 ### ✓ <filename2>.md
-- **Evidence File**: .rpgkit/data/feature_spec/evidence/<filename2>.md
+- **Evidence File**: .cmind/data/feature_spec/evidence/<filename2>.md
 - **Background**: <count> | **FR**: <count> | **NFR**: <count>
 
 ...
@@ -355,7 +355,7 @@ Generate the main feature specification file containing Meta, Background, and NF
 
 #### 3.1: Read All Evidence Files
 
-Load all `.md` files from `.rpgkit/data/feature_spec/evidence/`.
+Load all `.md` files from `.cmind/data/feature_spec/evidence/`.
 
 #### 3.2: Determine Repository Information
 
@@ -405,7 +405,7 @@ Derive from evidence:
 
 #### 3.5: Generate feature_spec.md
 
-Create `.rpgkit/data/feature_spec/feature_spec.md`:
+Create `.cmind/data/feature_spec/feature_spec.md`:
 
 ```markdown
 # Feature Specification
@@ -449,7 +449,7 @@ Create `.rpgkit/data/feature_spec/feature_spec.md`:
 ```markdown
 ## ✓ Main File Generation Complete
 
-- **Output File**: .rpgkit/data/feature_spec/feature_spec.md
+- **Output File**: .cmind/data/feature_spec/feature_spec.md
 - **Repository Name**: {name}
 - **Background Entries**: <count>
 - **NFR Entries**: <count>
@@ -499,7 +499,7 @@ Read original excerpts from all FR evidence and cluster by feature semantics:
 
 #### 4.3: Generate Feature Files
 
-For each domain, create `.rpgkit/data/feature_spec/features/FT-{NNN}.md`:
+For each domain, create `.cmind/data/feature_spec/features/FT-{NNN}.md`:
 
 ```markdown
 # FT-001: {Domain Name}
@@ -607,7 +607,7 @@ Convert generated Markdown feature specification files to JSON format.
 Execute the following command:
 
 ```bash
-rpgkit script feature_spec_to_json.py
+cmind script feature_spec_to_json.py
 ```
 
 #### 5.2: Verify Output
@@ -615,10 +615,10 @@ rpgkit script feature_spec_to_json.py
 Confirm conversion results based on script log output. The script will output logs in a format similar to:
 
 ```text
-Parsing feature specification from: .rpgkit/data/feature_spec
+Parsing feature specification from: .cmind/data/feature_spec
 Include evidence: True
 
-Output written to: .rpgkit/data/feature_spec.json
+Output written to: .cmind/data/feature_spec.json
   - Repository: {name}
   - Background items: <count>
   - NFR items: <count>
@@ -631,7 +631,7 @@ Display results based on log information:
 ```markdown
 ## ✓ JSON Conversion Complete
 
-- **Output File**: .rpgkit/data/feature_spec.json
+- **Output File**: .cmind/data/feature_spec.json
 - **Repository**: {from log}
 - **Background Entries**: {from log}
 - **NFR Entries**: {from log}
@@ -654,10 +654,10 @@ Display results based on log information:
 
 | File | Description |
 |------|-------------|
-| .rpgkit/data/feature_spec/evidence/*.md | Evidence files |
-| .rpgkit/data/feature_spec/feature_spec.md | Main specification file |
-| .rpgkit/data/feature_spec/features/FT-*.md | Feature domain files |
-| .rpgkit/data/feature_spec.json | JSON format specification file |
+| .cmind/data/feature_spec/evidence/*.md | Evidence files |
+| .cmind/data/feature_spec/feature_spec.md | Main specification file |
+| .cmind/data/feature_spec/features/FT-*.md | Feature domain files |
+| .cmind/data/feature_spec.json | JSON format specification file |
 
 ### Statistics
 
@@ -674,7 +674,7 @@ Display results based on log information:
 
 To expand and build the feature tree, run:
 
-`/rpgkit.feature_build`
+`/cmind.feature_build`
 ```
 
 ---

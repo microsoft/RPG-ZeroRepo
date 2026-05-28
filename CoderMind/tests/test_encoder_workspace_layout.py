@@ -4,7 +4,7 @@
 The encoder entry points (``run_encode.py`` /
 ``run_update_rpg.py``) and the ``update_graphs.py sync`` hook all
 default to scanning :data:`common.paths.WORKSPACE_ROOT` — the
-directory the user ran ``rpgkit init --here`` in (their existing
+directory the user ran ``cmind init --here`` in (their existing
 source repository).  There is no ``repo/`` sub-convention to honour
 on the encoder side; the decoder pipeline writes code to ``REPO_DIR``
 through entirely separate entry points.
@@ -39,7 +39,7 @@ def _reload_paths_against(workspace: Path):
     layouts we must reload after chdir'ing.
     """
     os.chdir(workspace)
-    os.environ.pop("RPGKIT_WORKSPACE", None)
+    os.environ.pop("CMIND_WORKSPACE", None)
     import common.paths as paths_mod
     importlib.reload(paths_mod)
     return paths_mod
@@ -47,14 +47,14 @@ def _reload_paths_against(workspace: Path):
 
 @pytest.fixture
 def encoder_workspace(tmp_path, monkeypatch):
-    """A workspace with ``.rpgkit/`` but NO ``repo/`` subdirectory — the canonical encoder layout (``rpgkit init --here`` inside an existing code repository)."""
+    """A workspace with ``.cmind/`` but NO ``repo/`` subdirectory — the canonical encoder layout (``cmind init --here`` inside an existing code repository)."""
     ws = tmp_path / "enc_ws"
     ws.mkdir()
-    (ws / ".rpgkit").mkdir()
+    (ws / ".cmind").mkdir()
     (ws / "auth.py").write_text("def login(): pass\n")
     (ws / "db.py").write_text("def connect(): pass\n")
     monkeypatch.chdir(ws)
-    monkeypatch.delenv("RPGKIT_WORKSPACE", raising=False)
+    monkeypatch.delenv("CMIND_WORKSPACE", raising=False)
     return ws
 
 
@@ -69,11 +69,11 @@ def workspace_with_repo_subdir(tmp_path, monkeypatch):
     """
     ws = tmp_path / "ws_with_repo"
     ws.mkdir()
-    (ws / ".rpgkit").mkdir()
+    (ws / ".cmind").mkdir()
     (ws / "repo").mkdir()
     (ws / "repo" / "main.py").write_text("def main(): pass\n")
     monkeypatch.chdir(ws)
-    monkeypatch.delenv("RPGKIT_WORKSPACE", raising=False)
+    monkeypatch.delenv("CMIND_WORKSPACE", raising=False)
     return ws
 
 
@@ -113,7 +113,7 @@ def test_run_update_rpg_error_path_in_encoder_layout(encoder_workspace):
     import rpg_encoder.run_update_rpg as upd
     importlib.reload(upd)
 
-    rpg_path = encoder_workspace / ".rpgkit" / "data" / "rpg.json"
+    rpg_path = encoder_workspace / ".cmind" / "data" / "rpg.json"
     rpg_path.parent.mkdir(parents=True, exist_ok=True)
     rpg_path.write_text('{"repo_name": "test", "root": {}}')
 
@@ -167,7 +167,7 @@ def test_run_update_rpg_explicit_override_wins(
     explicit = tmp_path / "elsewhere"
     explicit.mkdir()
     (explicit / "x.py").write_text("x = 1\n")
-    rpg_path = workspace_with_repo_subdir / ".rpgkit" / "data" / "rpg.json"
+    rpg_path = workspace_with_repo_subdir / ".cmind" / "data" / "rpg.json"
     rpg_path.parent.mkdir(parents=True, exist_ok=True)
     rpg_path.write_text('{"repo_name": "test", "root": {}}')
 

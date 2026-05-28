@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Session Manager Module for RPG-Kit.
+"""Session Manager Module for CoderMind.
 
 Provides a base class and CLI-specific subclasses for managing AI CLI
 sessions: injecting tool-specific CLI arguments, preparing prompt
@@ -249,8 +249,8 @@ class ClaudeSessionManager(SessionManager):
     where ``<encoded-project-path>`` replaces ``/`` and ``_`` with ``-``.
     """
 
-    # Captured traces live under ``.rpgkit/logs/claude/`` so all
-    # RPG-Kit-managed artefacts stay inside ``.rpgkit/`` (single ignore
+    # Captured traces live under ``.cmind/logs/claude/`` so all
+    # CoderMind-managed artefacts stay inside ``.cmind/`` (single ignore
     # rule, single cleanup target).  ``CLAUDE_LOGS_DIR`` is an absolute
     # path anchored at the workspace root (see ``common.paths``); the
     # base :meth:`_dest_dir` detects this and uses it as-is rather than

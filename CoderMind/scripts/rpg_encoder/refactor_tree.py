@@ -4,7 +4,7 @@ Uses an LLM to iteratively refactor a codebase's parsed feature tree into
 a hierarchical RPG structure with three-level functional paths.
 
 Ported from RPG-ZeroRepo ``zerorepo/rpg_encoder/rpg_parsing/refactor_tree.py``
-with the following adaptations for RPG-Kit:
+with the following adaptations for CoderMind:
 - Uses ``LLMClient`` from ``scripts.common.llm_client``
 - Uses ``Memory`` / message types from ``scripts.common.llm_types``
 - Uses utility functions from ``scripts.common.utils``

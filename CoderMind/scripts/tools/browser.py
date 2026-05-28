@@ -38,7 +38,7 @@ from urllib.parse import urlparse
 # Constants
 # ---------------------------------------------------------------------------
 
-DEFAULT_OUTPUT_DIR = ".rpgkit/tmp/screenshots"
+DEFAULT_OUTPUT_DIR = ".cmind/tmp/screenshots"
 DEFAULT_TIMEOUT = 10000      # 10s per Playwright operation
 SCRIPT_TIMEOUT = 60          # 60s hard limit for run-script
 
@@ -350,7 +350,7 @@ def cmd_inspect(url: str, width: int = 1280, height: int = 720):
     and collects all useful information, saving files for later analysis.
 
     Output:
-        - Screenshot (.png) and HTML (.html) saved to .rpgkit/tmp/screenshots/
+        - Screenshot (.png) and HTML (.html) saved to .cmind/tmp/screenshots/
         - Prints: request URL, actual URL, title, status
         - Prints: all links with visibility
         - Prints: all forms with fields
@@ -554,7 +554,7 @@ def cmd_run_script(url: str, script: str, timeout: int = SCRIPT_TIMEOUT):
     Safety:
         - Hard timeout (default 60s) via SIGALRM
         - Browser always cleaned up via context manager
-        - On error: automatic screenshot saved to .rpgkit/tmp/screenshots/
+        - On error: automatic screenshot saved to .cmind/tmp/screenshots/
         - Restricted builtins (no os, subprocess, sys access)
     """
     with open_browser() as (pw, browser):
@@ -727,7 +727,7 @@ Examples:
   %(prog)s inspect http://localhost:5000/login
 
   # Screenshot only
-  %(prog)s screenshot http://localhost:5000/ -o .rpgkit/tmp/home.png
+  %(prog)s screenshot http://localhost:5000/ -o .cmind/tmp/home.png
 
   # Page structure
   %(prog)s accessibility-tree http://localhost:5000/
@@ -749,7 +749,7 @@ page.click("button[type=submit]")
 page.wait_for_load_state("networkidle")
 print("URL after login:", page.url)
 print("Title:", page.title())
-page.screenshot(path=".rpgkit/tmp/after_login.png", full_page=True)
+page.screenshot(path=".cmind/tmp/after_login.png", full_page=True)
 '
 """,
     )

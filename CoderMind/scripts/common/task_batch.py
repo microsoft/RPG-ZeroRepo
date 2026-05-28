@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""PlannedTask Data Class for RPG-Kit.
+"""PlannedTask Data Class for CoderMind.
 
 Represents a single planned implementation task.
 Each task contains one or more units from a single file to be

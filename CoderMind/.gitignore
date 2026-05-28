@@ -4,9 +4,9 @@ __pycache__/
 *.py[cod]
 *$py.class
 
-# --- RPG-Kit generated data & temp ---
-.rpgkit/data/
-.rpgkit/tmp/
+# --- CoderMind generated data & temp ---
+.cmind/data/
+.cmind/tmp/
 
 # --- Logs ---
 *.log
@@ -16,7 +16,7 @@ venv/
 .venv/
 .venv_dev/
 /env/
-.rpgkit_dev_env/
+.cmind_dev_env/
 
 # --- IDE ---
 .idea/
@@ -221,14 +221,14 @@ __marimo__/
 # Planning
 workspace*/
 plans/
-# --- RPG-Kit workspace symlinks ---
+# --- CoderMind workspace symlinks ---
 .claude
 
-# RPG-Kit ignores (managed by `rpgkit init/update`)
-.rpgkit/
+# CoderMind ignores (managed by `cmind init/update`)
+.cmind/
 # But DO commit the workspace AI config so collaborators get a sane default.
 # Plan: plans/01-package-bundle-and-ai-config.md decision 15.
-!.rpgkit/config.toml
+!.cmind/config.toml
 .vscode/mcp.json
 .vscode/tasks.json
 .mcp.json

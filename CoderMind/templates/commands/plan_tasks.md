@@ -1,5 +1,5 @@
 ---
-name: rpgkit.plan_tasks
+name: cmind.plan_tasks
 description: Plan implementation tasks from interface definitions
 ---
 
@@ -14,7 +14,7 @@ Create implementation tasks from the interface definitions.
 Run the check script to determine current state:
 
 ```bash
-rpgkit script check_tasks.py --json
+cmind script check_tasks.py --json
 ```
 
 **If type is "error"**:
@@ -60,7 +60,7 @@ rpgkit script check_tasks.py --json
 Run the task planner:
 
 ```bash
-rpgkit script plan_tasks.py
+cmind script plan_tasks.py
 ```
 
 The script writes a structured log automatically; stdout carries the
@@ -74,14 +74,14 @@ This will:
 4. Group into implementation tasks
 5. **Append the main entry point task** (main.py) as the final core task
 6. **Append project file tasks** (requirements.txt, README.md) as post-implementation tasks
-7. Save the ordered tasks to `.rpgkit/data/tasks.json`
+7. Save the ordered tasks to `.cmind/data/tasks.json`
 
 ### Step 3: Validation
 
 After generation, run the check script again:
 
 ```bash
-rpgkit script check_tasks.py --json
+cmind script check_tasks.py --json
 ```
 
 Verify:

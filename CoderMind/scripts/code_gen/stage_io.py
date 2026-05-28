@@ -3,7 +3,7 @@
 
 Each pipeline stage (``final_test``, ``smoke_test``, ``global_review``)
 writes its outcome to a JSON sidecar under
-``.rpgkit/logs/codegen_<name>.json`` so:
+``.cmind/logs/codegen_<name>.json`` so:
 
 * ``global_review`` can load earlier stages' findings without re-running
   them.
@@ -31,7 +31,7 @@ def stage_path(name: str):
 
 
 def save_stage_result(name: str, data: Dict[str, Any]) -> None:
-    """Save a stage result to ``.rpgkit/logs/codegen_<name>.json``.
+    """Save a stage result to ``.cmind/logs/codegen_<name>.json``.
 
     Each pipeline stage (final_test, smoke_test, global_review) saves
     its output independently. Global review loads all of them as context.

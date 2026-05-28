@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
-"""Tool Abstraction Layer for RPG-Kit.
+"""Tool Abstraction Layer for CoderMind.
 
 This module provides a unified tool abstraction for the RPG Agent, enabling
 standardized tool definition, parameter validation, execution, and result handling.
 
 Ported from RPG-ZeroRepo (zerorepo/rpg_gen/base/tools/) with adaptations for
-RPG-Kit's project structure and coding conventions.
+CoderMind's project structure and coding conventions.
 
 Key components:
 - Tool (ABC): Abstract base class for all agent tools

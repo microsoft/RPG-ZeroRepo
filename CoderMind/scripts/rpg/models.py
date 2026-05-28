@@ -439,7 +439,7 @@ class RPG:
 
         # Git sync state — see :meth:`set_git_meta`.  ``None`` means the RPG
         # has never been linked to a git commit (e.g. brand-new RPG produced
-        # by ``/rpgkit.build_skeleton``).  Persisted under top-level
+        # by ``/cmind.build_skeleton``).  Persisted under top-level
         # ``"meta": {"git": {...}}`` by :meth:`to_dict`.
         self.git_meta: Optional[Dict[str, Optional[str]]] = None
 
@@ -1080,7 +1080,7 @@ class RPG:
     def get_functional_areas(self) -> List[str]:
         """Return sorted names of top-level functional areas (L1 children of repo_node).
 
-        In RPG-Kit's tree structure, L1 children are directly accessed
+        In CoderMind's tree structure, L1 children are directly accessed
         via ``repo_node._children`` instead of scanning edges.
 
         Returns:
@@ -1109,7 +1109,7 @@ class RPG:
         """Visualize the RPG tree starting from L1 children.
 
         Ported from ZeroRepo ``RPG.visualize_dir_map`` (rpg.py:933-1158),
-        adapted for RPG-Kit's tree-based (``_children``) structure.
+        adapted for CoderMind's tree-based (``_children``) structure.
 
         Args:
             start: Starting node (Node or node ID). None = repo_node children.
@@ -1400,7 +1400,7 @@ class RPG:
         that become childless **along the affected branches only**.
 
         Ported from ZeroRepo ``RPG.delete_file_nodes`` (rpg.py:569),
-        adapted for RPG-Kit's tree-based (``_children``/``_parent``) structure.
+        adapted for CoderMind's tree-based (``_children``/``_parent``) structure.
 
         Args:
             file_paths: Relative file paths to delete, e.g.
@@ -1518,7 +1518,7 @@ class RPG:
         - Clean up empty parent nodes.
 
         Ported from ZeroRepo ``RPG.update_from_parsed_tree`` (rpg.py:656),
-        adapted for RPG-Kit's tree-based structure.
+        adapted for CoderMind's tree-based structure.
 
         Args:
             parsed_tree: ``{rel_path: {unit_name: features, ...}, ...}``
@@ -2600,7 +2600,7 @@ class RPG:
         """Restore RPG from a dictionary.
 
         Supports two formats:
-        - **RPG-Kit nested format**: Has ``root`` field with nested ``children``.
+        - **CoderMind nested format**: Has ``root`` field with nested ``children``.
         - **ZeroRepo flat format**: Has ``nodes`` array + ``edges`` for parent-child.
 
         Format is auto-detected by checking for the ``nodes`` key.
@@ -2635,7 +2635,7 @@ class RPG:
 
     @classmethod
     def _from_tree_dict(cls, data: Dict[str, Any]) -> "RPG":
-        """Restore from RPG-Kit nested tree format (``root`` + ``children``)."""
+        """Restore from CoderMind nested tree format (``root`` + ``children``)."""
         repo_name = data.get("repo_name", "repo")
         repo_info = data.get("repo_info", "")
         excluded_files = data.get("excluded_files", [])

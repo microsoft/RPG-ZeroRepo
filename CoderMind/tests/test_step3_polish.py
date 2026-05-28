@@ -32,7 +32,7 @@ sys.path.insert(0, str(_project_root))
 sys.path.insert(0, str(_project_root / "src"))
 sys.path.insert(0, str(_project_root / "scripts"))
 
-import rpgkit_cli  # noqa: E402
+import cmind_cli  # noqa: E402
 from rpg.models import RPG  # noqa: E402
 from rpg.service import RPGService  # noqa: E402
 
@@ -56,7 +56,7 @@ def test_resolve_git_hooks_dir_for_plain_repo(tmp_path):
     repo = tmp_path / "repo"
     repo.mkdir()
     _sh(repo, "init", "-q")
-    hooks = rpgkit_cli._resolve_git_hooks_dir(repo)
+    hooks = cmind_cli._resolve_git_hooks_dir(repo)
     assert hooks is not None
     assert hooks == repo / ".git" / "hooks"
     assert hooks.is_dir()
@@ -79,14 +79,14 @@ def test_resolve_git_hooks_dir_for_worktree(tmp_path):
     # Sanity: ``.git`` inside the worktree is indeed a file, not a dir
     assert (wt / ".git").is_file()
 
-    hooks = rpgkit_cli._resolve_git_hooks_dir(wt)
+    hooks = cmind_cli._resolve_git_hooks_dir(wt)
     assert hooks is not None, "worktree must resolve to a hooks dir"
     # Worktrees share the main repo's hooks
     assert hooks == main / ".git" / "hooks"
 
 
 def test_resolve_git_hooks_dir_for_non_git_returns_none(tmp_path):
-    assert rpgkit_cli._resolve_git_hooks_dir(tmp_path) is None
+    assert cmind_cli._resolve_git_hooks_dir(tmp_path) is None
 
 
 def test_resolve_git_hooks_dir_honors_core_hooks_path_override(tmp_path):
@@ -104,7 +104,7 @@ def test_resolve_git_hooks_dir_honors_core_hooks_path_override(tmp_path):
     custom_hooks.mkdir()
     _sh(repo, "config", "core.hooksPath", str(custom_hooks))
 
-    resolved = rpgkit_cli._resolve_git_hooks_dir(repo)
+    resolved = cmind_cli._resolve_git_hooks_dir(repo)
     assert resolved is not None
     assert resolved == custom_hooks
 
@@ -117,7 +117,7 @@ def test_resolve_git_hooks_dir_with_relative_core_hooks_path(tmp_path):
     (repo / ".husky").mkdir()
     _sh(repo, "config", "core.hooksPath", ".husky")
 
-    resolved = rpgkit_cli._resolve_git_hooks_dir(repo)
+    resolved = cmind_cli._resolve_git_hooks_dir(repo)
     assert resolved is not None
     assert resolved.resolve() == (repo / ".husky").resolve()
 
@@ -130,7 +130,7 @@ def test_resolve_git_hooks_dir_empty_core_hooks_path_falls_back(tmp_path):
     # Explicitly set then unset to exercise the empty-value path.
     _sh(repo, "config", "core.hooksPath", "")
 
-    resolved = rpgkit_cli._resolve_git_hooks_dir(repo)
+    resolved = cmind_cli._resolve_git_hooks_dir(repo)
     assert resolved is not None
     assert resolved == repo / ".git" / "hooks"
 
@@ -144,13 +144,13 @@ def test_install_pre_commit_hook_via_core_hooks_path(tmp_path):
     custom_hooks.mkdir()
     _sh(repo, "config", "core.hooksPath", str(custom_hooks))
 
-    assert rpgkit_cli._install_git_pre_commit_hook(repo) is True
+    assert cmind_cli._install_git_pre_commit_hook(repo) is True
 
     # Hook landed in the custom dir, NOT in .git/hooks.
     assert (custom_hooks / "pre-commit").is_file()
     assert not (repo / ".git" / "hooks" / "pre-commit").exists()
     text = (custom_hooks / "pre-commit").read_text()
-    assert "RPGKIT-BEGIN pre-commit" in text
+    assert "CMIND-BEGIN pre-commit" in text
     assert "--staged-only" in text
 
 
@@ -167,11 +167,11 @@ def test_install_pre_commit_hook_in_worktree(tmp_path):
     wt = tmp_path / "wt"
     _sh(main, "worktree", "add", "--detach", str(wt))
 
-    assert rpgkit_cli._install_git_pre_commit_hook(wt) is True
+    assert cmind_cli._install_git_pre_commit_hook(wt) is True
     # Hook landed in the shared hooks dir (main repo) not the worktree
     pre_commit = main / ".git" / "hooks" / "pre-commit"
     assert pre_commit.is_file()
-    assert "RPG-Kit: incremental RPG sync on commit" in pre_commit.read_text()
+    assert "CoderMind: incremental RPG sync on commit" in pre_commit.read_text()
 
 
 # ===========================================================================
@@ -192,7 +192,7 @@ def synced_repo_with_branch(tmp_path):
     _sh(repo, "commit", "-q", "-m", "c1")
     head = _sh(repo, "rev-parse", "HEAD")
 
-    data_dir = repo / ".rpgkit" / "data"
+    data_dir = repo / ".cmind" / "data"
     data_dir.mkdir(parents=True)
     rpg_path = data_dir / "rpg.json"
     dep_graph_path = data_dir / "dep_graph.json"
@@ -253,7 +253,7 @@ def test_status_text_omits_branch_when_detached(tmp_path):
     head = _sh(repo, "rev-parse", "HEAD")
     _sh(repo, "-c", "advice.detachedHead=false", "checkout", "-q", head)
 
-    data_dir = repo / ".rpgkit" / "data"
+    data_dir = repo / ".cmind" / "data"
     data_dir.mkdir(parents=True)
     rpg_path = data_dir / "rpg.json"
     dep_graph_path = data_dir / "dep_graph.json"
@@ -319,11 +319,11 @@ def test_noop_skips_refresh_when_nothing_changed(synced_repo_with_branch):
 
 
 def test_noop_respects_no_git_meta_env(synced_repo_with_branch, monkeypatch):
-    """``RPGKIT_NO_GIT_META=1`` must veto the branch refresh too."""
+    """``CMIND_NO_GIT_META=1`` must veto the branch refresh too."""
     repo, rpg_path, dep_graph_path, code, _ = synced_repo_with_branch
     _sh(repo, "branch", "-m", "develop")
 
-    monkeypatch.setenv("RPGKIT_NO_GIT_META", "1")
+    monkeypatch.setenv("CMIND_NO_GIT_META", "1")
     svc = RPGService.load(str(rpg_path))
     result = svc.sync_from_commit_diff(
         code_dir=str(code), workspace_root=str(repo),
@@ -344,11 +344,11 @@ def test_install_post_merge_hook_writes_script(tmp_path):
     repo.mkdir()
     _sh(repo, "init", "-q")
 
-    assert rpgkit_cli._install_git_post_merge_hook(repo) is True
+    assert cmind_cli._install_git_post_merge_hook(repo) is True
     post_merge = repo / ".git" / "hooks" / "post-merge"
     assert post_merge.is_file()
     content = post_merge.read_text()
-    assert "RPG-Kit: incremental RPG sync after merge / pull" in content
+    assert "CoderMind: incremental RPG sync after merge / pull" in content
     assert "update_graphs.py" in content and " sync " in content
     # post-merge fires AFTER files are in the working tree, no staging
     # area exists at that point — so the hook must NOT use --staged-only.
@@ -362,12 +362,12 @@ def test_install_post_merge_hook_is_idempotent(tmp_path):
     repo = tmp_path / "repo"
     repo.mkdir()
     _sh(repo, "init", "-q")
-    rpgkit_cli._install_git_post_merge_hook(repo)
-    rpgkit_cli._install_git_post_merge_hook(repo)
-    rpgkit_cli._install_git_post_merge_hook(repo)
+    cmind_cli._install_git_post_merge_hook(repo)
+    cmind_cli._install_git_post_merge_hook(repo)
+    cmind_cli._install_git_post_merge_hook(repo)
     post_merge = (repo / ".git" / "hooks" / "post-merge").read_text()
     # Marker appears exactly once
-    assert post_merge.count("RPG-Kit: incremental RPG sync after merge / pull") == 1
+    assert post_merge.count("CoderMind: incremental RPG sync after merge / pull") == 1
 
 
 def test_install_post_merge_hook_preserves_existing_user_hook(tmp_path):
@@ -380,22 +380,22 @@ def test_install_post_merge_hook_preserves_existing_user_hook(tmp_path):
     user_hook.write_text("#!/bin/sh\necho 'user custom hook'\n")
     user_hook.chmod(0o755)
 
-    rpgkit_cli._install_git_post_merge_hook(repo)
+    cmind_cli._install_git_post_merge_hook(repo)
     content = user_hook.read_text()
     assert "echo 'user custom hook'" in content
-    assert "RPG-Kit: incremental RPG sync after merge / pull" in content
+    assert "CoderMind: incremental RPG sync after merge / pull" in content
 
 
 def test_install_hooks_installs_both_pre_commit_and_post_merge(tmp_path):
     """End-to-end: ``_install_hooks`` should produce all three hooks."""
     project = tmp_path / "proj"
     project.mkdir()
-    (project / ".rpgkit" / "scripts").mkdir(parents=True)
+    (project / ".cmind" / "scripts").mkdir(parents=True)
     # Stub script so installer reports OK (only the path string matters)
-    (project / ".rpgkit" / "scripts" / "update_graphs.py").write_text("")
+    (project / ".cmind" / "scripts" / "update_graphs.py").write_text("")
     _sh(project, "init", "-q")
 
-    rpgkit_cli._install_hooks(project, "copilot", tracker=None)
+    cmind_cli._install_hooks(project, "copilot", tracker=None)
 
     pre_commit = project / ".git" / "hooks" / "pre-commit"
     post_commit = project / ".git" / "hooks" / "post-commit"
@@ -417,11 +417,11 @@ def test_install_post_commit_hook_writes_script(tmp_path):
     repo.mkdir()
     _sh(repo, "init", "-q")
 
-    assert rpgkit_cli._install_git_post_commit_hook(repo) is True
+    assert cmind_cli._install_git_post_commit_hook(repo) is True
     post_commit = repo / ".git" / "hooks" / "post-commit"
     assert post_commit.is_file()
     content = post_commit.read_text()
-    assert "RPG-Kit: advance meta.git + background feature graph update" in content
+    assert "CoderMind: advance meta.git + background feature graph update" in content
     assert "update_graphs.py" in content and " sync " in content
     assert "update-rpg" in content
     # Must unset GIT_INDEX_FILE to avoid hook env var leaking into
@@ -448,22 +448,22 @@ def test_install_post_commit_hook_is_idempotent(tmp_path):
     repo = tmp_path / "repo"
     repo.mkdir()
     _sh(repo, "init", "-q")
-    rpgkit_cli._install_git_post_commit_hook(repo)
-    rpgkit_cli._install_git_post_commit_hook(repo)
-    rpgkit_cli._install_git_post_commit_hook(repo)
+    cmind_cli._install_git_post_commit_hook(repo)
+    cmind_cli._install_git_post_commit_hook(repo)
+    cmind_cli._install_git_post_commit_hook(repo)
     text = (repo / ".git" / "hooks" / "post-commit").read_text()
-    assert text.count("RPG-Kit: advance meta.git + background feature graph update") == 1
+    assert text.count("CoderMind: advance meta.git + background feature graph update") == 1
 
 
 def test_workspace_root_resolution_prefers_cwd_over_env(tmp_path, monkeypatch):
-    """Regression: hooks spawned by ``git`` always have cwd at the repo root.  If a parent process previously set ``RPGKIT_WORKSPACE`` to a different workspace (e.g. the developer's RPG-Kit dev env), the inherited env var must NOT override the hook's actual workspace."""
+    """Regression: hooks spawned by ``git`` always have cwd at the repo root.  If a parent process previously set ``CMIND_WORKSPACE`` to a different workspace (e.g. the developer's CoderMind dev env), the inherited env var must NOT override the hook's actual workspace."""
     # Set up two distinct workspaces
     real_ws = tmp_path / "real-ws"
-    (real_ws / ".rpgkit").mkdir(parents=True)
+    (real_ws / ".cmind").mkdir(parents=True)
     decoy_ws = tmp_path / "decoy-ws"
-    (decoy_ws / ".rpgkit").mkdir(parents=True)
+    (decoy_ws / ".cmind").mkdir(parents=True)
 
-    monkeypatch.setenv("RPGKIT_WORKSPACE", str(decoy_ws))
+    monkeypatch.setenv("CMIND_WORKSPACE", str(decoy_ws))
     monkeypatch.chdir(real_ws)
 
     # Importing common.paths now should resolve to real_ws (cwd wins)

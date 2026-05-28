@@ -4,7 +4,7 @@ Tests cover:
 - EdgeType extension (COMPOSES, IMPORTS, is_hierarchy)
 - RPG new attributes (dep_graph, _dep_to_rpg_map)
 - RPG new query methods (get_node_by_id, get_nodes_by_type, etc.)
-- RPG-Kit nested format serialization round-trip
+- CoderMind nested format serialization round-trip
 - ZeroRepo flat format loading
 - Backward compatibility (existing to_dict/from_dict unchanged)
 """
@@ -333,7 +333,7 @@ class TestVisualizeDirMap:
 
 
 # ──────────────────────────────────────────────────────────────
-# Serialization: RPG-Kit nested format round-trip
+# Serialization: CoderMind nested format round-trip
 # ──────────────────────────────────────────────────────────────
 
 class TestNestedFormatRoundTrip:
@@ -381,7 +381,7 @@ class TestNestedFormatRoundTrip:
     def test_has_root_field(self, sample_rpg):
         d = sample_rpg.to_dict()
         assert "root" in d
-        assert "nodes" not in d  # RPG-Kit format has root, not nodes
+        assert "nodes" not in d  # CoderMind format has root, not nodes
         assert "_dep_to_rpg_map" in d
 
 

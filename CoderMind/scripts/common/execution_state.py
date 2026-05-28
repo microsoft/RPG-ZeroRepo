@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Execution State Management for RPG-Kit Code Generation.
+"""Execution State Management for CoderMind Code Generation.
 
 Manages the state of code generation execution, including:
 - Current batch being processed
@@ -8,7 +8,7 @@ Manages the state of code generation execution, including:
 - Git commit tracking
 
 This module handles state persistence between command invocations,
-which is essential since RPG-Kit uses multiple CLI sessions.
+which is essential since CoderMind uses multiple CLI sessions.
 """
 
 import json
@@ -395,7 +395,7 @@ def _count_total_tasks_from_tasks_json(state_path: Path = STATE_FILE) -> int:
     ``plan_tasks`` runs.
 
     The tasks.json path is derived from ``state_path`` (assumed to live in
-    the same ``.rpgkit/data/`` directory) so callers passing a custom
+    the same ``.cmind/data/`` directory) so callers passing a custom
     state_path see the matching tasks.json instead of the workspace
     default.
     """
@@ -729,7 +729,7 @@ def get_or_create_code_gen_trajectory(
     Returns:
         Trajectory instance (loaded or newly created)
     """
-    # Trajectory files live under .rpgkit/data/trajectory/ (workspace level),
+    # Trajectory files live under .cmind/data/trajectory/ (workspace level),
     # not inside repo/, so base_dir should be the workspace root.
     base_dir = base_dir or WORKSPACE_ROOT
     

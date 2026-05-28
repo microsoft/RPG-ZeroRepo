@@ -6,9 +6,9 @@ Function: Design repository file structure from component architecture
 - Step 2: Generate directory structure mapping components to directories
 - Step 3: Assign features to specific Python files using professional prompts
 
-Input: .rpgkit/feature_tree.json (component list from refactor step)
-Output: .rpgkit/skeleton.json (tree-structured file skeleton with feature assignments)
-       .rpgkit/repo_rpg.json (intermediate RPG structure)
+Input: .cmind/feature_tree.json (component list from refactor step)
+Output: .cmind/skeleton.json (tree-structured file skeleton with feature assignments)
+       .cmind/repo_rpg.json (intermediate RPG structure)
 """
 
 import json
@@ -42,14 +42,14 @@ from skeleton.skeleton_prompts import extract_features_from_subtree
 # Utility Functions
 # ============================================================================
 
-def convert_skeleton_to_rpgkit_format(skeleton: RepoSkeleton, rpg: RPG) -> Dict[str, Any]:
-    """Convert skeleton format to RPG-Kit's expected format.
+def convert_skeleton_to_cmind_format(skeleton: RepoSkeleton, rpg: RPG) -> Dict[str, Any]:
+    """Convert skeleton format to CoderMind's expected format.
 
     This ensures compatibility with existing validation and summary scripts.
     """
 
     def convert_node(node):
-        """Convert skeleton node to RPG-Kit format recursively."""
+        """Convert skeleton node to CoderMind format recursively."""
         result = {
             "type": "directory" if node.is_dir else "file",
             "name": node.name,
@@ -70,7 +70,7 @@ def convert_skeleton_to_rpgkit_format(skeleton: RepoSkeleton, rpg: RPG) -> Dict[
 
         return result
 
-    # Build RPG-Kit compatible output
+    # Build CoderMind compatible output
     output = {
         "repository_name": rpg.repo_name,
         "repository_purpose": rpg.repo_info,
@@ -195,7 +195,7 @@ class SkeletonBuilder:
             print(f"   [OK] Updated {paths_updated} nodes with path information")
 
             # Step 3: Convert and save results
-            print("\n[Step 3] Converting to RPG-Kit format...")
+            print("\n[Step 3] Converting to CoderMind format...")
             result = self._build_result()
             
             # Save updated RPG (with directory assignments)
@@ -278,9 +278,9 @@ class SkeletonBuilder:
             return False
 
     def _build_result(self) -> Dict[str, Any]:
-        """Build the final result dictionary in RPG-Kit format."""
-        # Convert to RPG-Kit compatible format
-        result = convert_skeleton_to_rpgkit_format(self.skeleton, self.rpg)
+        """Build the final result dictionary in CoderMind format."""
+        # Convert to CoderMind compatible format
+        result = convert_skeleton_to_cmind_format(self.skeleton, self.rpg)
 
         # Add statistics
         result["statistics"].update({
@@ -535,7 +535,7 @@ def patch_missing(input_data: Dict[str, Any]) -> Dict[str, Any]:
                 node.meta.path = feature_to_file[fp]
 
     # Re-convert and save
-    result = convert_skeleton_to_rpgkit_format(skeleton, rpg)
+    result = convert_skeleton_to_cmind_format(skeleton, rpg)
     result["statistics"].update({
         "rpg_nodes": len(rpg.nodes),
         "rpg_edges": len(rpg.edges),
@@ -624,7 +624,7 @@ def main():
     if not input_path.exists():
         logger.error(f"Input file not found: {input_path}")
         print(f"ERROR: Input file not found: {input_path}")
-        print("Please run /rpgkit.refactor_feature first.")
+        print("Please run /cmind.refactor_feature first.")
         return 1
 
     try:

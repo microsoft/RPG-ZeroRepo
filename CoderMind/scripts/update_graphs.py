@@ -13,11 +13,11 @@ Subcommands:
   full        AST scan + mappings + edges (legacy, use 'sync' instead)
 
 Usage:
-  rpgkit script update_graphs.py dep --json
-  rpgkit script update_graphs.py enrich --json
-  rpgkit script update_graphs.py enrich --file models/user.py --dry-run --json
-  rpgkit script update_graphs.py sync --json
-  rpgkit script update_graphs.py update-rpg --json
+  cmind script update_graphs.py dep --json
+  cmind script update_graphs.py enrich --json
+  cmind script update_graphs.py enrich --file models/user.py --dry-run --json
+  cmind script update_graphs.py sync --json
+  cmind script update_graphs.py update-rpg --json
 """
 
 import argparse
@@ -37,13 +37,13 @@ from common.rpg_io import safe_load_rpg  # noqa: E402
 
 # Shared message used by every subcommand that requires an existing
 # ``rpg.json`` (sync, update-rpg, ...).  Surfaces in two places:
-#   * ``.rpgkit/logs/update_rpg.log`` for the asynchronous post-commit
+#   * ``.cmind/logs/update_rpg.log`` for the asynchronous post-commit
 #     phase — where it's the user's only diagnostic.
 #   * stdout / JSON output for direct CLI invocations.
 # Keep the message single-line so it survives JSON serialisation cleanly
 # and stays easy to grep.
 _RPG_MISSING_MSG = (
-    "rpg.json not found at {rpg_path}. Run /rpgkit.encode in your AI agent "
+    "rpg.json not found at {rpg_path}. Run /cmind.encode in your AI agent "
     "to generate it; the post-commit hook will resume keeping it in sync "
     "on the next commit."
 )
@@ -104,7 +104,7 @@ def _refresh_rpg_html(rpg_path: Path) -> dict:
         data = load_rpg(str(rpg_path))
         html_content = generate_html(data)
         # rpg.html is a user-facing artefact: write it to the
-        # workspace's .rpgkit/reports/ (the home-side data/ holds
+        # workspace's .cmind/reports/ (the home-side data/ holds
         # only machine-consumed JSON).  This mirrors run_encode.py.
         RPG_HTML_FILE.parent.mkdir(parents=True, exist_ok=True)
         RPG_HTML_FILE.write_text(html_content, encoding="utf-8")
@@ -390,7 +390,7 @@ def cmd_update_rpg(
     Designed for post-commit background invocation via ``setsid``::
 
         setsid env -u GIT_INDEX_FILE -u GIT_DIR sh -c \
-            "cd <workspace>; rpgkit script update_graphs.py update-rpg --json >> log 2>&1" &
+            "cd <workspace>; cmind script update_graphs.py update-rpg --json >> log 2>&1" &
 
     Requires:
         - rpg.json exists (encode has been run)
@@ -431,7 +431,7 @@ def cmd_update_rpg(
     )
 
     # Create temporary worktree for previous commit.
-    worktree_dir = tempfile.mkdtemp(prefix="rpgkit_prev_")
+    worktree_dir = tempfile.mkdtemp(prefix="cmind_prev_")
     try:
         wt_proc = subprocess.run(
             ["git", "worktree", "add", worktree_dir, prev_ref, "--detach", "-q"],
@@ -494,7 +494,7 @@ def _auto_detect_code_dir(workspace_root: str, code_dir_arg: str = None) -> str:
     Returns the workspace root by default — matching the encoder
     entry points (``run_encode.py`` / ``run_update_rpg.py``) which
     also default to ``WORKSPACE_ROOT``.  This keeps all 3 entry
-    points consistent in encoder mode (``rpgkit init --here`` inside
+    points consistent in encoder mode (``cmind init --here`` inside
     an existing repo).
 
     An explicit ``code_dir_arg`` always wins; pass it when scanning
@@ -610,18 +610,18 @@ def _format_status_for_agent(status: dict) -> str:
         edges = status.get("rpg_edges", "?")
         repo = status.get("repo_name") or "unknown"
         lines.append(
-            f"[RPG-Kit] Repository Program Graph is available "
+            f"[CoderMind] Repository Program Graph is available "
             f"(repo={repo}, nodes={nodes}, edges={edges})."
         )
         if status.get("dep_graph_exists") and "dep_graph_error" not in status:
             dn = status.get("dep_nodes", "?")
             de = status.get("dep_edges", "?")
             lines.append(
-                f"[RPG-Kit] Dependency graph: {dn} nodes, {de} edges."
+                f"[CoderMind] Dependency graph: {dn} nodes, {de} edges."
             )
         elif "dep_graph_error" in status:
             lines.append(
-                f"[RPG-Kit] Dependency graph unavailable (parse error: "
+                f"[CoderMind] Dependency graph unavailable (parse error: "
                 f"{status['dep_graph_error']})."
             )
 
@@ -641,7 +641,7 @@ def _format_status_for_agent(status: dict) -> str:
         if last_short and cur_short:
             if in_sync:
                 lines.append(
-                    f"[RPG-Kit] Last synced at commit {last_short}"
+                    f"[CoderMind] Last synced at commit {last_short}"
                     f"{_branch_suffix(cur_branch or last_branch)} "
                     "(in sync with current HEAD)."
                 )
@@ -656,17 +656,17 @@ def _format_status_for_agent(status: dict) -> str:
                         f" (branch changed: '{last_branch}' → '{cur_branch}')"
                     )
                 lines.append(
-                    f"[RPG-Kit] Last synced at commit {last_short}"
+                    f"[CoderMind] Last synced at commit {last_short}"
                     f"{_branch_suffix(last_branch)}; "
                     f"current HEAD is {cur_short}"
                     f"{_branch_suffix(cur_branch)}{branch_note}. "
-                    "Run /rpgkit.update_rpg "
+                    "Run /cmind.update_rpg "
                     "(or commit to trigger the pre-commit sync hook) to "
                     "refresh the graph."
                 )
         elif last_short and not cur_short:
             lines.append(
-                f"[RPG-Kit] Last synced at commit {last_short}"
+                f"[CoderMind] Last synced at commit {last_short}"
                 f"{_branch_suffix(last_branch)}; git status "
                 "for the current workspace is unavailable."
             )
@@ -702,15 +702,15 @@ def _format_status_for_agent(status: dict) -> str:
         # File present but unreadable: tell the agent the graph is
         # NOT available so it doesn't waste a turn calling rpg-tools.
         lines.append(
-            f"[RPG-Kit] RPG file at {status.get('rpg_path')} could not "
+            f"[CoderMind] RPG file at {status.get('rpg_path')} could not "
             f"be parsed (error: {status['rpg_error']}). Graph-powered "
             "navigation is unavailable until it is rebuilt. Run "
-            "/rpgkit.encode to regenerate it."
+            "/cmind.encode to regenerate it."
         )
     else:
         lines.append(
-            "[RPG-Kit] No RPG found at "
-            f"{status.get('rpg_path')}. Run /rpgkit.encode to build the "
+            "[CoderMind] No RPG found at "
+            f"{status.get('rpg_path')}. Run /cmind.encode to build the "
             "Repository Program Graph and enable graph-powered code "
             "navigation via the rpg-tools MCP server."
         )
@@ -820,10 +820,10 @@ def main():
 
     # For background hook processes (setsid), cwd may not be the
     # workspace root.  Use the rpg file path to infer it:
-    # rpg_path = <workspace>/.rpgkit/data/rpg.json → workspace = rpg_path/../../../
-    if not os.path.isdir(os.path.join(workspace_root, ".rpgkit")):
+    # rpg_path = <workspace>/.cmind/data/rpg.json → workspace = rpg_path/../../../
+    if not os.path.isdir(os.path.join(workspace_root, ".cmind")):
         inferred = args.rpg.resolve().parent.parent.parent
-        if (inferred / ".rpgkit").is_dir():
+        if (inferred / ".cmind").is_dir():
             workspace_root = str(inferred)
             os.chdir(workspace_root)
 

@@ -1,4 +1,4 @@
-"""Unit tests for ``rpgkit_cli._storage``."""
+"""Unit tests for ``cmind_cli._storage``."""
 from __future__ import annotations
 
 import sys
@@ -8,12 +8,12 @@ import pytest
 
 # Make ``src/`` importable when running pytest directly from a clean
 # checkout (no ``pip install -e .`` step).  Same pattern as the other
-# rpgkit_cli unit tests in this directory.
+# cmind_cli unit tests in this directory.
 _SRC_DIR = Path(__file__).resolve().parents[1] / "src"
 if str(_SRC_DIR) not in sys.path:
     sys.path.insert(0, str(_SRC_DIR))
 
-from rpgkit_cli import _storage  # noqa: E402
+from cmind_cli import _storage  # noqa: E402
 
 
 # ---------------------------------------------------------------------------
@@ -121,7 +121,7 @@ class TestPathHelpers:
         self, fake_home: Path, workspace: Path
     ) -> None:
         d = _storage.home_workspace_dir(workspace)
-        assert d.is_relative_to(fake_home / ".rpgkit" / "workspaces")
+        assert d.is_relative_to(fake_home / ".cmind" / "workspaces")
         assert d.name == _storage.workspace_id(workspace)
 
     def test_data_logs_inner_git_under_home(
@@ -137,7 +137,7 @@ class TestPathHelpers:
     ) -> None:
         """Reports stay in the workspace, not in home."""
         reports = _storage.workspace_reports_dir(workspace)
-        assert reports == workspace.resolve() / ".rpgkit" / "reports"
+        assert reports == workspace.resolve() / ".cmind" / "reports"
 
     def test_legacy_hash_dir_fallback(
         self, fake_home: Path, workspace: Path
@@ -150,7 +150,7 @@ class TestPathHelpers:
         """
         # Plant a legacy directory but **no** slug-named one.
         legacy_dir = (
-            fake_home / ".rpgkit" / "workspaces" / _storage._legacy_workspace_id(workspace)
+            fake_home / ".cmind" / "workspaces" / _storage._legacy_workspace_id(workspace)
         )
         legacy_dir.mkdir(parents=True)
         assert _storage.home_workspace_dir(workspace) == legacy_dir
@@ -161,14 +161,14 @@ class TestPathHelpers:
         """When both legacy and slug dirs exist, the slug dir wins.
 
         Lets users migrate by simply creating the slug dir (or letting
-        the next ``rpgkit init`` do it) without manual cleanup.
+        the next ``cmind init`` do it) without manual cleanup.
         """
         legacy_dir = (
-            fake_home / ".rpgkit" / "workspaces" / _storage._legacy_workspace_id(workspace)
+            fake_home / ".cmind" / "workspaces" / _storage._legacy_workspace_id(workspace)
         )
         legacy_dir.mkdir(parents=True)
         slug_dir = (
-            fake_home / ".rpgkit" / "workspaces" / _storage.workspace_id(workspace)
+            fake_home / ".cmind" / "workspaces" / _storage.workspace_id(workspace)
         )
         slug_dir.mkdir(parents=True)
         assert _storage.home_workspace_dir(workspace) == slug_dir
@@ -181,8 +181,8 @@ class TestPathHelpers:
 class TestFindWorkspaceRoot:
     def _mark(self, ws: Path) -> None:
         """Plant the workspace marker file."""
-        (ws / ".rpgkit").mkdir(exist_ok=True)
-        (ws / ".rpgkit" / "config.toml").write_text("ai = 'claude'\n")
+        (ws / ".cmind").mkdir(exist_ok=True)
+        (ws / ".cmind" / "config.toml").write_text("ai = 'claude'\n")
 
     def test_finds_at_root(self, workspace: Path) -> None:
         self._mark(workspace)
@@ -216,14 +216,14 @@ class TestFindWorkspaceRoot:
         renamed) and the walker keeps climbing rather than misrouting."""
         self._mark(workspace)
         # Forge meta recording a *different* absolute path under
-        # ``~/.rpgkit/workspaces/<workspace-id>/.meta.toml``.
+        # ``~/.cmind/workspaces/<workspace-id>/.meta.toml``.
         meta_path = _storage.workspace_meta_path(workspace)
         meta_path.parent.mkdir(parents=True, exist_ok=True)
         meta_path.write_text(
             'channel = "bundle"\n'
             f'workspace_path = "{workspace.parent / "elsewhere"}"\n'
-            'rpgkit_cli_version_at_init = "0.1.4"\n'
-            'rpgkit_cli_version_last_seen = "0.1.4"\n'
+            'cmind_cli_version_at_init = "0.1.4"\n'
+            'cmind_cli_version_last_seen = "0.1.4"\n'
             'initialised_at = "2026-01-01T00:00:00+00:00"\n'
         )
         assert _storage.find_workspace_root_from(workspace) is None
@@ -245,14 +245,14 @@ class TestMeta:
         _storage.write_meta(
             workspace,
             channel=_storage.CHANNEL_BUNDLE,
-            rpgkit_cli_version="0.1.4",
+            cmind_cli_version="0.1.4",
         )
         data = _storage.read_meta(workspace)
         assert data is not None
         assert data["channel"] == "bundle"
         assert data["workspace_path"] == str(workspace.resolve())
-        assert data["rpgkit_cli_version_at_init"] == "0.1.4"
-        assert data["rpgkit_cli_version_last_seen"] == "0.1.4"
+        assert data["cmind_cli_version_at_init"] == "0.1.4"
+        assert data["cmind_cli_version_last_seen"] == "0.1.4"
         assert "created_at" in data
         assert "last_seen_at" in data
 
@@ -317,24 +317,24 @@ class TestMeta:
         _storage.write_meta(
             workspace,
             channel=_storage.CHANNEL_BUNDLE,
-            rpgkit_cli_version="0.1.4",
+            cmind_cli_version="0.1.4",
         )
         first = _storage.read_meta(workspace)
         assert first is not None
-        assert first["rpgkit_cli_version_at_init"] == "0.1.4"
+        assert first["cmind_cli_version_at_init"] == "0.1.4"
 
         _storage.write_meta(
             workspace,
             channel=_storage.CHANNEL_BUNDLE,
-            rpgkit_cli_version="0.2.0",
+            cmind_cli_version="0.2.0",
             preserve_created_at=False,
         )
         second = _storage.read_meta(workspace)
         assert second is not None
         # init_version should track the *current* call now, not the
         # previously-recorded one.
-        assert second["rpgkit_cli_version_at_init"] == "0.2.0"
-        assert second["rpgkit_cli_version_last_seen"] == "0.2.0"
+        assert second["cmind_cli_version_at_init"] == "0.2.0"
+        assert second["cmind_cli_version_last_seen"] == "0.2.0"
 
 
 # ---------------------------------------------------------------------------
@@ -402,8 +402,8 @@ class TestResolveDataFromCwd:
     def test_resolves_from_subdir(
         self, fake_home: Path, workspace: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        (workspace / ".rpgkit").mkdir()
-        (workspace / ".rpgkit" / "config.toml").write_text("")
+        (workspace / ".cmind").mkdir()
+        (workspace / ".cmind" / "config.toml").write_text("")
         sub = workspace / "src"
         sub.mkdir()
         monkeypatch.chdir(sub)

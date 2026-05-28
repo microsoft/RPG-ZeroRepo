@@ -194,8 +194,8 @@ python $GUI_TOOL screenshot
 `--file`. This guarantees the script is reusable in future review iterations:
 ```bash
 # Write the test script to the reusable scripts directory
-mkdir -p .rpgkit/tmp/gui_test_scripts
-cat > .rpgkit/tmp/gui_test_scripts/01_create_shape.py << 'PYEOF'
+mkdir -p .cmind/tmp/gui_test_scripts
+cat > .cmind/tmp/gui_test_scripts/01_create_shape.py << 'PYEOF'
 import time
 # Verify: selecting a tool and using it on the canvas
 gui.click(120, 45)       # open dropdown menu
@@ -207,7 +207,7 @@ time.sleep(0.5)
 gui.screenshot()         # verify result
 PYEOF
 # Run it
-python $GUI_TOOL run-script --file .rpgkit/tmp/gui_test_scripts/01_create_shape.py
+python $GUI_TOOL run-script --file .cmind/tmp/gui_test_scripts/01_create_shape.py
 ```
 This way the script file persists and can be replayed in the next iteration.
 
@@ -286,7 +286,7 @@ After fixing visual issues, re-inspect to verify the fix.
     - Stop any background project processes you started
     - Delete any test databases you created (e.g., test_review.db)
     - For GUI apps: run `gui.py close` then `gui.py stop-display`
-    - For GUI apps: your test scripts in `.rpgkit/tmp/gui_test_scripts/`
+    - For GUI apps: your test scripts in `.cmind/tmp/gui_test_scripts/`
       are already saved (you wrote them to files before running via `--file`).
       Do NOT delete them — future review iterations will replay them.
 12. Output the **Review Checklist** you've been building. Use this exact format:
@@ -479,11 +479,11 @@ python $GUI_TOOL screenshot
 ```
 
 **Multi-step interactions** — always write to a file first, then run via
-`--file`. Scripts saved under `.rpgkit/tmp/gui_test_scripts/` persist across
+`--file`. Scripts saved under `.cmind/tmp/gui_test_scripts/` persist across
 review iterations so the next agent can replay them:
 ```bash
-mkdir -p .rpgkit/tmp/gui_test_scripts
-cat > .rpgkit/tmp/gui_test_scripts/02_form_fill.py << 'PYEOF'
+mkdir -p .cmind/tmp/gui_test_scripts
+cat > .cmind/tmp/gui_test_scripts/02_form_fill.py << 'PYEOF'
 import time
 # Verify: dropdown selection + form fill + submit
 wid = gui.find_window("My App")
@@ -501,7 +501,7 @@ gui.key("Return")
 time.sleep(0.5)
 gui.screenshot()         # verify result
 PYEOF
-python $GUI_TOOL run-script --file .rpgkit/tmp/gui_test_scripts/02_form_fill.py
+python $GUI_TOOL run-script --file .cmind/tmp/gui_test_scripts/02_form_fill.py
 ```
 
 **Simple one-off scripts** (no need to persist):
@@ -652,10 +652,10 @@ def _collect_children(children: list, depth: int = 1, max_depth: int = 3) -> Lis
 def _load_gui_script_reuse_context(repo_path: Path) -> str:
     """Load reusable GUI interaction scripts for review prompt context.
 
-    Scripts are stored under ``repo/.rpgkit/tmp/gui_test_scripts`` and are
+    Scripts are stored under ``repo/.cmind/tmp/gui_test_scripts`` and are
     intended to capture stable, previously-validated interaction flows.
     """
-    scripts_dir = repo_path / ".rpgkit" / "tmp" / "gui_test_scripts"
+    scripts_dir = repo_path / ".cmind" / "tmp" / "gui_test_scripts"
     if not scripts_dir.is_dir():
         return "(No reusable GUI scripts found yet)"
 
@@ -1121,7 +1121,7 @@ def global_review(
 
         # Clean screenshots from previous iteration so size check is fresh
         try:
-            screenshots_dir = repo_path / ".rpgkit" / "tmp" / "screenshots"
+            screenshots_dir = repo_path / ".cmind" / "tmp" / "screenshots"
             if screenshots_dir.is_dir():
                 shutil.rmtree(screenshots_dir)
         except Exception:
@@ -1251,7 +1251,7 @@ def global_review(
         # self-reported metrics (which may be missing or malformed).
         if review_passed:
             try:
-                screenshots_dir = repo_path / ".rpgkit" / "tmp" / "screenshots"
+                screenshots_dir = repo_path / ".cmind" / "tmp" / "screenshots"
                 if screenshots_dir.is_dir():
                     png_files = list(screenshots_dir.glob("*.png"))
                     if png_files:

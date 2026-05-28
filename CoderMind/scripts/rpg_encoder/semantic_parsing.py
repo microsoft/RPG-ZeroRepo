@@ -10,7 +10,7 @@ The core class ``ParseFeatures`` orchestrates the full pipeline:
 5. Deduplicate summaries
 
 Ported from RPG-ZeroRepo ``zerorepo/rpg_encoder/rpg_parsing/semantic_parsing.py``
-with the following adaptations for RPG-Kit:
+with the following adaptations for CoderMind:
 - Uses ``LLMClient`` from ``scripts.common.llm_client``
 - Uses ``Memory`` / message types from ``scripts.common.llm_types``
 - Uses utility functions from ``scripts.common.utils``

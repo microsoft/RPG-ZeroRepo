@@ -1,17 +1,17 @@
 """Locate bundled core_pack assets inside the installed package.
 
 The bundle is created at wheel-build time by hatch's ``force-include``
-(see ``pyproject.toml``).  After ``uv tool install rpgkit-cli``, the
+(see ``pyproject.toml``).  After ``uv tool install cmind-cli``, the
 layout is::
 
-    <prefix>/lib/python3.x/site-packages/rpgkit_cli/
+    <prefix>/lib/python3.x/site-packages/cmind_cli/
         __init__.py
         _assets.py
         core_pack/
             scripts/         (full CoderMind/scripts/ tree)
             commands/        (full CoderMind/templates/commands/ tree)
 
-``rpgkit init`` and ``rpgkit update`` copy from here to the workspace
+``cmind init`` and ``cmind update`` copy from here to the workspace
 when bundle mode is active (the default).  When the bundle is absent
 (typically in an editable install where ``force-include`` does not run),
 :func:`available` returns ``False`` and callers should fall back to the
@@ -41,24 +41,24 @@ def core_pack_root() -> Path:
     Returns the path regardless of whether it exists on disk — callers
     should check :func:`available` before using the path.
     """
-    return Path(str(files("rpgkit_cli").joinpath("core_pack")))
+    return Path(str(files("cmind_cli").joinpath("core_pack")))
 
 
 def _dev_scripts_dir() -> Path | None:
     """Locate the repo-root ``scripts/`` directory for editable/dev installs.
 
-    When ``rpgkit-cli`` is installed in editable mode (``pip install -e .``
-    or ``uv run rpgkit ...`` from the source tree), hatch's
-    ``force-include`` does not populate ``rpgkit_cli/core_pack/``.  In
+    When ``cmind-cli`` is installed in editable mode (``pip install -e .``
+    or ``uv run cmind ...`` from the source tree), hatch's
+    ``force-include`` does not populate ``cmind_cli/core_pack/``.  In
     that case we fall back to the live source at ``<repo>/scripts/``,
     which sits two levels above this file::
 
         <repo>/
-            src/rpgkit_cli/_assets.py   ← __file__
+            src/cmind_cli/_assets.py   ← __file__
             scripts/                     ← target
     """
     here = Path(__file__).resolve()
-    # src/rpgkit_cli/_assets.py → repo = parents[2]
+    # src/cmind_cli/_assets.py → repo = parents[2]
     if len(here.parents) >= 3:
         candidate = here.parents[2] / "scripts"
         if candidate.is_dir():
@@ -88,10 +88,10 @@ def available() -> bool:
 
 
 def scripts_dir() -> Path:
-    """Directory containing the RPG-Kit pipeline scripts.
+    """Directory containing the CoderMind pipeline scripts.
 
     Resolution order:
-      1. Wheel bundle: ``<site-packages>/rpgkit_cli/core_pack/scripts/``
+      1. Wheel bundle: ``<site-packages>/cmind_cli/core_pack/scripts/``
       2. Dev/editable fallback: ``<repo>/scripts/``
 
     Falls back to the wheel path even when missing so error messages
@@ -129,7 +129,7 @@ def list_scripts() -> list[str]:
     """Return all script relative paths (POSIX-style) under :func:`scripts_dir`.
 
     Filters to ``.py`` files only, skips ``__pycache__`` directories,
-    and sorts alphabetically.  Used by ``rpgkit script --list``.
+    and sorts alphabetically.  Used by ``cmind script --list``.
     """
     root = scripts_dir()
     if not root.is_dir():

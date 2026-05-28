@@ -7,7 +7,7 @@ if [[ $# -ne 1 ]]; then
 fi
 
 RUN_NUMBER="$1"
-TAG_PREFIX="${TAG_PREFIX:-rpgkit-v}"
+TAG_PREFIX="${TAG_PREFIX:-cmind-v}"
 INITIAL_VERSION="${INITIAL_VERSION:-0.1.0}"
 
 write_output() {
@@ -31,6 +31,6 @@ TAG_NAME="${TAG_PREFIX}${NEW_VERSION#v}"
 
 write_output "new_version=$NEW_VERSION"
 write_output "tag_name=$TAG_NAME"
-echo "Latest stable RPG-Kit tag: $LATEST_TAG"
+echo "Latest stable CoderMind tag: $LATEST_TAG"
 echo "Pre-release version will be: $NEW_VERSION"
 echo "Pre-release tag will be: $TAG_NAME"

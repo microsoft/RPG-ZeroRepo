@@ -11,7 +11,7 @@ Core invariant under test:
 Anything weaker risks silent drift between incremental and full updates,
 which would mean the pre-commit hook (Step 3) and the codegen path
 (Step 4) gradually corrupt the graph in ways nobody notices until a
-``/rpgkit.update_rpg`` full rebuild reveals the discrepancy.
+``/cmind.update_rpg`` full rebuild reveals the discrepancy.
 
 We use small synthetic repos because the equivalence check is O(nodes
 + edges) and we want sub-second tests.  The cross-file semantic-edge

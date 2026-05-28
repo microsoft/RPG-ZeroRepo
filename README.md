@@ -12,7 +12,7 @@
 > [!NOTE]
 > **CoderMind** is the new name for **RPG-Kit**. The product has been renamed; the install command (`rpgkit`) and package (`rpgkit-cli`) will be renamed in a subsequent release.
 
-🔥 **New: [CoderMind](CoderMind/) (formerly RPG-Kit) is now open source for Claude Code and GitHub Copilot.**
+🔥 **New: [CoderMind](CoderMind/) is now open source for Claude Code and GitHub Copilot.**
 
 Coding agents often lose repository-level context across long tasks: requirements drift, architecture decisions disappear, and edits miss hidden dependencies.
 
@@ -24,7 +24,7 @@ The repository also includes the research code: **[ZeroRepo](#zerorepo-requireme
 
 ## News
 
-- [2026-05-15] 🚀 **CoderMind** (formerly RPG-Kit) is now open source for Claude Code and GitHub Copilot. It uses Repository Planning Graphs as a control layer for long-horizon coding agents, including planning, multi-file generation, repository understanding, and graph-aware updates.
+- [2026-05-15] 🚀 **CoderMind** is now open source for Claude Code and GitHub Copilot. It uses Repository Planning Graphs as a control layer for long-horizon coding agents, including planning, multi-file generation, repository understanding, and graph-aware updates.
 - [2026-05-01] 🎉 **RPG-Encoder** ([*Closing the Loop: Universal Repository Representation with RPG-Encoder*](https://arxiv.org/abs/2602.02084)) has been accepted to **ICML 2026**.
 - [2026-03-02] 🚀 We have open-sourced the **EpiCoder Feature Tree** at [Hugging Face](https://huggingface.co/datasets/microsoft/EpiCoder-meta-features), providing structured knowledge for repository planning in **ZeroRepo**.
 - [2026-02-27] 🚀 We released the code for [RPG-Encoder](zerorepo/rpg_encoder/) and [RepoCraft](repocraft/).
@@ -73,33 +73,33 @@ Coding agents are strong at local edits, but repository-level work requires dura
 |---|---|---|---|
 | **Build a new repository** | A natural-language requirement | Create an RPG plan, refine it into architecture/tasks, then generate code. | A persistent plan for long-horizon multi-file generation. |
 | **Understand an existing repository** | An existing codebase | Encode the repo into an RPG workspace, then search, explore, and explain through MCP tools (`search_rpg`, `explore_rpg`, `get_node_detail`). | A structured repository map beyond chat history and file search. |
-| **Update an existing repository** | A codebase + change request | Use the RPG to locate affected nodes, plan the edit, and update code and graph together (`/rpgkit.rpg_edit "..."`). | Graph-aware edits that account for cross-file dependencies. |
+| **Update an existing repository** | A codebase + change request | Use the RPG to locate affected nodes, plan the edit, and update code and graph together (`/cmind.rpg_edit "..."`). | Graph-aware edits that account for cross-file dependencies. |
 
 ### Quick Start
 
 ```bash
-uv tool install rpgkit-cli \
+uv tool install cmind-cli \
   --from "git+https://github.com/microsoft/RPG-ZeroRepo.git#subdirectory=CoderMind"
-rpgkit check
+cmind check
 ```
 
 **On an existing repository:**
 
 ```bash
 cd your-existing-repo
-rpgkit init . --encode
+cmind init . --encode
 # In Claude Code or GitHub Copilot:
-# /rpgkit.rpg_edit  "Add rate limiting to all API endpoints"
+# /cmind.rpg_edit  "Add rate limiting to all API endpoints"
 ```
 
 **Generate a new repository:**
 
 ```bash
-rpgkit init my-project
+cmind init my-project
 cd my-project
 # In Claude Code or GitHub Copilot:
-# /rpgkit.feature_spec  Build a CLI tool for managing Docker containers
-# /rpgkit.feature_build → /rpgkit.feature_refactor → ... → /rpgkit.code_gen
+# /cmind.feature_spec  Build a CLI tool for managing Docker containers
+# /cmind.feature_build → /cmind.feature_refactor → ... → /cmind.code_gen
 ```
 
 See [`CoderMind/README.md`](CoderMind/README.md) for the full setup, slash commands, and MCP tools.
@@ -111,8 +111,8 @@ CoderMind gives Claude Code and GitHub Copilot a **persistent RPG workspace** fo
 
 CoderMind exposes the RPG workspace through three interfaces:
 
-- **CLI setup** — initialize CoderMind in a new or existing repository with `rpgkit init`.
-- **Slash commands** — run build, understand, and update workflows inside the coding agent (`/rpgkit.feature_spec`, `/rpgkit.code_gen`, `/rpgkit.encode`, `/rpgkit.rpg_edit`, and more).
+- **CLI setup** — initialize CoderMind in a new or existing repository with `cmind init`.
+- **Slash commands** — run build, understand, and update workflows inside the coding agent (`/cmind.feature_spec`, `/cmind.code_gen`, `/cmind.encode`, `/cmind.rpg_edit`, and more).
 - **MCP graph tools** — let the agent search, inspect, and traverse RPG nodes during coding (`search_rpg`, `explore_rpg`, `get_node_detail`, `list_rpg_tree`).
 
 CoderMind can keep the RPG in sync with code changes through a post-commit hook, so edits made by the agent or directly in code can be reflected back into the graph.
@@ -121,9 +121,9 @@ CoderMind can keep the RPG in sync with code changes through a post-commit hook,
 
 ### CoderMind in action
 
-The graph below was produced by running `/rpgkit.encode` on this repository:
+The graph below was produced by running `/cmind.encode` on this repository:
 
-![RPG visualization of this repository](docs/rpgkit_visualized_graph.png)
+![RPG visualization of this repository](docs/cmind_visualized_graph.png)
 
 This illustrates how CoderMind turns an existing repository into an RPG that agents can search, explore, and use for graph-aware edits.
 

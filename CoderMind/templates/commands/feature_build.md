@@ -1,6 +1,6 @@
 ---
 description: Generate and iteratively refine the feature tree based on functional requirements.
-name: rpgkit.feature_build
+name: cmind.feature_build
 ---
 
 ## Workflow
@@ -19,7 +19,7 @@ This workflow has four steps:
 Execute the following command to check the current state of input/output files:
 
 ```bash
-rpgkit script feature_build_validation.py
+cmind script feature_build_validation.py
 ```
 
 **After execution, parse the JSON output and display a user-friendly summary.**
@@ -30,14 +30,14 @@ rpgkit script feature_build_validation.py
 
    - Inform the user about the issues based on the error information in the output
 
-   - Remind the user to run `/rpgkit.feature_spec` first to create a valid `.rpgkit/data/feature_spec.json`
+   - Remind the user to run `/cmind.feature_spec` first to create a valid `.cmind/data/feature_spec.json`
 
 2. **If `status` is `ready`:**
 
    1. If message = "Output exists", display the following information for user decision:
 
       ```markdown
-      Output file `.rpgkit/data/feature_build.json` already exists.
+      Output file `.cmind/data/feature_build.json` already exists.
       Continuing will expand the feature tree beyond the specification, adding features not described in the spec but practically necessary for production use.
       
       Please enter your choice:
@@ -61,7 +61,7 @@ The script automatically detects whether the output file (`feature_build.json`) 
 1. **Execute the command:**
 
    ```bash
-   rpgkit script feature_build.py --mode step1
+   cmind script feature_build.py --mode step1
    ```
 
    The script prints its full output on stdout and also writes a
@@ -115,7 +115,7 @@ After the spec-driven build is complete, ask the user whether they want to expan
    a. **Get expansion direction suggestions:**
 
       ```bash
-      rpgkit script feature_build.py --mode suggest-directions
+      cmind script feature_build.py --mode suggest-directions
       ```
 
       The JSON payload is printed on stdout (and the full log is
@@ -148,7 +148,7 @@ After the spec-driven build is complete, ask the user whether they want to expan
       Then pass the normalized indices to the script:
 
       ```bash
-      rpgkit script feature_build.py \
+      cmind script feature_build.py \
        --mode step2 \
        --direction "<normalized indices>"
       ```
@@ -156,7 +156,7 @@ After the spec-driven build is complete, ask the user whether they want to expan
       For example, if the user enters `1,3,5`:
 
       ```bash
-      rpgkit script feature_build.py \
+      cmind script feature_build.py \
        --mode step2 \
        --direction "1,3,5"
       ```
@@ -201,4 +201,4 @@ Report includes:
 
 - Feature tree generation status
 - Total feature count
-- Whether ready to proceed to the next phase (`/rpgkit.feature_refactor`)
+- Whether ready to proceed to the next phase (`/cmind.feature_refactor`)

@@ -1,8 +1,8 @@
-"""Centralized logging configuration for RPG-Kit scripts.
+"""Centralized logging configuration for CoderMind scripts.
 
 All scripts that produce non-trivial work should call
 :func:`setup_file_logging` once in their ``main()`` so that logs are
-captured to ``<workspace>/.rpgkit/logs/<name>.log`` for later inspection.
+captured to ``<workspace>/.cmind/logs/<name>.log`` for later inspection.
 
 Design goals
 ------------
@@ -14,7 +14,7 @@ Design goals
   script's own decision; this helper only attaches a *file* handler.
 * **Symlink-safe** — the log directory comes from ``common.paths``,
   which already resolves the workspace root correctly when
-  ``.rpgkit/scripts`` is a symlink in dev workflows.
+  ``.cmind/scripts`` is a symlink in dev workflows.
 * **Non-blocking on read-only filesystems** — if ``LOGS_DIR`` cannot be
   created or written to (e.g. CI, container, sandbox), the helper logs
   one warning to stderr and returns ``None`` instead of raising; the
@@ -27,7 +27,7 @@ Typical usage
     from common.logging_setup import setup_file_logging
 
     def main():
-        setup_file_logging("rpg_edit")          # → .rpgkit/logs/rpg_edit.log
+        setup_file_logging("rpg_edit")          # → .cmind/logs/rpg_edit.log
         # … rest of script …
 
 The single ``log_name`` argument is the file *stem*; the ``.log``
@@ -60,7 +60,7 @@ def setup_file_logging(
     datefmt: str = _DEFAULT_DATEFMT,
     logs_dir: Optional[Path] = None,
 ) -> Optional[Path]:
-    """Attach a file handler that writes script logs under ``.rpgkit/logs/``.
+    """Attach a file handler that writes script logs under ``.cmind/logs/``.
 
     The root logger is reconfigured (only its level, never its existing
     handlers) so the new file handler actually receives records at
@@ -69,7 +69,7 @@ def setup_file_logging(
 
     Args:
         log_name: Stem for the log file (``"rpg_edit"`` →
-            ``.rpgkit/logs/rpg_edit.log``).
+            ``.cmind/logs/rpg_edit.log``).
         level: Minimum level the file handler captures.  Defaults to
             ``DEBUG`` so verbose runs are inspectable after the fact.
         fmt: ``logging.Formatter`` format string.
@@ -90,7 +90,7 @@ def setup_file_logging(
         target_dir.mkdir(parents=True, exist_ok=True)
     except OSError as exc:
         print(
-            f"[rpgkit logging_setup] could not create {target_dir}: {exc}; "
+            f"[cmind logging_setup] could not create {target_dir}: {exc}; "
             "file logging disabled (console logs unaffected).",
             file=sys.stderr,
         )
@@ -109,7 +109,7 @@ def setup_file_logging(
         file_handler = logging.FileHandler(log_path, mode="a", encoding="utf-8")
     except OSError as exc:
         print(
-            f"[rpgkit logging_setup] could not open {log_path}: {exc}; "
+            f"[cmind logging_setup] could not open {log_path}: {exc}; "
             "file logging disabled (console logs unaffected).",
             file=sys.stderr,
         )

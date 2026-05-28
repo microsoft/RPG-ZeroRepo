@@ -8,9 +8,9 @@ Function: Design inter-component data flow as a directed acyclic graph (DAG)
 - Generates subtree processing order for later steps
 - Adds data flow dependencies as edges to repo_rpg.json
 
-Input: .rpgkit/skeleton.json (file structure with component info)
-Output: .rpgkit/data_flow.json (data flow edges and subtree order)
-        .rpgkit/repo_rpg.json (updated with data flow edges)
+Input: .cmind/skeleton.json (file structure with component info)
+Output: .cmind/data_flow.json (data flow edges and subtree order)
+        .cmind/repo_rpg.json (updated with data flow edges)
 """
 
 import json
@@ -314,7 +314,7 @@ def main():
     if not input_path.exists():
         logger.error(f"Input file not found: {input_path}")
         print(f"ERROR: Input file not found: {input_path}")
-        print("Please run /rpgkit.build_skeleton first.")
+        print("Please run /cmind.build_skeleton first.")
         return 1
 
     with open(input_path, "r", encoding="utf-8") as f:

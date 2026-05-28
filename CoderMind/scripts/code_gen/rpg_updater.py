@@ -726,7 +726,7 @@ def run_rpg_update(
     # filesystem path. The path is only used to populate ``source_file`` in
     # edge metadata, which feeds into edge ``description`` text injected into
     # LLM prompts. Absolute paths leak host-specific prefixes
-    # (e.g. /home/.../RPG-Kit-backup/...) and mislead agents.
+    # (e.g. /home/.../CoderMind-backup/...) and mislead agents.
     analyzer.analyze_file(Path(batch.file_path), code)
     analyzed_deps = analyzer.get_all_edges()
     

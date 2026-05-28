@@ -1,18 +1,18 @@
 #!/usr/bin/env python3
 """
-RPG-Kit Usage Statistics & Report Generator
+CoderMind Usage Statistics & Report Generator
 
-Reads JSONL telemetry logs from .rpgkit/logs/ and generates usage reports.
+Reads JSONL telemetry logs from .cmind/logs/ and generates usage reports.
 
 Usage:
     python utils/rpg_stats.py                  # print summary to stdout
-    python utils/rpg_stats.py --report         # write markdown report to .rpgkit/reports/
+    python utils/rpg_stats.py --report         # write markdown report to .cmind/reports/
     python utils/rpg_stats.py --json           # print summary as JSON
     python utils/rpg_stats.py --days 7         # only last 7 days
 
 Log files consumed:
-    .rpgkit/logs/mcp_calls.jsonl    — MCP tool invocations (search, explore, etc.)
-    .rpgkit/logs/hook_calls.jsonl   — git hook invocations (sync, update-rpg)
+    .cmind/logs/mcp_calls.jsonl    — MCP tool invocations (search, explore, etc.)
+    .cmind/logs/hook_calls.jsonl   — git hook invocations (sync, update-rpg)
 """
 
 import argparse
@@ -34,9 +34,9 @@ try:
 except ImportError:
     # Fallback for standalone usage
     _WS = Path.cwd()
-    MCP_CALLS_LOG = _WS / ".rpgkit" / "logs" / "mcp_calls.jsonl"
-    HOOK_CALLS_LOG = _WS / ".rpgkit" / "logs" / "hook_calls.jsonl"
-    REPORTS_DIR = _WS / ".rpgkit" / "reports"
+    MCP_CALLS_LOG = _WS / ".cmind" / "logs" / "mcp_calls.jsonl"
+    HOOK_CALLS_LOG = _WS / ".cmind" / "logs" / "hook_calls.jsonl"
+    REPORTS_DIR = _WS / ".cmind" / "reports"
 
 
 def _read_jsonl(path: Path, since: Optional[datetime] = None) -> List[dict]:
@@ -144,7 +144,7 @@ def generate_report(mcp_stats: dict, hook_stats: dict, days: Optional[int] = Non
     """Generate a Markdown usage report."""
     period = f"last {days} days" if days else "all time"
     lines = [
-        f"# RPG-Kit Usage Report",
+        f"# CoderMind Usage Report",
         f"",
         f"Period: **{period}**",
         f"Generated: {datetime.now().strftime('%Y-%m-%d %H:%M')}",
@@ -210,9 +210,9 @@ def generate_report(mcp_stats: dict, hook_stats: dict, days: Optional[int] = Non
 
 
 def main():
-    parser = argparse.ArgumentParser(description="RPG-Kit usage statistics")
+    parser = argparse.ArgumentParser(description="CoderMind usage statistics")
     parser.add_argument("--report", action="store_true",
-                        help="Write Markdown report to .rpgkit/reports/")
+                        help="Write Markdown report to .cmind/reports/")
     parser.add_argument("--json", action="store_true",
                         help="Output raw stats as JSON")
     parser.add_argument("--days", type=int, default=None,

@@ -2,7 +2,7 @@
 """RPG Builder.
 
 This module provides functionality to build RPG (Repository Program Graph)
-from RPG-Kit's refactor_feature.json input format.
+from CoderMind's refactor_feature.json input format.
 
 Key functions:
 - create_initial_rpg: Build RPG from component architecture
@@ -17,7 +17,7 @@ from .models import RPG, Node, NodeMetaData, NodeType, uuid8
 
 
 def create_initial_rpg(repo_data: Dict[str, Any]) -> RPG:
-    """Create initial RPG from RPG-Kit's refactor_feature.json data.
+    """Create initial RPG from CoderMind's refactor_feature.json data.
 
     Args:
         repo_data: Dictionary from refactor_feature.json containing:

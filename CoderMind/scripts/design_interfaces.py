@@ -10,12 +10,12 @@ Function: Design function/class interfaces for each file in the repository
 - Updates repo_rpg.json with dependency edges
 
 Input: 
-  - .rpgkit/skeleton.json (file structure with feature assignments)
-  - .rpgkit/data_flow.json (data flow with subtree order)
-  - .rpgkit/base_classes.json (base classes for context)
+  - .cmind/skeleton.json (file structure with feature assignments)
+  - .cmind/data_flow.json (data flow with subtree order)
+  - .cmind/base_classes.json (base classes for context)
 Output: 
-  - .rpgkit/interfaces.json (interfaces organized by subtree and file, with enhanced_data_flow)
-  - .rpgkit/repo_rpg.json (updated with fine-grained dependency edges)
+  - .cmind/interfaces.json (interfaces organized by subtree and file, with enhanced_data_flow)
+  - .cmind/repo_rpg.json (updated with fine-grained dependency edges)
 """
 
 import json
@@ -1134,7 +1134,7 @@ def main():
     if not skeleton_path.exists():
         logger.error(f"Skeleton file not found: {skeleton_path}")
         print(f"ERROR: Skeleton file not found: {skeleton_path}")
-        print("Please run /rpgkit.build_skeleton first.")
+        print("Please run /cmind.build_skeleton first.")
         return 1
 
     with open(skeleton_path, "r", encoding="utf-8") as f:
@@ -1152,7 +1152,7 @@ def main():
     else:
         logger.warning(f"Data flow file not found: {data_flow_path}")
         print(f"[WARNING] Warning: Data flow file not found: {data_flow_path}")
-        print("  Run /rpgkit.build_data_flow first for better results.")
+        print("  Run /cmind.build_data_flow first for better results.")
 
     # Load base classes
     base_classes_path = Path(args.base_classes)
@@ -1166,7 +1166,7 @@ def main():
     else:
         logger.warning(f"Base classes file not found: {base_classes_path}")
         print(f"[WARNING] Warning: Base classes file not found: {base_classes_path}")
-        print("  Run /rpgkit.design_base_classes first for better results.")
+        print("  Run /cmind.design_base_classes first for better results.")
 
     # Initialize trajectory
     trajectory = None

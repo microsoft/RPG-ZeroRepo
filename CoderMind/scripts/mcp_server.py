@@ -1,4 +1,4 @@
-"""RPG-Kit MCP Server.
+"""CoderMind MCP Server.
 
 Exposes RPG graph query tools via MCP (Model Context Protocol), allowing
 AI assistants to search, explore, and inspect RPG graphs interactively.
@@ -10,16 +10,16 @@ Tools provided:
 - ``list_rpg_tree``    -- browse RPG feature tree structure
 
 The server communicates over stdio (the standard MCP transport for
-CLI-based servers).  It ships inside the ``rpgkit-cli`` wheel and is
-launched by MCP clients via the ``rpgkit-mcp`` console script (which
+CLI-based servers).  It ships inside the ``cmind-cli`` wheel and is
+launched by MCP clients via the ``cmind-mcp`` console script (which
 ``.mcp.json`` / ``.vscode/mcp.json`` register as the ``rpg-tools``
-command — see ``rpgkit_cli.entries:mcp_main``).
+command — see ``cmind_cli.entries:mcp_main``).
 
 Run directly (for debugging)::
 
-    rpgkit-mcp [--rpg-file PATH]
+    cmind-mcp [--rpg-file PATH]
     # or equivalently:
-    rpgkit script mcp_server.py [--rpg-file PATH]
+    cmind script mcp_server.py [--rpg-file PATH]
 """
 
 import json
@@ -79,9 +79,9 @@ def _resolve_rpg_path() -> str:
 
     The default (``RPG_FILE``) is provided by
     :mod:`common.paths`, which resolves to
-    ``~/.rpgkit/workspaces/<workspace-id>/data/rpg.json`` for the current
+    ``~/.cmind/workspaces/<workspace-id>/data/rpg.json`` for the current
     workspace (discovered by walking up from cwd looking for
-    ``.rpgkit/config.toml``).  Callers running ``rpgkit-mcp`` from any
+    ``.cmind/config.toml``).  Callers running ``cmind-mcp`` from any
     subdirectory of a workspace therefore get the right RPG file
     automatically; ``--rpg-file`` is reserved for explicit overrides
     (test fixtures, alternative graphs, …).
@@ -95,13 +95,13 @@ def _resolve_rpg_path() -> str:
 
 
 # Standard message returned to the AI agent when the RPG graph isn't ready
-# (e.g. ``rpgkit init`` ran, but the encoder hasn't been run yet so
+# (e.g. ``cmind init`` ran, but the encoder hasn't been run yet so
 # the resolved ``rpg.json`` doesn't exist).  Kept short + actionable so
 # the agent will relay it verbatim to the user.  The hint omits the
 # concrete directory path; the actual location is reported as the
 # ``rpg_file`` field of :func:`_unavailable_payload`.
 _ENCODE_HINT = (
-    "RPG graph not generated yet. Ask the user to run **`/rpgkit.encode`** "
+    "RPG graph not generated yet. Ask the user to run **`/cmind.encode`** "
     "in this AI agent to build the workspace's `rpg.json`. Once it finishes, "
     "RPG tools will start working automatically on the next call — no need "
     "to restart the MCP server."
@@ -138,10 +138,10 @@ def create_mcp_server(rpg_file: str):
     Registers 4 MCP tools: search, explore, detail, and tree.
 
     The engine is loaded **lazily**: if ``rpg_file`` doesn't yet exist
-    (typical first-run flow — ``rpgkit init`` finished but the user
+    (typical first-run flow — ``cmind init`` finished but the user
     hasn't run the encoder yet), the server still starts cleanly and
     every tool returns an actionable ``rpg_unavailable`` payload pointing
-    the user at ``/rpgkit.encode``.  Once the encoder writes
+    the user at ``/cmind.encode``.  Once the encoder writes
     ``rpg.json`` the next tool call picks it up automatically — no
     restart needed.  This avoids the ``MCP error -32000: Connection
     closed`` failure mode that used to happen when the server exited
@@ -192,7 +192,7 @@ def create_mcp_server(rpg_file: str):
             "This server provides structured access to the Repository "
             "Program Graph (RPG) for the current workspace \u2014 a "
             "pre-computed, queryable index of the codebase built by "
-            "`/rpgkit.encode` and kept in sync with HEAD by a "
+            "`/cmind.encode` and kept in sync with HEAD by a "
             "post-commit hook.\n\n"
             "What the RPG knows about this repository:\n"
             "  \u2022 The feature hierarchy: functional areas \u2192 "
@@ -391,7 +391,7 @@ def create_mcp_server(rpg_file: str):
 
 
 # ---------------------------------------------------------------------------
-# Entry point: ``rpgkit-mcp`` console script (via rpgkit_cli.entries:mcp_main)
+# Entry point: ``cmind-mcp`` console script (via cmind_cli.entries:mcp_main)
 # or direct ``python <scripts_dir>/mcp_server.py [--rpg-file PATH]`` for
 # debugging.
 # ---------------------------------------------------------------------------
@@ -399,7 +399,7 @@ def create_mcp_server(rpg_file: str):
 def main() -> None:
     """Run the MCP server over stdio.
 
-    Used by both the ``rpgkit-mcp`` console-script entry (which sets up
+    Used by both the ``cmind-mcp`` console-script entry (which sets up
     ``sys.path`` then imports and calls this function) and the direct
     ``python mcp_server.py`` invocation under ``__main__``.
     """
@@ -407,12 +407,12 @@ def main() -> None:
     # NOTE: do NOT sys.exit when the file is missing.  The MCP transport
     # must stay up so the client can actually receive the
     # ``rpg_unavailable`` hint that tells the user to run
-    # ``/rpgkit.encode``.  Exiting here used to surface as the opaque
+    # ``/cmind.encode``.  Exiting here used to surface as the opaque
     # ``MCP error -32000: Connection closed`` on the client side.
     if not os.path.isfile(rpg_path):
         logger.warning(
             "RPG file not found: %s — server will start in degraded mode "
-            "and instruct the user to run /rpgkit.encode on the first tool call.",
+            "and instruct the user to run /cmind.encode on the first tool call.",
             rpg_path,
         )
 

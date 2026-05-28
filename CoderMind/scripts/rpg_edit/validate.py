@@ -47,7 +47,7 @@ def main():
     if not has_dep_graph and not args.dep_graph.exists():
         result = {"type": "error", "error_code": "dep_graph_not_found",
                   "message": f"dep_graph.json not found: {args.dep_graph}. "
-                             "Run `rpgkit script update_graphs.py sync` "
+                             "Run `cmind script update_graphs.py sync` "
                              "to build it from the current code."}
         print(json.dumps(result) if args.json else f"Error: {result['message']}")
         return 1

@@ -7,8 +7,8 @@ repository changes to an existing RPG graph.
 Prints a single JSON result to stdout with status and diff statistics.
 
 Usage:
-    rpgkit script rpg_encoder/run_update_rpg.py --json \\
-        --rpg-file .rpgkit/data/rpg.json --last-repo-dir ./old-version
+    cmind script rpg_encoder/run_update_rpg.py --json \\
+        --rpg-file .cmind/data/rpg.json --last-repo-dir ./old-version
 """
 
 import json
@@ -53,14 +53,14 @@ def run_update_rpg(
          this baseline.
     """
     # ``cur_repo_dir`` defaults to ``WORKSPACE_ROOT`` — the directory
-    # the user ran ``rpgkit init --here`` in (their existing source
+    # the user ran ``cmind init --here`` in (their existing source
     # repo).  Pass an explicit path to override.
     if cur_repo_dir is None:
         cur_repo_dir = str(WORKSPACE_ROOT)
     cur_repo_dir = os.path.abspath(cur_repo_dir)
     last_repo_dir = os.path.abspath(last_repo_dir)
     rpg_file = os.path.abspath(rpg_file)
-    # ``dep_graph_path`` defaults to the standard ``.rpgkit/data/dep_graph.json``
+    # ``dep_graph_path`` defaults to the standard ``.cmind/data/dep_graph.json``
     # location so that ``run_update_rpg.py`` (CLI) and the pre-commit
     # hook agree on a single canonical file.
     if dep_graph_path is None:
@@ -218,7 +218,7 @@ def main():
         default=None,
         help=(
             "Current repository directory. Defaults to the workspace "
-            "root (the directory containing ``.rpgkit/``)."
+            "root (the directory containing ``.cmind/``)."
         ),
     )
     parser.add_argument("--last-repo-dir", "-l", required=True, help="Previous version repo directory")
@@ -227,7 +227,7 @@ def main():
         "--dep-graph",
         default=None,
         help=(
-            "Path to write dep_graph.json (default: .rpgkit/data/dep_graph.json). "
+            "Path to write dep_graph.json (default: .cmind/data/dep_graph.json). "
             "Must match the path used by the pre-commit sync hook to avoid drift."
         ),
     )

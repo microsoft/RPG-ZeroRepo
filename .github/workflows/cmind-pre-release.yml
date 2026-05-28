@@ -6,8 +6,8 @@ on:
       - dev
     paths:
       - "CoderMind/**"
-      - ".github/workflows/rpgkit-pre-release.yml"
-      - ".github/workflows/scripts/rpgkit/**"
+      - ".github/workflows/cmind-pre-release.yml"
+      - ".github/workflows/scripts/cmind/**"
   workflow_dispatch:
 
 jobs:
@@ -26,28 +26,28 @@ jobs:
           token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Prepare scripts
-        run: chmod +x .github/workflows/scripts/rpgkit/*.sh
+        run: chmod +x .github/workflows/scripts/cmind/*.sh
 
       - name: Get CoderMind pre-release version
         id: get_tag
-        run: .github/workflows/scripts/rpgkit/get-next-pre-version.sh "${{ github.run_number }}"
+        run: .github/workflows/scripts/cmind/get-next-pre-version.sh "${{ github.run_number }}"
 
       - name: Check if release already exists
         id: check_release
-        run: .github/workflows/scripts/rpgkit/check-release-exists.sh "${{ steps.get_tag.outputs.tag_name }}"
+        run: .github/workflows/scripts/cmind/check-release-exists.sh "${{ steps.get_tag.outputs.tag_name }}"
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Create release package variants
         if: steps.check_release.outputs.exists == 'false'
-        run: .github/workflows/scripts/rpgkit/create-release-packages.sh "${{ steps.get_tag.outputs.new_version }}"
+        run: .github/workflows/scripts/cmind/create-release-packages.sh "${{ steps.get_tag.outputs.new_version }}"
 
       - name: Generate release notes
         if: steps.check_release.outputs.exists == 'false'
-        run: .github/workflows/scripts/rpgkit/generate-release-notes.sh "${{ steps.get_tag.outputs.new_version }}" "${{ steps.get_tag.outputs.latest_tag }}" pre
+        run: .github/workflows/scripts/cmind/generate-release-notes.sh "${{ steps.get_tag.outputs.new_version }}" "${{ steps.get_tag.outputs.latest_tag }}" pre
 
       - name: Create GitHub pre-release
         if: steps.check_release.outputs.exists == 'false'
-        run: .github/workflows/scripts/rpgkit/create-github-release.sh "${{ steps.get_tag.outputs.new_version }}" "${{ steps.get_tag.outputs.tag_name }}" pre
+        run: .github/workflows/scripts/cmind/create-github-release.sh "${{ steps.get_tag.outputs.new_version }}" "${{ steps.get_tag.outputs.tag_name }}" pre
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

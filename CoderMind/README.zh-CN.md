@@ -1,4 +1,4 @@
-<h1 align="center">RPG-Kit</h1>
+<h1 align="center">CoderMind</h1>
 
 <p align="center">
   <a href="README.md">English</a> |
@@ -12,9 +12,9 @@
 
 编码智能体擅长局部编辑，但仓库级任务如果缺少稳定的规划结构往往会失败：需求漂移、架构决策丢失、多文件生成前后不一致、更新可能错过隐藏依赖。
 
-RPG-Kit 为 Claude Code 和 GitHub Copilot 提供一个面向仓库级编码的**持久化 RPG 工作区**。这个工作区围绕一个 **Repository Planning Graph (RPG)** 构建，把需求、功能、架构、文件、代码实体和依赖关系连接在一起。
+CoderMind 为 Claude Code 和 GitHub Copilot 提供一个面向仓库级编码的**持久化 RPG 工作区**。这个工作区围绕一个 **Repository Planning Graph (RPG)** 构建，把需求、功能、架构、文件、代码实体和依赖关系连接在一起。
 
-借助 RPG-Kit，智能体可以通过图驱动的工作流来工作：
+借助 CoderMind，智能体可以通过图驱动的工作流来工作：
 
 - **构建（Build）**：把需求转换为 RPG 规划，然后生成一个多文件仓库。
 - **理解（Understand）**：把已有仓库映射为 RPG，然后搜索、浏览和解释它。
@@ -77,11 +77,11 @@ MCP Server: search_rpg / explore_rpg / get_node_detail / list_rpg_tree
 
 </details>
 
-### RPG-Kit 实际效果
+### CoderMind 实际效果
 
-下图是为本仓库生成的图可视化的一部分。运行 `/rpgkit.encode` 后，可以打开 `<workspace>/.rpgkit/reports/rpg.html` 浏览完整的交互式图。运行 `rpgkit version` 可以看到当前工作区的具体路径。
+下图是为本仓库生成的图可视化的一部分。运行 `/cmind.encode` 后，可以打开 `<workspace>/.cmind/reports/rpg.html` 浏览完整的交互式图。运行 `cmind version` 可以看到当前工作区的具体路径。
 
-![RPG-Kit repository graph visualization](../docs/rpgkit_visualized_graph.png)
+![CoderMind repository graph visualization](../docs/cmind_visualized_graph.png)
 
 ## 安装
 
@@ -92,38 +92,38 @@ MCP Server: search_rpg / explore_rpg / get_node_detail / list_rpg_tree
 - Git
 - 一个已安装并完成身份验证的 Coding Agent CLI：[GitHub Copilot](https://docs.github.com/en/copilot) 或 [Claude Code](https://docs.anthropic.com/en/docs/claude-code/setup)
 
-### 安装 RPG-Kit
+### 安装 CoderMind
 
 ```bash
 # 持久化安装（推荐）
-uv tool install rpgkit-cli --from "git+https://github.com/microsoft/RPG-ZeroRepo.git#subdirectory=RPG-Kit"
-rpgkit check
+uv tool install cmind-cli --from "git+https://github.com/microsoft/RPG-ZeroRepo.git#subdirectory=CoderMind"
+cmind check
 
 # 一次性使用
-uvx --from "git+https://github.com/microsoft/RPG-ZeroRepo.git#subdirectory=RPG-Kit" rpgkit init <project-name>
+uvx --from "git+https://github.com/microsoft/RPG-ZeroRepo.git#subdirectory=CoderMind" cmind init <project-name>
 ```
 
-从 `0.1.3` 开始，wheel 会把 pipeline scripts 和 slash-command templates 作为打包资源一起发布，因此 `rpgkit init` 可以离线工作（例如 air-gapped 环境、公司代理环境等）。
+从 `0.1.3` 开始，wheel 会把 pipeline scripts 和 slash-command templates 作为打包资源一起发布，因此 `cmind init` 可以离线工作（例如 air-gapped 环境、公司代理环境等）。
 
 ## 快速开始：新仓库
 
-当你希望 RPG-Kit 把需求转换为新代码库时，使用此路径。
+当你希望 CoderMind 把需求转换为新代码库时，使用此路径。
 
 > [!WARNING]
-> 对于生成代码量较大的项目，`/rpgkit.design_interfaces` 和 `/rpgkit.code_gen` 可能运行较长时间。典型例子：100 个 feature 大约需要 30 分钟。
+> 对于生成代码量较大的项目，`/cmind.design_interfaces` 和 `/cmind.code_gen` 可能运行较长时间。典型例子：100 个 feature 大约需要 30 分钟。
 
 1. 初始化一个新项目：
 
    ```bash
-   rpgkit init my-project
+   cmind init my-project
    cd my-project
    ```
 
    常见变体：
 
    ```bash
-   rpgkit init my-project --ai claude --script sh
-   rpgkit init my-project --ai copilot
+   cmind init my-project --ai claude --script sh
+   cmind init my-project --ai copilot
    ```
 
 2. **[可选]** 把你的需求文档放在 `my-project/docs/`。
@@ -133,45 +133,45 @@ uvx --from "git+https://github.com/microsoft/RPG-ZeroRepo.git#subdirectory=RPG-K
 4. 运行正向流水线：
 
    ```text
-   /rpgkit.feature_spec <feature description>
-   /rpgkit.feature_build
-   /rpgkit.feature_refactor
-   [Optional] /rpgkit.feature_edit <edit instructions>
-   /rpgkit.build_skeleton
-   /rpgkit.build_data_flow
-   /rpgkit.design_base_classes
-   /rpgkit.design_interfaces
-   /rpgkit.plan_tasks
-   /rpgkit.code_gen
-   [Optional] /rpgkit.rpg_edit <edit instructions>
+   /cmind.feature_spec <feature description>
+   /cmind.feature_build
+   /cmind.feature_refactor
+   [Optional] /cmind.feature_edit <edit instructions>
+   /cmind.build_skeleton
+   /cmind.build_data_flow
+   /cmind.design_base_classes
+   /cmind.design_interfaces
+   /cmind.plan_tasks
+   /cmind.code_gen
+   [Optional] /cmind.rpg_edit <edit instructions>
    ```
 
 > [!IMPORTANT]
 > **不同 Coding Agent 的调用方式略有不同**：
 >
-> - **Claude Code**：直接在对话中输入 `/rpgkit.feature_spec ...`，slash command 会被识别并触发对应 workflow。
-> - **GitHub Copilot CLI**：不支持 slash command（但支持自定义 agent），需要先 `/agent rpgkit.feature_spec` 切换到目标 agent，然后输入 `start` 让它执行内置的 workflow。
+> - **Claude Code**：直接在对话中输入 `/cmind.feature_spec ...`，slash command 会被识别并触发对应 workflow。
+> - **GitHub Copilot CLI**：不支持 slash command（但支持自定义 agent），需要先 `/agent cmind.feature_spec` 切换到目标 agent，然后输入 `start` 让它执行内置的 workflow。
 
-RPG-Kit 会渐进式地在 home-side 运行时目录（`~/.rpgkit/workspaces/<workspace-id>/data/rpg.json`）里创建 `rpg.json`，并用它把需求、规划产物、生成的代码和依赖信息保持对齐。你的工作区源文件不会被污染。
+CoderMind 会渐进式地在 home-side 运行时目录（`~/.cmind/workspaces/<workspace-id>/data/rpg.json`）里创建 `rpg.json`，并用它把需求、规划产物、生成的代码和依赖信息保持对齐。你的工作区源文件不会被污染。
 
 ## 快速开始：已有仓库
 
 当你已经有一个仓库，希望 AI 智能体在 RPG 上下文中理解或编辑它时，使用此路径。
 
 > [!WARNING]
-> 对于较大的项目，`rpgkit init . --encode` 和 `/rpgkit.encode` 可能运行较长时间。典型例子：200 个源文件大约需要 100 分钟。
+> 对于较大的项目，`cmind init . --encode` 和 `/cmind.encode` 可能运行较长时间。典型例子：200 个源文件大约需要 100 分钟。
 
-1. 在仓库根目录初始化 RPG-Kit 并构建初始图：
+1. 在仓库根目录初始化 CoderMind 并构建初始图：
 
    ```bash
    cd existing-repo/
-   rpgkit init . --encode # --encode 会根据当前的代码生成 RPG
+   cmind init . --encode # --encode 会根据当前的代码生成 RPG
    ```
 
    如果你想跳过非空目录的确认提示：
 
    ```bash
-   rpgkit init . --force --encode
+   cmind init . --force --encode
    ```
 
 2. 在仓库里启动你的 AI 编码智能体。
@@ -179,39 +179,39 @@ RPG-Kit 会渐进式地在 home-side 运行时目录（`~/.rpgkit/workspaces/<wo
 3. 【可选】通过 MCP 工具和 slash 命令使用生成的 RPG，以下命令只在手动运行时需要：
 
    ```text
-   /rpgkit.encode                                  # 需要时重建完整 RPG
-   /rpgkit.update_rpg                              # 手动增量更新（fallback）
-   /rpgkit.rpg_edit <edit instructions>            # 图感知的代码编辑
+   /cmind.encode                                  # 需要时重建完整 RPG
+   /cmind.update_rpg                              # 手动增量更新（fallback）
+   /cmind.rpg_edit <edit instructions>            # 图感知的代码编辑
    ```
 
-4. 每次 commit 后，RPG-Kit 安装的 git hook 会自动调用 `rpgkit hook <name>` 调度器，更新 RPG，与代码变更保持对齐。如果 hook 失败或被跳过，可以手动运行 `/rpgkit.update_rpg`。
+4. 每次 commit 后，CoderMind 安装的 git hook 会自动调用 `cmind hook <name>` 调度器，更新 RPG，与代码变更保持对齐。如果 hook 失败或被跳过，可以手动运行 `/cmind.update_rpg`。
 
-## `rpgkit init` 之后会发生什么
+## `cmind init` 之后会发生什么
 
-`rpgkit init` 不会修改你的源文件，**也不会在你的工作区写入运行时状态**。它只在你的工作区添加命令定义、MCP 配置和 hooks，所有 RPG-Kit 的运行时数据（产物、日志）都放在 home-side 目录 `~/.rpgkit/workspaces/<workspace-id>/` 下，其中 `<workspace-id>` 是根据工作区绝对路径生成的可读 slug（例如 `home-hys-projects-myrepo`）。
+`cmind init` 不会修改你的源文件，**也不会在你的工作区写入运行时状态**。它只在你的工作区添加命令定义、MCP 配置和 hooks，所有 CoderMind 的运行时数据（产物、日志）都放在 home-side 目录 `~/.cmind/workspaces/<workspace-id>/` 下，其中 `<workspace-id>` 是根据工作区绝对路径生成的可读 slug（例如 `home-hys-projects-myrepo`）。
 
 ```text
 my-project/
-├── docs/                 # /rpgkit.feature_spec 的可选需求文档
+├── docs/                 # /cmind.feature_spec 的可选需求文档
 ├── .github/ or .claude/  # AI 助手的命令定义和设置
 ├── .vscode/              # 适用时的 Copilot/VS Code MCP 配置
-├── .rpgkit/              # 包含生成的报告和配置文件
-└── .git/hooks/           # rpgkit init 装的 post-commit / post-merge（每个 hook 仅一行：`rpgkit hook <name>`）
+├── .cmind/              # 包含生成的报告和配置文件
+└── .git/hooks/           # cmind init 装的 post-commit / post-merge（每个 hook 仅一行：`cmind hook <name>`）
 ```
 
 完整的目录布局和数据文件参考见 [docs/project-structure.md](docs/project-structure.md)。
 
-## 更新 RPG-Kit
+## 更新 CoderMind
 
 ```bash
-uv tool install rpgkit-cli \
-  --from "git+https://github.com/microsoft/RPG-ZeroRepo.git#subdirectory=RPG-Kit" \
+uv tool install cmind-cli \
+  --from "git+https://github.com/microsoft/RPG-ZeroRepo.git#subdirectory=CoderMind" \
   --force \
   --reinstall
 
 # 对已有工作区进行更新
 cd <your-workspace>
-rpgkit update
+cmind update
 ```
 
 ## 支持的平台
@@ -234,20 +234,20 @@ rpgkit update
 
 ## 文档
 
-- [Slash 命令参考](docs/commands.md) —— 每一个 `/rpgkit.*` 命令的输入、输出和示例。
-- [CLI 参考](docs/cli-reference.md) —— `rpgkit init`、`rpgkit update`、`rpgkit check`、`rpgkit version` 以及所有选项。
+- [Slash 命令参考](docs/commands.md) —— 每一个 `/cmind.*` 命令的输入、输出和示例。
+- [CLI 参考](docs/cli-reference.md) —— `cmind init`、`cmind update`、`cmind check`、`cmind version` 以及所有选项。
 - [配置](docs/configuration.md) —— AI 助手设置、MCP 注册、hook、自动审批和故障排查。
-- [项目结构](docs/project-structure.md) —— RPG-Kit 创建的文件和目录。
+- [项目结构](docs/project-structure.md) —— CoderMind 创建的文件和目录。
 
 ## 即将推出的功能
 
-- **更简化的生成命令**：把当前多步骤的生成流程合并为更少的命令，例如 `/rpgkit.generate_repo`、`/rpgkit.generate_feature` 和 `/rpgkit.plan`。
+- **更简化的生成命令**：把当前多步骤的生成流程合并为更少的命令，例如 `/cmind.generate_repo`、`/cmind.generate_feature` 和 `/cmind.plan`。
 - **多语言支持**：增加对 Go、C++、Rust、JavaScript/TypeScript 等的支持。
 - **更多平台集成**：在不同系统上跨 CLI 和 VS Code 扩展工作流支持不同的 AI 编码智能体。
 
 ## 故障排查
 
-**找不到 AI 助手 CLI**：运行 `rpgkit check`，安装并完成所选助手 CLI 的身份验证，然后重新运行 `rpgkit init` 或 `rpgkit update`。
+**找不到 AI 助手 CLI**：运行 `cmind check`，安装并完成所选助手 CLI 的身份验证，然后重新运行 `cmind init` 或 `cmind update`。
 
 ## 许可证
 

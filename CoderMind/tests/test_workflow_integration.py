@@ -2,7 +2,7 @@
 """Tests for M13 Workflow Integration.
 
 Covers:
-  - RPGKitConfig: load from YAML, from_dict, defaults, validation, save
+  - CMindConfig: load from YAML, from_dict, defaults, validation, save
   - RPGVersionControl: save_version, rollback, diff, list_versions, pruning
   - WorkflowIntegration: prepare_for_codegen, merge_generated_code,
     save_rpg, load_rpg, detect_workflow_mode
@@ -38,13 +38,13 @@ from rpg.models import (
     uuid8,
 )
 from rpg_encoder.config import (
-    RPGKitConfig,
+    CMindConfig,
     WorkflowConfig,
     EncodeConfig,
     CodegenConfig,
     VersioningConfig,
     CONFIG_FILE_NAME,
-    RPGKIT_DIR_NAME,
+    CMIND_DIR_NAME,
     _parse_workflow,
 )
 from rpg_encoder.version_control import (
@@ -133,25 +133,25 @@ def simple_rpg():
 
 
 @pytest.fixture
-def tmp_rpgkit_dir():
-    """Create a temporary .rpgkit directory."""
+def tmp_cmind_dir():
+    """Create a temporary .cmind directory."""
     with tempfile.TemporaryDirectory() as tmpdir:
-        rpgkit_dir = os.path.join(tmpdir, RPGKIT_DIR_NAME)
-        os.makedirs(rpgkit_dir, exist_ok=True)
-        yield tmpdir, rpgkit_dir
+        cmind_dir = os.path.join(tmpdir, CMIND_DIR_NAME)
+        os.makedirs(cmind_dir, exist_ok=True)
+        yield tmpdir, cmind_dir
 
 
 # ============================================================================
-# Tests: RPGKitConfig
+# Tests: CMindConfig
 # ============================================================================
 
 
-class TestRPGKitConfig:
+class TestCMindConfig:
     """Tests for the configuration module."""
 
     def test_default_config(self):
         """Default config has expected values."""
-        config = RPGKitConfig()
+        config = CMindConfig()
         assert config.workflow.default_mode == "mixed"
         assert config.workflow.encode.auto_exclude == ["tests/", "docs/"]
         assert config.workflow.encode.run_data_flow is False
@@ -179,7 +179,7 @@ class TestRPGKitConfig:
                 },
             }
         }
-        config = RPGKitConfig.from_dict(data)
+        config = CMindConfig.from_dict(data)
         assert config.workflow.default_mode == "forward"
         assert config.workflow.encode.auto_exclude == ["vendor/"]
         assert config.workflow.encode.run_data_flow is True
@@ -191,7 +191,7 @@ class TestRPGKitConfig:
     def test_from_dict_partial(self):
         """Missing keys use defaults."""
         data = {"workflow": {"default_mode": "reverse"}}
-        config = RPGKitConfig.from_dict(data)
+        config = CMindConfig.from_dict(data)
         assert config.workflow.default_mode == "reverse"
         # Defaults for sub-configs
         assert config.workflow.encode.auto_exclude == ["tests/", "docs/"]
@@ -199,18 +199,18 @@ class TestRPGKitConfig:
 
     def test_from_dict_empty(self):
         """Empty dict gives full defaults."""
-        config = RPGKitConfig.from_dict({})
+        config = CMindConfig.from_dict({})
         assert config.workflow.default_mode == "mixed"
 
     def test_invalid_default_mode_falls_back(self):
         """Invalid default_mode falls back to 'mixed'."""
         data = {"workflow": {"default_mode": "invalid_mode"}}
-        config = RPGKitConfig.from_dict(data)
+        config = CMindConfig.from_dict(data)
         assert config.workflow.default_mode == "mixed"
 
     def test_to_dict_roundtrip(self):
         """to_dict produces data that from_dict can consume back."""
-        original = RPGKitConfig.from_dict({
+        original = CMindConfig.from_dict({
             "workflow": {
                 "default_mode": "forward",
                 "encode": {"auto_exclude": ["build/"]},
@@ -218,21 +218,21 @@ class TestRPGKitConfig:
             }
         })
         exported = original.to_dict()
-        restored = RPGKitConfig.from_dict(exported)
+        restored = CMindConfig.from_dict(exported)
         assert restored.workflow.default_mode == "forward"
         assert restored.workflow.encode.auto_exclude == ["build/"]
         assert restored.workflow.versioning.max_history == 20
 
-    def test_load_with_yaml_file(self, tmp_rpgkit_dir):
-        """Config.load reads from .rpgkit/config.yaml."""
-        repo_dir, rpgkit_dir = tmp_rpgkit_dir
+    def test_load_with_yaml_file(self, tmp_cmind_dir):
+        """Config.load reads from .cmind/config.yaml."""
+        repo_dir, cmind_dir = tmp_cmind_dir
         config_content = {
             "workflow": {
                 "default_mode": "reverse",
                 "versioning": {"max_history": 3},
             }
         }
-        config_path = os.path.join(rpgkit_dir, CONFIG_FILE_NAME)
+        config_path = os.path.join(cmind_dir, CONFIG_FILE_NAME)
         try:
             import yaml
             with open(config_path, "w") as f:
@@ -240,34 +240,34 @@ class TestRPGKitConfig:
         except ImportError:
             pytest.skip("PyYAML not installed")
 
-        config = RPGKitConfig.load(repo_dir)
+        config = CMindConfig.load(repo_dir)
         assert config.workflow.default_mode == "reverse"
         assert config.workflow.versioning.max_history == 3
         assert config.config_path == config_path
 
-    def test_load_no_file_gives_defaults(self, tmp_rpgkit_dir):
+    def test_load_no_file_gives_defaults(self, tmp_cmind_dir):
         """Config.load returns defaults when no config file exists."""
-        repo_dir, _ = tmp_rpgkit_dir
-        config = RPGKitConfig.load(repo_dir)
+        repo_dir, _ = tmp_cmind_dir
+        config = CMindConfig.load(repo_dir)
         assert config.workflow.default_mode == "mixed"
         assert config.config_path is None
 
-    def test_save_and_load(self, tmp_rpgkit_dir):
+    def test_save_and_load(self, tmp_cmind_dir):
         """save() creates a YAML file that load() can read."""
-        repo_dir, rpgkit_dir = tmp_rpgkit_dir
+        repo_dir, cmind_dir = tmp_cmind_dir
         try:
             import yaml
         except ImportError:
             pytest.skip("PyYAML not installed")
 
-        config = RPGKitConfig.from_dict(
+        config = CMindConfig.from_dict(
             {"workflow": {"default_mode": "forward"}},
-            rpgkit_dir=rpgkit_dir,
+            cmind_dir=cmind_dir,
         )
         saved_path = config.save()
         assert os.path.isfile(saved_path)
 
-        loaded = RPGKitConfig.load(repo_dir)
+        loaded = CMindConfig.load(repo_dir)
         assert loaded.workflow.default_mode == "forward"
 
     def test_parse_workflow_none(self):
@@ -295,10 +295,10 @@ class TestRPGVersionControl:
         assert _parse_version_from_filename("other.txt") is None
         assert _parse_version_from_filename("rpg.vabc.json") is None
 
-    def test_save_and_list(self, simple_rpg, tmp_rpgkit_dir):
+    def test_save_and_list(self, simple_rpg, tmp_cmind_dir):
         """save_version creates files; list_versions enumerates them."""
-        _, rpgkit_dir = tmp_rpgkit_dir
-        vc = RPGVersionControl(rpgkit_dir=rpgkit_dir, max_history=10)
+        _, cmind_dir = tmp_cmind_dir
+        vc = RPGVersionControl(cmind_dir=cmind_dir, max_history=10)
 
         v1 = vc.save_version(simple_rpg, message="First version")
         assert v1 == 1
@@ -312,39 +312,39 @@ class TestRPGVersionControl:
         assert versions[0]["message"] == "First version"
         assert versions[1]["version"] == 2
 
-    def test_save_with_source(self, simple_rpg, tmp_rpgkit_dir):
+    def test_save_with_source(self, simple_rpg, tmp_cmind_dir):
         """save_version stores source metadata."""
-        _, rpgkit_dir = tmp_rpgkit_dir
-        vc = RPGVersionControl(rpgkit_dir=rpgkit_dir)
+        _, cmind_dir = tmp_cmind_dir
+        vc = RPGVersionControl(cmind_dir=cmind_dir)
         vc.save_version(simple_rpg, message="Encoded", source="encoded")
 
         versions = vc.list_versions()
         assert versions[0]["source"] == "encoded"
 
-    def test_rollback(self, simple_rpg, tmp_rpgkit_dir):
+    def test_rollback(self, simple_rpg, tmp_cmind_dir):
         """Rollback loads RPG from a saved version."""
-        _, rpgkit_dir = tmp_rpgkit_dir
-        vc = RPGVersionControl(rpgkit_dir=rpgkit_dir)
+        _, cmind_dir = tmp_cmind_dir
+        vc = RPGVersionControl(cmind_dir=cmind_dir)
         vc.save_version(simple_rpg, message="Original")
 
         restored = vc.rollback(version=1)
         assert isinstance(restored, RPG)
         assert restored.repo_name == "test_repo"
         # Check that main rpg.json was also written
-        main_rpg = os.path.join(rpgkit_dir, "data", "rpg.json")
+        main_rpg = os.path.join(cmind_dir, "data", "rpg.json")
         assert os.path.isfile(main_rpg)
 
-    def test_rollback_nonexistent_raises(self, tmp_rpgkit_dir):
+    def test_rollback_nonexistent_raises(self, tmp_cmind_dir):
         """Rollback raises FileNotFoundError for missing versions."""
-        _, rpgkit_dir = tmp_rpgkit_dir
-        vc = RPGVersionControl(rpgkit_dir=rpgkit_dir)
+        _, cmind_dir = tmp_cmind_dir
+        vc = RPGVersionControl(cmind_dir=cmind_dir)
         with pytest.raises(FileNotFoundError):
             vc.rollback(version=999)
 
-    def test_diff_nodes(self, tmp_rpgkit_dir):
+    def test_diff_nodes(self, tmp_cmind_dir):
         """Diff detects added/removed nodes between versions."""
-        _, rpgkit_dir = tmp_rpgkit_dir
-        vc = RPGVersionControl(rpgkit_dir=rpgkit_dir)
+        _, cmind_dir = tmp_cmind_dir
+        vc = RPGVersionControl(cmind_dir=cmind_dir)
 
         # Version 1: small RPG
         rpg1 = RPG(repo_name="test")
@@ -366,10 +366,10 @@ class TestRPGVersionControl:
         assert "extra_node" in diff["nodes_added"]
         assert diff["summary"]["nodes_added"] >= 1
 
-    def test_diff_edges(self, tmp_rpgkit_dir):
+    def test_diff_edges(self, tmp_cmind_dir):
         """Diff detects added/removed non-containment edges."""
-        _, rpgkit_dir = tmp_rpgkit_dir
-        vc = RPGVersionControl(rpgkit_dir=rpgkit_dir)
+        _, cmind_dir = tmp_cmind_dir
+        vc = RPGVersionControl(cmind_dir=cmind_dir)
 
         rpg1 = RPG(repo_name="test")
         n1 = Node(id="n1", name="A", level=None)
@@ -394,17 +394,17 @@ class TestRPGVersionControl:
         diff = vc.diff(1, 2)
         assert diff["summary"]["edges_added"] >= 1
 
-    def test_diff_nonexistent_raises(self, tmp_rpgkit_dir):
+    def test_diff_nonexistent_raises(self, tmp_cmind_dir):
         """Diff raises FileNotFoundError for missing versions."""
-        _, rpgkit_dir = tmp_rpgkit_dir
-        vc = RPGVersionControl(rpgkit_dir=rpgkit_dir)
+        _, cmind_dir = tmp_cmind_dir
+        vc = RPGVersionControl(cmind_dir=cmind_dir)
         with pytest.raises(FileNotFoundError):
             vc.diff(1, 2)
 
-    def test_max_history_prunes(self, simple_rpg, tmp_rpgkit_dir):
+    def test_max_history_prunes(self, simple_rpg, tmp_cmind_dir):
         """save_version prunes old versions when max_history is exceeded."""
-        _, rpgkit_dir = tmp_rpgkit_dir
-        vc = RPGVersionControl(rpgkit_dir=rpgkit_dir, max_history=3)
+        _, cmind_dir = tmp_cmind_dir
+        vc = RPGVersionControl(cmind_dir=cmind_dir, max_history=3)
 
         for i in range(5):
             vc.save_version(simple_rpg, message=f"Version {i+1}")
@@ -414,10 +414,10 @@ class TestRPGVersionControl:
         # Oldest versions should have been pruned
         assert versions[0]["version"] == 3
 
-    def test_get_latest_version(self, simple_rpg, tmp_rpgkit_dir):
+    def test_get_latest_version(self, simple_rpg, tmp_cmind_dir):
         """get_latest_version returns the highest version number."""
-        _, rpgkit_dir = tmp_rpgkit_dir
-        vc = RPGVersionControl(rpgkit_dir=rpgkit_dir)
+        _, cmind_dir = tmp_cmind_dir
+        vc = RPGVersionControl(cmind_dir=cmind_dir)
         assert vc.get_latest_version() is None
 
         vc.save_version(simple_rpg, message="V1")
@@ -426,10 +426,10 @@ class TestRPGVersionControl:
         vc.save_version(simple_rpg, message="V2")
         assert vc.get_latest_version() == 2
 
-    def test_list_versions_empty_dir(self, tmp_rpgkit_dir):
+    def test_list_versions_empty_dir(self, tmp_cmind_dir):
         """list_versions returns empty list for fresh directory."""
-        _, rpgkit_dir = tmp_rpgkit_dir
-        vc = RPGVersionControl(rpgkit_dir=rpgkit_dir)
+        _, cmind_dir = tmp_cmind_dir
+        vc = RPGVersionControl(cmind_dir=cmind_dir)
         assert vc.list_versions() == []
 
 
@@ -620,46 +620,46 @@ class TestWorkflowIntegration:
         # Should not crash; may or may not add the file depending on parser
         assert isinstance(updated, RPG)
 
-    def test_save_rpg(self, simple_rpg, tmp_rpgkit_dir):
+    def test_save_rpg(self, simple_rpg, tmp_cmind_dir):
         """save_rpg writes to disk and creates a version."""
-        _, rpgkit_dir = tmp_rpgkit_dir
+        _, cmind_dir = tmp_cmind_dir
         result = WorkflowIntegration.save_rpg(
             rpg=simple_rpg,
-            rpgkit_dir=rpgkit_dir,
+            cmind_dir=cmind_dir,
             message="Test save",
             source="encoded",
         )
         assert os.path.isfile(result["rpg_path"])
         assert "version" in result
 
-    def test_save_rpg_without_versioning(self, simple_rpg, tmp_rpgkit_dir):
+    def test_save_rpg_without_versioning(self, simple_rpg, tmp_cmind_dir):
         """save_rpg with version_control=False skips versioning."""
-        _, rpgkit_dir = tmp_rpgkit_dir
+        _, cmind_dir = tmp_cmind_dir
         result = WorkflowIntegration.save_rpg(
             rpg=simple_rpg,
-            rpgkit_dir=rpgkit_dir,
+            cmind_dir=cmind_dir,
             message="No version",
             version_control=False,
         )
         assert os.path.isfile(result["rpg_path"])
         assert "version" not in result
 
-    def test_load_rpg(self, simple_rpg, tmp_rpgkit_dir):
+    def test_load_rpg(self, simple_rpg, tmp_cmind_dir):
         """load_rpg reads RPG from saved file."""
-        _, rpgkit_dir = tmp_rpgkit_dir
+        _, cmind_dir = tmp_cmind_dir
         WorkflowIntegration.save_rpg(
             rpg=simple_rpg,
-            rpgkit_dir=rpgkit_dir,
+            cmind_dir=cmind_dir,
             version_control=False,
         )
-        loaded = WorkflowIntegration.load_rpg(rpgkit_dir)
+        loaded = WorkflowIntegration.load_rpg(cmind_dir)
         assert loaded is not None
         assert loaded.repo_name == "test_repo"
 
-    def test_load_rpg_nonexistent(self, tmp_rpgkit_dir):
+    def test_load_rpg_nonexistent(self, tmp_cmind_dir):
         """load_rpg returns None when file doesn't exist."""
-        _, rpgkit_dir = tmp_rpgkit_dir
-        loaded = WorkflowIntegration.load_rpg(rpgkit_dir)
+        _, cmind_dir = tmp_cmind_dir
+        loaded = WorkflowIntegration.load_rpg(cmind_dir)
         assert loaded is None
 
     def test_detect_workflow_mode_no_rpg(self):
@@ -783,21 +783,21 @@ class TestInternalHelpers:
 class TestWorkflowScenarios:
     """Integration tests for the four workflow scenarios."""
 
-    def test_pure_reverse_scenario(self, simple_rpg, tmp_rpgkit_dir):
+    def test_pure_reverse_scenario(self, simple_rpg, tmp_cmind_dir):
         """Pure reverse: encode -> save -> load -> explore."""
-        _, rpgkit_dir = tmp_rpgkit_dir
+        _, cmind_dir = tmp_cmind_dir
 
         # Save the encoded RPG
         result = WorkflowIntegration.save_rpg(
             rpg=simple_rpg,
-            rpgkit_dir=rpgkit_dir,
+            cmind_dir=cmind_dir,
             message="Encoded from repo",
             source="encoded",
         )
         assert result["version"] == 1
 
         # Load it back
-        loaded = WorkflowIntegration.load_rpg(rpgkit_dir)
+        loaded = WorkflowIntegration.load_rpg(cmind_dir)
         assert loaded is not None
         assert loaded.repo_name == "test_repo"
 
@@ -805,14 +805,14 @@ class TestWorkflowScenarios:
         context = WorkflowIntegration.prepare_for_codegen(rpg=loaded)
         assert context["source"] == "encoded"
 
-    def test_mixed_enhance_scenario(self, simple_rpg, tmp_rpgkit_dir):
+    def test_mixed_enhance_scenario(self, simple_rpg, tmp_cmind_dir):
         """Mixed: encode -> save -> merge new code -> save."""
-        _, rpgkit_dir = tmp_rpgkit_dir
+        _, cmind_dir = tmp_cmind_dir
 
         # Step 1: Save encoded RPG
         WorkflowIntegration.save_rpg(
             rpg=simple_rpg,
-            rpgkit_dir=rpgkit_dir,
+            cmind_dir=cmind_dir,
             message="Initial encode",
             source="encoded",
         )
@@ -834,21 +834,21 @@ class TestWorkflowScenarios:
         # Step 4: Save updated RPG
         result = WorkflowIntegration.save_rpg(
             rpg=updated,
-            rpgkit_dir=rpgkit_dir,
+            cmind_dir=cmind_dir,
             message="Added helper module",
             source="mixed",
         )
         assert result["version"] == 2
 
         # Verify version history
-        vc = RPGVersionControl(rpgkit_dir=rpgkit_dir)
+        vc = RPGVersionControl(cmind_dir=cmind_dir)
         versions = vc.list_versions()
         assert len(versions) == 2
 
-    def test_iterative_scenario(self, simple_rpg, tmp_rpgkit_dir):
+    def test_iterative_scenario(self, simple_rpg, tmp_cmind_dir):
         """Iterative: merge -> save -> merge -> save -> diff."""
-        _, rpgkit_dir = tmp_rpgkit_dir
-        vc = RPGVersionControl(rpgkit_dir=rpgkit_dir)
+        _, cmind_dir = tmp_cmind_dir
+        vc = RPGVersionControl(cmind_dir=cmind_dir)
 
         # Iteration 1
         vc.save_version(simple_rpg, message="Before iteration 1")

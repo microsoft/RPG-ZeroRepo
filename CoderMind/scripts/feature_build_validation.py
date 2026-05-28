@@ -1,13 +1,13 @@
 #!/usr/bin/env python3
-"""Validate feature_spec.json (input) and feature_build.json (output) for /rpgkit.feature_build command.
+"""Validate feature_spec.json (input) and feature_build.json (output) for /cmind.feature_build command.
 
 This script checks:
-1. Input file: .rpgkit/data/feature_spec.json
+1. Input file: .cmind/data/feature_spec.json
    - File existence
    - Required fields: meta, background_and_overview, functional_requirements
    - Fields must exist and not be empty
 
-2. Output file: .rpgkit/data/feature_build.json
+2. Output file: .cmind/data/feature_build.json
    - File existence
    - Fields status: repository_name, repository_purpose, repository_specification, feature_tree
 
@@ -100,7 +100,7 @@ def count_nodes(nodes: List[Dict[str, Any]]) -> int:
 
 
 def validate_input_file() -> Dict[str, Any]:
-    """Validate the input file (.rpgkit/data/feature_spec.json)."""
+    """Validate the input file (.cmind/data/feature_spec.json)."""
     result = {
         "valid": False,
         "exists": False,
@@ -186,7 +186,7 @@ def validate_input_file() -> Dict[str, Any]:
 
 
 def check_output_file() -> Dict[str, Any]:
-    """Check the output file (.rpgkit/data/feature_build.json) status."""
+    """Check the output file (.cmind/data/feature_build.json) status."""
     result = {
         "exists": False,
         "has_content": False,

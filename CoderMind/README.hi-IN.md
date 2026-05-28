@@ -1,4 +1,4 @@
-<h1 align="center">RPG-Kit</h1>
+<h1 align="center">CoderMind</h1>
 
 <p align="center">
   <a href="README.md">English</a> |
@@ -12,9 +12,9 @@
 
 कोडिंग एजेंट्स लोकल संपादन में मजबूत होते हैं, लेकिन एक स्थिर प्लानिंग संरचना के बिना रिपॉज़िटरी-स्तर के कार्य अक्सर विफल हो जाते हैं। आवश्यकताएँ बहक जाती हैं, आर्किटेक्चर के निर्णय खो जाते हैं, मल्टी-फ़ाइल जनरेशन असंगत हो जाती है, और अपडेट छिपी हुई dependencies को मिस कर सकते हैं।
 
-RPG-Kit, Claude Code और GitHub Copilot को रिपॉज़िटरी-स्तर कोडिंग के लिए एक **persistent RPG workspace** देता है। यह वर्कस्पेस एक **Repository Planning Graph (RPG)** के चारों ओर बना है, जो आवश्यकताओं, features, आर्किटेक्चर, फ़ाइलों, कोड entities और dependencies को जोड़ता है।
+CoderMind, Claude Code और GitHub Copilot को रिपॉज़िटरी-स्तर कोडिंग के लिए एक **persistent RPG workspace** देता है। यह वर्कस्पेस एक **Repository Planning Graph (RPG)** के चारों ओर बना है, जो आवश्यकताओं, features, आर्किटेक्चर, फ़ाइलों, कोड entities और dependencies को जोड़ता है।
 
-RPG-Kit के साथ, एजेंट्स ग्राफ-संचालित वर्कफ़्लो के माध्यम से काम करते हैं:
+CoderMind के साथ, एजेंट्स ग्राफ-संचालित वर्कफ़्लो के माध्यम से काम करते हैं:
 
 - **Build (निर्माण)**: आवश्यकताओं को RPG प्लान में बदलें, फिर एक मल्टी-फ़ाइल रिपॉज़िटरी बनाएँ।
 - **Understand (समझें)**: किसी मौजूदा रिपॉज़िटरी को RPG में मैप करें, फिर खोजें, अन्वेषण करें और समझाएँ।
@@ -77,11 +77,11 @@ MCP Server: search_rpg / explore_rpg / get_node_detail / list_rpg_tree
 
 </details>
 
-### RPG-Kit वास्तविक उपयोग में
+### CoderMind वास्तविक उपयोग में
 
-नीचे दी गई छवि इस रिपॉज़िटरी के लिए जनरेट किए गए ग्राफ़ विज़ुअलाइज़ेशन का एक भाग है। `/rpgkit.encode` चलाने के बाद, पूर्ण इंटरैक्टिव ग्राफ़ देखने के लिए `<workspace>/.rpgkit/reports/rpg.html` खोलें। वर्तमान वर्कस्पेस के हल किए गए पथ देखने के लिए `rpgkit version` चलाएँ।
+नीचे दी गई छवि इस रिपॉज़िटरी के लिए जनरेट किए गए ग्राफ़ विज़ुअलाइज़ेशन का एक भाग है। `/cmind.encode` चलाने के बाद, पूर्ण इंटरैक्टिव ग्राफ़ देखने के लिए `<workspace>/.cmind/reports/rpg.html` खोलें। वर्तमान वर्कस्पेस के हल किए गए पथ देखने के लिए `cmind version` चलाएँ।
 
-![RPG-Kit repository graph visualization](../docs/rpgkit_visualized_graph.png)
+![CoderMind repository graph visualization](../docs/cmind_visualized_graph.png)
 
 ## इंस्टॉलेशन
 
@@ -92,38 +92,38 @@ MCP Server: search_rpg / explore_rpg / get_node_detail / list_rpg_tree
 - Git
 - एक इंस्टॉल और प्रमाणित AI कोडिंग एजेंट CLI: [GitHub Copilot](https://docs.github.com/en/copilot) या [Claude Code](https://docs.anthropic.com/en/docs/claude-code/setup)
 
-### RPG-Kit इंस्टॉल करें
+### CoderMind इंस्टॉल करें
 
 ```bash
 # Persistent इंस्टॉलेशन (अनुशंसित)
-uv tool install rpgkit-cli --from "git+https://github.com/microsoft/RPG-ZeroRepo.git#subdirectory=RPG-Kit"
-rpgkit check
+uv tool install cmind-cli --from "git+https://github.com/microsoft/RPG-ZeroRepo.git#subdirectory=CoderMind"
+cmind check
 
 # एक बार के उपयोग के लिए
-uvx --from "git+https://github.com/microsoft/RPG-ZeroRepo.git#subdirectory=RPG-Kit" rpgkit init <project-name>
+uvx --from "git+https://github.com/microsoft/RPG-ZeroRepo.git#subdirectory=CoderMind" cmind init <project-name>
 ```
 
-`0.1.3` से, wheel pipeline scripts और slash-command templates को packaged assets के रूप में शामिल करता है, इसलिए `rpgkit init` ऑफ़लाइन वातावरणों (जैसे air-gapped या corporate proxy वातावरण) में भी काम करता है।
+`0.1.3` से, wheel pipeline scripts और slash-command templates को packaged assets के रूप में शामिल करता है, इसलिए `cmind init` ऑफ़लाइन वातावरणों (जैसे air-gapped या corporate proxy वातावरण) में भी काम करता है।
 
 ## Quick Start: नई रिपॉज़िटरी
 
-जब आप RPG-Kit से आवश्यकताओं को एक नए कोडबेस में बदलवाना चाहते हैं, तब इस मार्ग का उपयोग करें।
+जब आप CoderMind से आवश्यकताओं को एक नए कोडबेस में बदलवाना चाहते हैं, तब इस मार्ग का उपयोग करें।
 
 > [!WARNING]
-> बहुत अधिक जनरेटेड कोड वाली परियोजनाओं के लिए, `/rpgkit.design_interfaces` और `/rpgkit.code_gen` को चलने में काफ़ी समय लग सकता है। उदाहरण: 100 features में लगभग 30 मिनट लगते हैं।
+> बहुत अधिक जनरेटेड कोड वाली परियोजनाओं के लिए, `/cmind.design_interfaces` और `/cmind.code_gen` को चलने में काफ़ी समय लग सकता है। उदाहरण: 100 features में लगभग 30 मिनट लगते हैं।
 
 1. नई परियोजना को आरंभीकृत करें:
 
    ```bash
-   rpgkit init my-project
+   cmind init my-project
    cd my-project
    ```
 
    सामान्य विकल्प:
 
    ```bash
-   rpgkit init my-project --ai claude --script sh
-   rpgkit init my-project --ai copilot
+   cmind init my-project --ai claude --script sh
+   cmind init my-project --ai copilot
    ```
 
 2. **[वैकल्पिक]** अपने आवश्यकता दस्तावेज़ `my-project/docs/` में रखें।
@@ -133,45 +133,45 @@ uvx --from "git+https://github.com/microsoft/RPG-ZeroRepo.git#subdirectory=RPG-K
 4. फॉरवर्ड पाइपलाइन चलाएँ:
 
    ```text
-   /rpgkit.feature_spec <feature description>
-   /rpgkit.feature_build
-   /rpgkit.feature_refactor
-   [Optional] /rpgkit.feature_edit <edit instructions>
-   /rpgkit.build_skeleton
-   /rpgkit.build_data_flow
-   /rpgkit.design_base_classes
-   /rpgkit.design_interfaces
-   /rpgkit.plan_tasks
-   /rpgkit.code_gen
-   [Optional] /rpgkit.rpg_edit <edit instructions>
+   /cmind.feature_spec <feature description>
+   /cmind.feature_build
+   /cmind.feature_refactor
+   [Optional] /cmind.feature_edit <edit instructions>
+   /cmind.build_skeleton
+   /cmind.build_data_flow
+   /cmind.design_base_classes
+   /cmind.design_interfaces
+   /cmind.plan_tasks
+   /cmind.code_gen
+   [Optional] /cmind.rpg_edit <edit instructions>
    ```
 
 > [!IMPORTANT]
 > **हर Coding Agent का इनवोकेशन थोड़ा अलग होता है**:
 >
-> - **Claude Code**: चैट में सीधे `/rpgkit.feature_spec ...` टाइप करें — slash command पहचाने जाते हैं और संबंधित workflow ट्रिगर हो जाता है।
-> - **GitHub Copilot CLI**: slash command समर्थित नहीं हैं (कस्टम agent समर्थित हैं), इसलिए पहले `/agent rpgkit.feature_spec` से लक्ष्य agent पर स्विच करें, फिर `start` टाइप करके इसका अंतर्निहित workflow चलाएँ।
+> - **Claude Code**: चैट में सीधे `/cmind.feature_spec ...` टाइप करें — slash command पहचाने जाते हैं और संबंधित workflow ट्रिगर हो जाता है।
+> - **GitHub Copilot CLI**: slash command समर्थित नहीं हैं (कस्टम agent समर्थित हैं), इसलिए पहले `/agent cmind.feature_spec` से लक्ष्य agent पर स्विच करें, फिर `start` टाइप करके इसका अंतर्निहित workflow चलाएँ।
 
-RPG-Kit क्रमिक रूप से `~/.rpgkit/workspaces/<workspace-id>/data/rpg.json` बनाता है और इसका उपयोग आवश्यकताओं, प्लानिंग आउटपुट, जनरेटेड कोड और dependency जानकारी को संरेखित रखने के लिए करता है। आपके वर्कस्पेस की स्रोत फ़़ाइलें दूषित नहीं होंगी।
+CoderMind क्रमिक रूप से `~/.cmind/workspaces/<workspace-id>/data/rpg.json` बनाता है और इसका उपयोग आवश्यकताओं, प्लानिंग आउटपुट, जनरेटेड कोड और dependency जानकारी को संरेखित रखने के लिए करता है। आपके वर्कस्पेस की स्रोत फ़़ाइलें दूषित नहीं होंगी।
 
 ## Quick Start: मौजूदा रिपॉज़िटरी
 
 जब आपके पास पहले से एक रिपॉज़िटरी है और आप चाहते हैं कि AI एजेंट इसे RPG कॉन्टेक्स्ट के साथ समझे या संपादित करे, तब इस मार्ग का उपयोग करें।
 
 > [!WARNING]
-> बड़ी परियोजनाओं के लिए, `rpgkit init . --encode` और `/rpgkit.encode` को चलने में काफ़ी समय लग सकता है। उदाहरण: 200 स्रोत फ़ाइलों में लगभग 100 मिनट लगते हैं।
+> बड़ी परियोजनाओं के लिए, `cmind init . --encode` और `/cmind.encode` को चलने में काफ़ी समय लग सकता है। उदाहरण: 200 स्रोत फ़ाइलों में लगभग 100 मिनट लगते हैं।
 
-1. रिपॉज़िटरी रूट में RPG-Kit को आरंभीकृत करें और प्रारंभिक ग्राफ़ बनाएँ:
+1. रिपॉज़िटरी रूट में CoderMind को आरंभीकृत करें और प्रारंभिक ग्राफ़ बनाएँ:
 
    ```bash
    cd existing-repo/
-   rpgkit init . --encode    # --encode वर्तमान कोड से RPG उत्पन्न करता है
+   cmind init . --encode    # --encode वर्तमान कोड से RPG उत्पन्न करता है
    ```
 
    यदि आप गैर-खाली निर्देशिका के लिए पुष्टि संकेत को छोड़ना चाहते हैं:
 
    ```bash
-   rpgkit init . --force --encode
+   cmind init . --force --encode
    ```
 
 2. रिपॉज़िटरी में अपना AI कोडिंग एजेंट लॉन्च करें।
@@ -179,39 +179,39 @@ RPG-Kit क्रमिक रूप से `~/.rpgkit/workspaces/<workspace-id>
 3. **[वैकल्पिक]** MCP टूल्स और स्लैश कमांड्स के माध्यम से जनरेटेड RPG का उपयोग करें। नीचे दिए गए कमांड केवल मैन्युअल रूप से चलाने पर आवश्यक हैं:
 
    ```text
-   /rpgkit.encode                                  # आवश्यकता पड़ने पर पूर्ण RPG को पुनर्निर्मित करें
-   /rpgkit.update_rpg                              # मैन्युअल वृद्धिशील अपडेट (fallback)
-   /rpgkit.rpg_edit <edit instructions>            # ग्राफ़-जागरूक कोड संपादन
+   /cmind.encode                                  # आवश्यकता पड़ने पर पूर्ण RPG को पुनर्निर्मित करें
+   /cmind.update_rpg                              # मैन्युअल वृद्धिशील अपडेट (fallback)
+   /cmind.rpg_edit <edit instructions>            # ग्राफ़-जागरूक कोड संपादन
    ```
 
-4. हर commit के बाद, RPG-Kit द्वारा इंस्टॉल किया गया git hook स्वचालित रूप से `rpgkit hook <name>` dispatcher को कॉल करता है, RPG को अपडेट करता है और उसे कोड परिवर्तनों के साथ संरेखित रखता है। यदि hook विफल हो जाता है या छोड़ दिया जाता है, तो `/rpgkit.update_rpg` मैन्युअल रूप से चलाएँ।
+4. हर commit के बाद, CoderMind द्वारा इंस्टॉल किया गया git hook स्वचालित रूप से `cmind hook <name>` dispatcher को कॉल करता है, RPG को अपडेट करता है और उसे कोड परिवर्तनों के साथ संरेखित रखता है। यदि hook विफल हो जाता है या छोड़ दिया जाता है, तो `/cmind.update_rpg` मैन्युअल रूप से चलाएँ।
 
-## `rpgkit init` के बाद क्या होता है
+## `cmind init` के बाद क्या होता है
 
-`rpgkit init` आपकी स्रोत फ़़ाइलों को संशोधित नहीं करता है, **और आपके वर्कस्पेस में रनटाइम स्टेट नहीं लिखता है**। यह आपके वर्कस्पेस में केवल command definitions, MCP कॉन्फ़़िगरेशन और hooks जोड़ता है। RPG-Kit का रनटाइम डेटा (outputs और logs) home-side निर्देशिका `~/.rpgkit/workspaces/<workspace-id>/` के अंतर्गत रखा जाता है, जहाँ `<workspace-id>` वर्कस्पेस के absolute path से जनित एक पठनीय slug है (उदाहरण: `home-hys-projects-myrepo`)।
+`cmind init` आपकी स्रोत फ़़ाइलों को संशोधित नहीं करता है, **और आपके वर्कस्पेस में रनटाइम स्टेट नहीं लिखता है**। यह आपके वर्कस्पेस में केवल command definitions, MCP कॉन्फ़़िगरेशन और hooks जोड़ता है। CoderMind का रनटाइम डेटा (outputs और logs) home-side निर्देशिका `~/.cmind/workspaces/<workspace-id>/` के अंतर्गत रखा जाता है, जहाँ `<workspace-id>` वर्कस्पेस के absolute path से जनित एक पठनीय slug है (उदाहरण: `home-hys-projects-myrepo`)।
 
 ```text
 my-project/
-├── docs/                 # /rpgkit.feature_spec के लिए वैकल्पिक आवश्यकता दस्तावेज़
+├── docs/                 # /cmind.feature_spec के लिए वैकल्पिक आवश्यकता दस्तावेज़
 ├── .github/ or .claude/  # Coding Agent कमांड परिभाषाएँ और सेटिंग्स
 ├── .vscode/              # लागू होने पर Copilot/VS Code MCP कॉन्फ़िगरेशन
-├── .rpgkit/              # जनरेटेड रिपोर्ट और कॉन्फ़िगरेशन फ़ाइलें
-└── .git/hooks/           # rpgkit init द्वारा इंस्टॉल किए गए post-commit / post-merge (प्रत्येक hook केवल एक पंक्ति: `rpgkit hook <name>`)
+├── .cmind/              # जनरेटेड रिपोर्ट और कॉन्फ़िगरेशन फ़ाइलें
+└── .git/hooks/           # cmind init द्वारा इंस्टॉल किए गए post-commit / post-merge (प्रत्येक hook केवल एक पंक्ति: `cmind hook <name>`)
 ```
 
 पूर्ण लेआउट और डेटा फ़ाइल संदर्भ के लिए [docs/project-structure.md](docs/project-structure.md) देखें।
 
-## RPG-Kit अपडेट करें
+## CoderMind अपडेट करें
 
 ```bash
-uv tool install rpgkit-cli \
-   --from "git+https://github.com/microsoft/RPG-ZeroRepo.git#subdirectory=RPG-Kit" \
+uv tool install cmind-cli \
+   --from "git+https://github.com/microsoft/RPG-ZeroRepo.git#subdirectory=CoderMind" \
    --force \
    --reinstall
 
 # किसी मौजूदा वर्कस्पेस को अपडेट करें
 cd <your-workspace>
-rpgkit update
+cmind update
 ```
 
 ## समर्थित प्लेटफ़ॉर्म्स
@@ -234,20 +234,20 @@ rpgkit update
 
 ## दस्तावेज़ीकरण
 
-- [स्लैश कमांड संदर्भ](docs/commands.md) — हर `/rpgkit.*` कमांड के लिए इनपुट, आउटपुट और उदाहरण।
-- [CLI संदर्भ](docs/cli-reference.md) — `rpgkit init`, `rpgkit update`, `rpgkit check`, `rpgkit version` और सभी विकल्प।
+- [स्लैश कमांड संदर्भ](docs/commands.md) — हर `/cmind.*` कमांड के लिए इनपुट, आउटपुट और उदाहरण।
+- [CLI संदर्भ](docs/cli-reference.md) — `cmind init`, `cmind update`, `cmind check`, `cmind version` और सभी विकल्प।
 - [कॉन्फ़िगरेशन](docs/configuration.md) — AI सहायक सेटअप, MCP पंजीकरण, hooks, ऑटो-अनुमोदन और समस्या-निवारण।
-- [परियोजना संरचना](docs/project-structure.md) — RPG-Kit द्वारा बनाई गई फ़ाइलें और निर्देशिकाएँ।
+- [परियोजना संरचना](docs/project-structure.md) — CoderMind द्वारा बनाई गई फ़ाइलें और निर्देशिकाएँ।
 
 ## आगामी सुविधाएँ
 
-- **सरल जनरेशन कमांड्स:** वर्तमान बहु-चरण जनरेशन प्रवाह को कम कमांड्स में मर्ज किया जाएगा, जैसे `/rpgkit.generate_repo`, `/rpgkit.generate_feature` और `/rpgkit.plan`।
+- **सरल जनरेशन कमांड्स:** वर्तमान बहु-चरण जनरेशन प्रवाह को कम कमांड्स में मर्ज किया जाएगा, जैसे `/cmind.generate_repo`, `/cmind.generate_feature` और `/cmind.plan`।
 - **बहु-भाषा समर्थन:** Go, C++, Rust, JavaScript/TypeScript और अन्य के लिए समर्थन जोड़ा जाएगा।
-- **अधिक प्लेटफ़ॉर्म एकीकरण:** विभिन्न सिस्टम्स पर विभिन्न AI कोडिंग एजेंट्स के लिए CLI और VS Code एक्सटेंशन वर्कफ़्लो में RPG-Kit समर्थन।
+- **अधिक प्लेटफ़ॉर्म एकीकरण:** विभिन्न सिस्टम्स पर विभिन्न AI कोडिंग एजेंट्स के लिए CLI और VS Code एक्सटेंशन वर्कफ़्लो में CoderMind समर्थन।
 
 ## समस्या-निवारण
 
-**AI सहायक CLI नहीं मिला:** `rpgkit check` चलाएँ, चयनित सहायक CLI को इंस्टॉल और प्रमाणित करें, फिर `rpgkit init` या `rpgkit update` पुनः चलाएँ।
+**AI सहायक CLI नहीं मिला:** `cmind check` चलाएँ, चयनित सहायक CLI को इंस्टॉल और प्रमाणित करें, फिर `cmind init` या `cmind update` पुनः चलाएँ।
 
 ## लाइसेंस
 

@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-TAG_PREFIX="${TAG_PREFIX:-rpgkit-v}"
+TAG_PREFIX="${TAG_PREFIX:-cmind-v}"
 
 write_output() {
   [[ -n "${GITHUB_OUTPUT:-}" ]] && echo "$1" >> "$GITHUB_OUTPUT"
@@ -32,6 +32,6 @@ TAG_NAME="${TAG_PREFIX}${NEW_VERSION#v}"
 
 write_output "new_version=$NEW_VERSION"
 write_output "tag_name=$TAG_NAME"
-echo "Latest RPG-Kit tag: $LATEST_TAG"
+echo "Latest CoderMind tag: $LATEST_TAG"
 echo "New version will be: $NEW_VERSION"
 echo "Release tag will be: $TAG_NAME"

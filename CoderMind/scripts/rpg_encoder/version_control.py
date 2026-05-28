@@ -1,10 +1,10 @@
 """RPG Version Control.
 
 Manages versioned snapshots of RPG state (``rpg.json``) inside the
-``.rpgkit/data/history/`` directory.  Each snapshot is a self-contained
+``.cmind/data/history/`` directory.  Each snapshot is a self-contained
 JSON file with metadata (version number, timestamp, message, source).
 
-This is an **original** RPG-Kit module -- it is NOT ported from
+This is an **original** CoderMind module -- it is NOT ported from
 RPG-ZeroRepo.
 
 Key class:
@@ -12,7 +12,7 @@ Key class:
 
 Typical usage::
 
-    vc = RPGVersionControl(rpgkit_dir=".rpgkit")
+    vc = RPGVersionControl(cmind_dir=".cmind")
     v = vc.save_version(rpg, message="Initial encode")
     old_rpg = vc.rollback(version=1)
     diff = vc.diff(version1=1, version2=2)
@@ -75,7 +75,7 @@ def _parse_version_from_filename(filename: str) -> Optional[int]:
 class RPGVersionControl:
     """Manage versioned snapshots of the RPG.
 
-    Versions are stored as ``<rpgkit_dir>/data/history/rpg.v<N>.json``
+    Versions are stored as ``<cmind_dir>/data/history/rpg.v<N>.json``
     where *N* is a monotonically increasing integer starting from 1.
 
     Each version file contains:
@@ -86,13 +86,13 @@ class RPGVersionControl:
     - ``rpg``: the full RPG dict (``RPG.to_dict()``)
 
     Args:
-        rpgkit_dir: Path to the ``.rpgkit`` directory.
+        cmind_dir: Path to the ``.cmind`` directory.
         max_history: Maximum number of versions to keep (0 = unlimited).
     """
 
-    def __init__(self, rpgkit_dir: str, max_history: int = 10):
-        self.rpgkit_dir = os.path.abspath(rpgkit_dir)
-        self.data_dir = os.path.join(self.rpgkit_dir, DATA_DIR_NAME)
+    def __init__(self, cmind_dir: str, max_history: int = 10):
+        self.cmind_dir = os.path.abspath(cmind_dir)
+        self.data_dir = os.path.join(self.cmind_dir, DATA_DIR_NAME)
         self.history_dir = os.path.join(self.data_dir, HISTORY_DIR_NAME)
         self.max_history = max_history
 

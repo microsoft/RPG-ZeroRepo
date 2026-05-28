@@ -12,7 +12,7 @@ Key workflow:
 6. Sync skeleton feature paths
 
 Ported from RPG-ZeroRepo ``zerorepo/rpg_encoder/rpg_parsing/rpg_evolution.py``
-with the following adaptations for RPG-Kit:
+with the following adaptations for CoderMind:
 - No ``RepoSkeleton`` / ``FileNode`` dependency -- uses simplified skeleton
   loading via ``os.walk`` (same pattern as ``RPGParser``).
 - Uses ``LLMClient`` from ``scripts.common.llm_client``
@@ -292,7 +292,7 @@ class RPGEvolution:
     - Provides detailed logging and statistics
 
     Ported from RPG-ZeroRepo ``rpg_evolution.py`` :class:`RPGEvolution`,
-    adapted for RPG-Kit infrastructure.
+    adapted for CoderMind infrastructure.
     """
 
     # ------------------------------------------------------------------
@@ -337,7 +337,7 @@ class RPGEvolution:
         in-memory ``rpg.dep_graph`` — leaving ``dep_graph.json`` stale
         whenever the encoder wrote ``rpg.json`` separately afterwards.
         That drift caused MCP-server / ``update_graphs.py status`` reads
-        to return inconsistent data after ``/rpgkit.update_rpg``.
+        to return inconsistent data after ``/cmind.update_rpg``.
 
         Args:
             rpg: The RPG to attach the rebuilt dep_graph to.

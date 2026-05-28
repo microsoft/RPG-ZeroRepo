@@ -1,6 +1,6 @@
 ---
 description: Edit RPG feature graph + code + dep_graph in sync, driven by natural language.
-name: rpgkit.rpg_edit
+name: cmind.rpg_edit
 ---
 
 ## User Input
@@ -20,28 +20,28 @@ If the input is empty, respond immediately:
 > - "Add rate limiting (10 req/s) to all API endpoints"
 > - "Refactor the auth module, split registration and login into separate files"
 >
-> Usage: `/rpgkit.rpg_edit <your edit instructions>`
+> Usage: `/cmind.rpg_edit <your edit instructions>`
 
 ## Overview
 
-`/rpgkit.rpg_edit` is an **independent command** that uses the RPG feature
+`/cmind.rpg_edit` is an **independent command** that uses the RPG feature
 graph as the entry point to locate modification targets, then drives
 synchronized changes across **code + RPG + dep_graph**.
 
 - Does NOT go through `feature_tree.json`.
-- Does NOT depend on `/rpgkit.feature_edit` or `/rpgkit.update_rpg`.
+- Does NOT depend on `/cmind.feature_edit` or `/cmind.update_rpg`.
 - The RPG feature graph is the authoritative source for code modifications.
 
 ## Workflow
 
-The text after `/rpgkit.rpg_edit` is the edit instruction, available as `$ARGUMENTS`.
+The text after `/cmind.rpg_edit` is the edit instruction, available as `$ARGUMENTS`.
 
 **Working Directory**: All relative paths are based on the project root.
 
 ### Step 1: Pre-check
 
 ```bash
-rpgkit script rpg_edit/validate.py --json
+cmind script rpg_edit/validate.py --json
 ```
 
 Inspect the `type` field:
@@ -52,7 +52,7 @@ Inspect the `type` field:
 ### Step 2: Locate Target Nodes
 
 ```bash
-rpgkit script rpg_edit/locate.py --query "$ARGUMENTS" --json
+cmind script rpg_edit/locate.py --query "$ARGUMENTS" --json
 ```
 
 > **Note:** If `$ARGUMENTS` contains double quotes, escape them before passing.
@@ -79,7 +79,7 @@ For each selected node, run impact analysis and persist the result so
 the Step 5d review step can pick it up automatically:
 
 ```bash
-rpgkit script rpg_edit/impact.py --node-id <id1> [--node-id <id2> ...] --json --save
+cmind script rpg_edit/impact.py --node-id <id1> [--node-id <id2> ...] --json --save
 ```
 
 The `--save` flag persists `rpg_edit_impact.json` for downstream stages;
@@ -107,7 +107,7 @@ If no keyword matches, skip directly to Step 4.
 **Step 3.5a — Probe tool availability (≤ 5s):**
 
 ```bash
-rpgkit script tools/browser.py check >/dev/null 2>&1 \
+cmind script tools/browser.py check >/dev/null 2>&1 \
     && BROWSER_OK=1 || BROWSER_OK=0
 ```
 
@@ -129,7 +129,7 @@ Step 4.
 **Step 3.5c — Run inspect:**
 
 ```bash
-rpgkit script tools/browser.py inspect <url>
+cmind script tools/browser.py inspect <url>
 ```
 
 The command prints paths to the saved HTML and screenshot. Read the
@@ -164,7 +164,7 @@ assumptions from node names. Poor plans come from skipping this step.
    was skipped but the app is running, take a screenshot now:
 
    ```bash
-   rpgkit script tools/browser.py inspect http://localhost:<PORT>/
+   cmind script tools/browser.py inspect http://localhost:<PORT>/
    ```
 
 4. **Collect all files that need changes** — not just the ones from
@@ -202,10 +202,10 @@ in `code_changes`:
 
 Save the plan via the dedicated helper, which persists
 `rpg_edit_plan.json` for downstream stages and prints the absolute
-path on stdout. Do NOT use the Write tool for `.rpgkit/` paths:
+path on stdout. Do NOT use the Write tool for `.cmind/` paths:
 
 ```bash
-cat << 'PLAN_EOF' | rpgkit script rpg_edit/save_plan.py
+cat << 'PLAN_EOF' | cmind script rpg_edit/save_plan.py
 <paste the JSON here>
 PLAN_EOF
 ```
@@ -268,7 +268,7 @@ do **not** silently `git stash`, as that would hide their work.
 **Step 5b — Update RPG feature graph:**
 
 ```bash
-rpgkit script rpg_edit/apply.py --phase rpg-only --json
+cmind script rpg_edit/apply.py --phase rpg-only --json
 ```
 
 This applies `feature_changes` to the RPG and saves it (reading the plan
@@ -283,7 +283,7 @@ mode, and the driver script creates a single commit on the current branch
 (even when multiple SubAgent iterations are needed).
 
 ```bash
-rpgkit script rpg_edit/code.py --json
+cmind script rpg_edit/code.py --json
 ```
 
 Inspect the result `success` field:
@@ -299,7 +299,7 @@ If success, refresh the dep_graph and amend the existing commit so that
 code + dep_graph land together:
 
 ```bash
-rpgkit script rpg_edit/apply.py --phase dep-refresh \
+cmind script rpg_edit/apply.py --phase dep-refresh \
     --backup-ts <timestamp_from_5b> --json
 
 git add -A && git commit --amend --no-edit
@@ -310,13 +310,13 @@ git add -A && git commit --amend --no-edit
 1. **Smoke test** — verify imports and entry point:
 
 ```bash
-rpgkit script smoke_test.py --json
+cmind script smoke_test.py --json
 ```
 
 1. **Impact review** — run targeted tests and verify affected functionality:
 
 ```bash
-rpgkit script rpg_edit/review.py --json
+cmind script rpg_edit/review.py --json
 ```
 
 The review script reads the plan and impact JSON from their default
@@ -357,7 +357,7 @@ visible in `git log --graph`.
   > Merged `rpg-edit/<short-id>` into `main` (commit `<merge-SHA>`).
   > To revert later:
   > - Code:  `git revert -m 1 <merge-SHA>`
-  > - Graphs: `rpgkit script rpg_edit/apply.py --rollback <timestamp> --json`
+  > - Graphs: `cmind script rpg_edit/apply.py --rollback <timestamp> --json`
 
   If the review output contained `suggestions`, append:
 
@@ -365,7 +365,7 @@ visible in `git log --graph`.
   > - <suggestion 1>
   > - <suggestion 2>
   >
-  > You can address these with another `/rpgkit.rpg_edit` command.
+  > You can address these with another `/cmind.rpg_edit` command.
 
 - **Failure path** (Step 5d failed, Step 5e skipped):
 
@@ -381,7 +381,7 @@ visible in `git log --graph`.
   > `main` is clean.  Choose one of:
   > - Inspect:  `git diff main rpg-edit/<short-id>`
   > - Discard code + graphs together:
-  >     `rpgkit script rpg_edit/apply.py --rollback <timestamp> --rollback-branch rpg-edit/<short-id> --json`
+  >     `cmind script rpg_edit/apply.py --rollback <timestamp> --rollback-branch rpg-edit/<short-id> --json`
   > - Discard code only:  `git branch -D rpg-edit/<short-id>`
   > - Continue editing on the branch and re-run from Step 5d.
 
@@ -392,4 +392,4 @@ visible in `git log --graph`.
 3. **User confirmation** — always confirm the plan before applying changes. Never auto-apply.
 4. **Branch isolation** — `main` is touched only after tests pass. Failed runs leave the work on a `rpg-edit/<id>` branch for inspection.
 5. **Coordinated rollback** — `--rollback <ts> --rollback-branch <name>` reverts RPG, dep_graph, and the dedicated branch in one step.
-6. **Independent command** — does not depend on or invoke any other `/rpgkit.*` command.
+6. **Independent command** — does not depend on or invoke any other `/cmind.*` command.

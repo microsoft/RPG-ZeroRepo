@@ -11,9 +11,9 @@ Adaptations:
   - Replaced ``load_skeleton_from_repo`` / ``filter_non_test_py_files``
     with repo-dir walking that builds a ``file2code`` dict (avoids
     importing the full RepoSkeleton build infra here).
-  - Replaced llama_index BM25 with RPG-Kit's lightweight
+  - Replaced llama_index BM25 with CoderMind's lightweight
     ``ModuleRetriever`` from ``bm25_model.py``.
-  - Uses RPG-Kit imports (``scripts.common.tools``, ``scripts.rpg_agent``).
+  - Uses CoderMind imports (``scripts.common.tools``, ``scripts.rpg_agent``).
   - ``parse_thinking_output`` inlined (tag-stripping helper).
 """
 

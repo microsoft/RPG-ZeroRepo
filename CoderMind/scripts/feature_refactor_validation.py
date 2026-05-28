@@ -1,13 +1,13 @@
 #!/usr/bin/env python3
-"""Validate feature_build.json (input) and feature_tree.json (output) for /rpgkit.feature_refactor command.
+"""Validate feature_build.json (input) and feature_tree.json (output) for /cmind.feature_refactor command.
 
 This script checks:
-1. Input file: .rpgkit/data/feature_build.json
+1. Input file: .cmind/data/feature_build.json
    - File existence
    - Required fields: repository_name, repository_purpose, feature_tree
    - Fields must exist and not be empty
 
-2. Output file: .rpgkit/data/feature_tree.json
+2. Output file: .cmind/data/feature_tree.json
    - File existence
    - Fields status: repository_name, repository_purpose, feature_tree, components
 
@@ -99,7 +99,7 @@ def count_feature_tree_leaves(tree: Dict[str, Any]) -> int:
 
 
 def validate_input_file() -> Dict[str, Any]:
-    """Validate the input file (.rpgkit/data/feature_build.json)."""
+    """Validate the input file (.cmind/data/feature_build.json)."""
     result = {
         "valid": False,
         "exists": False,
@@ -146,7 +146,7 @@ def validate_input_file() -> Dict[str, Any]:
 
 
 def check_output_file() -> Dict[str, Any]:
-    """Check the output file (.rpgkit/data/feature_tree.json) status."""
+    """Check the output file (.cmind/data/feature_tree.json) status."""
     result = {
         "exists": False,
         "has_content": False,

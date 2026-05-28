@@ -283,7 +283,7 @@ def check_state(input_path: Path, output_path: Path) -> Dict[str, Any]:
     # Check input (interfaces.json)
     if not result["input_exists"]:
         result["type"] = "error"
-        result["message"] = f"Input file not found: {input_path}. Please run /rpgkit.design_interfaces first."
+        result["message"] = f"Input file not found: {input_path}. Please run /cmind.design_interfaces first."
         return result
     
     input_valid, input_errors = validate_interfaces(input_path)

@@ -63,7 +63,7 @@ def codegen_workspace(tmp_path, monkeypatch):
     (code / "a.py").write_text("def a(): return 1\n")
     (code / "b.py").write_text("from a import a\ndef b(): return a() + 1\n")
 
-    data_dir = ws / ".rpgkit" / "data"
+    data_dir = ws / ".cmind" / "data"
     data_dir.mkdir(parents=True)
     rpg_path = data_dir / "rpg.json"
     dep_graph_path = data_dir / "dep_graph.json"
@@ -311,7 +311,7 @@ def update_rpg_workspace(tmp_path):
     _sh(ws, "commit", "-q", "-m", "init")
 
     # Seed RPG without meta.git (so we can verify it gets set)
-    data_dir = ws / ".rpgkit" / "data"
+    data_dir = ws / ".cmind" / "data"
     data_dir.mkdir(parents=True)
     rpg_path = data_dir / "rpg.json"
     dep_graph_path = data_dir / "dep_graph.json"

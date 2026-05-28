@@ -6,9 +6,9 @@ actually work correctly. The review scope is driven by impact analysis
 data (callers, affected_files), NOT a full global review.
 
 Usage:
-    rpgkit script rpg_edit/review.py \
-      --plan .rpgkit/data/rpg_edit_plan.json \
-      --impact .rpgkit/data/rpg_edit_impact.json \
+    cmind script rpg_edit/review.py \
+      --plan .cmind/data/rpg_edit_plan.json \
+      --impact .cmind/data/rpg_edit_impact.json \
       --json
 
 The sub-agent will:
@@ -340,8 +340,8 @@ def build_impact_review_prompt(
         pattern = " or ".join(test_patterns)
         pytest_cmd += f' -k "{pattern}" --timeout=30'
 
-    # Tool invocations route through the global ``rpgkit`` CLI (the
-    # scripts no longer live in the workspace).  See ``rpgkit script``
+    # Tool invocations route through the global ``cmind`` CLI (the
+    # scripts no longer live in the workspace).  See ``cmind script``
     # in docs/cli-reference.md.
     browser_tool = cmd_for("tools/browser.py")
     gui_tool = cmd_for("tools/gui.py")

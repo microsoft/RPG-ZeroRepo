@@ -1,5 +1,5 @@
 ---
-name: rpgkit.update_rpg
+name: cmind.update_rpg
 description: Manually trigger an incremental RPG update (fallback for when the post-commit hook didn't run)
 ---
 
@@ -23,7 +23,7 @@ automatic update didn't happen, e.g.:
 
 * You committed with `git commit --no-verify` (skipping hooks).
 * The background hook errored out (network blip, LLM timeout) — run
-  `rpgkit version` to locate the workspace's logs directory and tail
+  `cmind version` to locate the workspace's logs directory and tail
   the latest `update_rpg.log` there.
 * You want to force a fresh update synchronously and see the result
   immediately instead of waiting for the async hook.
@@ -36,14 +36,14 @@ uses) and runs the LLM-driven feature graph diff + dep_graph rebuild.
 Run the check script:
 
 ```bash
-rpgkit script rpg_encoder/check_encode.py --json
+cmind script rpg_encoder/check_encode.py --json
 ```
 
 Inspect the `type` field in the JSON output:
 
 * **`error`** → display `message` and stop. The `rpg.json` file is
-  corrupt; the user may need to delete it and rerun `/rpgkit.encode`.
-* **`init`** → no `rpg.json` yet. Tell the user to run `/rpgkit.encode`
+  corrupt; the user may need to delete it and rerun `/cmind.encode`.
+* **`init`** → no `rpg.json` yet. Tell the user to run `/cmind.encode`
   first to create the baseline graph, then terminate.
 * **`update`** → display `result.stats.repo_name` / `node_count` /
   `edge_count` and proceed to Step 2.
@@ -56,7 +56,7 @@ git rev-list --count HEAD
 ```
 
 If the count is `< 2`, tell the user there is no previous commit to
-diff against, and suggest running `/rpgkit.encode` instead. Terminate.
+diff against, and suggest running `/cmind.encode` instead. Terminate.
 
 ### Step 2: Run the Update
 
@@ -65,7 +65,7 @@ up its own temporary worktree internally — **you do not need to manage
 `git worktree` manually**.
 
 ```bash
-rpgkit script update_graphs.py update-rpg --json
+cmind script update_graphs.py update-rpg --json
 ```
 
 The full JSON result is printed on stdout (single `{...}` block). The
@@ -90,7 +90,7 @@ RPG update complete!
 **If `status` is `"error"`**:
 
 * Show the `error` field.
-* Tell the user to run `rpgkit version` to locate the logs directory
+* Tell the user to run `cmind version` to locate the logs directory
   and inspect `update_rpg.log` for the full trace.
 * Common causes: LLM API misconfigured, network failure, dirty worktree
   blocking `git worktree add`.
@@ -102,8 +102,8 @@ Tips:
   - The post-commit hook runs this same update automatically after
     every commit; you only need to invoke this command when the
     automatic update failed or was skipped.
-  - /rpgkit.encode — Run a full re-encode if the RPG seems stale or
+  - /cmind.encode — Run a full re-encode if the RPG seems stale or
     has drifted significantly from the codebase.
-  - The latest `update_rpg.log` (path shown by `rpgkit version`) keeps
+  - The latest `update_rpg.log` (path shown by `cmind version`) keeps
     the most recent run output.
 ```

@@ -41,7 +41,7 @@ def _reload_paths_against(workspace: Path):
     reload.
     """
     os.chdir(workspace)
-    os.environ.pop("RPGKIT_WORKSPACE", None)
+    os.environ.pop("CMIND_WORKSPACE", None)
     import common.paths as paths_mod
     importlib.reload(paths_mod)
     return paths_mod
@@ -51,9 +51,9 @@ def _reload_paths_against(workspace: Path):
 def workspace(tmp_path, monkeypatch):
     ws = tmp_path / "ws"
     ws.mkdir()
-    (ws / ".rpgkit").mkdir()
+    (ws / ".cmind").mkdir()
     monkeypatch.chdir(ws)
-    monkeypatch.delenv("RPGKIT_WORKSPACE", raising=False)
+    monkeypatch.delenv("CMIND_WORKSPACE", raising=False)
     return ws
 
 
@@ -66,12 +66,12 @@ def workspace_with_unrelated_repo_subdir(tmp_path, monkeypatch):
     """
     ws = tmp_path / "ws_with_repo"
     ws.mkdir()
-    (ws / ".rpgkit").mkdir()
+    (ws / ".cmind").mkdir()
     (ws / "repo").mkdir()
     (ws / "repo" / "stale.py").write_text("# legacy / unrelated\n")
     (ws / "auth.py").write_text("def login(): pass\n")
     monkeypatch.chdir(ws)
-    monkeypatch.delenv("RPGKIT_WORKSPACE", raising=False)
+    monkeypatch.delenv("CMIND_WORKSPACE", raising=False)
     return ws
 
 
@@ -266,7 +266,7 @@ def test_run_batch_preserves_external_surface(monkeypatch):
         ``dispatch_sub_agent``
     """
     monkeypatch.chdir(_project_root)  # avoid stale cwd from previous fixtures
-    monkeypatch.delenv("RPGKIT_WORKSPACE", raising=False)
+    monkeypatch.delenv("CMIND_WORKSPACE", raising=False)
     import run_batch
     required = (
         "REPO_RPG_FILE",

@@ -1,6 +1,6 @@
 ---
 description: Edit the feature tree, nodes can be deleted, modified, added, or expanded as needed.
-name: rpgkit.feature_edit
+name: cmind.feature_edit
 ---
 
 
@@ -22,13 +22,13 @@ If the input is empty, respond immediately:
 > - "Expand the 'security' component with more encryption options"
 > - "Merge 'analytics telemetry' into 'monitoring observability'"
 >
-> Usage: `/rpgkit.feature_edit <your edit instructions>`
+> Usage: `/cmind.feature_edit <your edit instructions>`
 
 ## Workflow
 
-The text typed by the user after `/rpgkit.feature_edit` **is the edit instruction**. You can assume it is always available as `$ARGUMENTS`, unless explicitly empty. Do **not** ask the user to repeat it otherwise.
+The text typed by the user after `/cmind.feature_edit` **is the edit instruction**. You can assume it is always available as `$ARGUMENTS`, unless explicitly empty. Do **not** ask the user to repeat it otherwise.
 
-**File:** `.rpgkit/data/feature_tree.json` (both input and output)
+**File:** `.cmind/data/feature_tree.json` (both input and output)
 
 **Working Directory**: All relative paths are based on the project root directory.
 
@@ -37,7 +37,7 @@ The text typed by the user after `/rpgkit.feature_edit` **is the edit instructio
 Execute from repository root:
 
 ```bash
-rpgkit script feature_edit_validation.py --edit_instruction "$ARGUMENTS"
+cmind script feature_edit_validation.py --edit_instruction "$ARGUMENTS"
 ```
 
 **Important:** If `$ARGUMENTS` contains a double quote (`"`), it MUST be escaped before being passed to the script.
@@ -51,9 +51,9 @@ Inspect the `type` field in the output:
    - `file_not_found`:
 
      ```markdown
-     > **Error**: The file `.rpgkit/data/feature_tree.json` does not exist.
+     > **Error**: The file `.cmind/data/feature_tree.json` does not exist.
      > 
-     > Please run `/rpgkit.feature_refactor` first to generate the feature tree.
+     > Please run `/cmind.feature_refactor` first to generate the feature tree.
      ```
 
    - `field_empty` or `field_missing`:
@@ -61,7 +61,7 @@ Inspect the `type` field in the output:
      ```markdown
      > **Error**: The file exists but the `components` field is missing or empty.
      > 
-     > Please run `/rpgkit.feature_refactor` to generate a valid feature tree structure.
+     > Please run `/cmind.feature_refactor` to generate a valid feature tree structure.
      ```
 
 2. **If `type` is `"ready"`**: Proceed to Step 2.
@@ -73,9 +73,9 @@ Inspect the `type` field in the output:
 Display the following prompt and wait for user confirmation:
 
 ```markdown
-The script `rpgkit script feature_edit.py` will be executed to edit the feature tree based on your instructions.
+The script `cmind script feature_edit.py` will be executed to edit the feature tree based on your instructions.
 
-**File:** `.rpgkit/data/feature_tree.json`
+**File:** `.cmind/data/feature_tree.json`
 
 **Edit Instructions:** 
 > $ARGUMENTS
@@ -96,7 +96,7 @@ Please confirm to proceed:
 Execute the following command:
 
 ```bash
-rpgkit script feature_edit.py
+cmind script feature_edit.py
 ```
 
 The script writes a structured log automatically; stdout
@@ -120,18 +120,18 @@ After the script completes:
    ```markdown
    **Edit Complete**
    
-   The edited feature tree has been saved to `.rpgkit/data/feature_tree.json`.
+   The edited feature tree has been saved to `.cmind/data/feature_tree.json`.
    
    Please review the changes to verify they match your expectations.
    
    If further adjustments are needed, run:
 
    ```text
-   /rpgkit.feature_edit <additional edit instructions>
+   /cmind.feature_edit <additional edit instructions>
    ```
 
    If you are satisfied with the feature tree and ready to proceed to the **next step**, run:
 
    ```text
-   /rpgkit.build_skeleton
+   /cmind.build_skeleton
    ```

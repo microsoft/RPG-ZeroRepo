@@ -2,13 +2,13 @@
 """Save an EditPlan JSON document to ``RPG_EDIT_PLAN_FILE``.
 
 Reads JSON from stdin, validates that it parses, and writes it to
-``~/.rpgkit/workspaces/<workspace-id>/data/rpg_edit_plan.json``.  Slash-command
+``~/.cmind/workspaces/<workspace-id>/data/rpg_edit_plan.json``.  Slash-command
 templates use this so they never need to know the physical (home-dir)
 location of the workspace.
 
 Usage (typical AI-agent invocation)::
 
-    cat << 'PLAN_EOF' | rpgkit script rpg_edit/save_plan.py
+    cat << 'PLAN_EOF' | cmind script rpg_edit/save_plan.py
     { "feature_changes": [...], "code_changes": [...] }
     PLAN_EOF
 

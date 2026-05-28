@@ -1,5 +1,5 @@
 ---
-name: rpgkit.code_gen
+name: cmind.code_gen
 description: Implement code using TDD workflow with iterative test-code-fix cycles
 ---
 
@@ -18,7 +18,7 @@ runs pytest, and fixes issues — up to 5 iterations per attempt, 2 attempts per
 Run the check script to determine current state:
 
 ```bash
-rpgkit script check_code_gen.py --json
+cmind script check_code_gen.py --json
 ```
 
 **If type is "error"**:
@@ -31,7 +31,7 @@ rpgkit script check_code_gen.py --json
 
 **If type is "in_progress"**:
 
-* Run `rpgkit script run_batch.py --resume --json` to resume
+* Run `cmind script run_batch.py --resume --json` to resume
 
 **If type is "complete"**:
 
@@ -42,7 +42,7 @@ rpgkit script check_code_gen.py --json
 **This step is only needed once**, before the first batch.
 
 ```bash
-rpgkit script init_codebase.py --json
+cmind script init_codebase.py --json
 ```
 
 This creates README.md, .gitignore, base classes, and an initial commit.
@@ -96,19 +96,19 @@ Remember both choices for the session.
 **Single-batch mode:**
 
 ```bash
-rpgkit script run_batch.py --next --json
+cmind script run_batch.py --next --json
 ```
 
 **File-merge mode (no unit limit):**
 
 ```bash
-rpgkit script run_batch.py --next --merge-file --json
+cmind script run_batch.py --next --merge-file --json
 ```
 
 **File-merge mode (with unit limit):**
 
 ```bash
-rpgkit script run_batch.py --next --merge-file --max-units <N> --json
+cmind script run_batch.py --next --merge-file --max-units <N> --json
 ```
 
 **Read the JSON output:**
@@ -129,7 +129,7 @@ Continue until `type` is `"complete"` or no tasks remain.
 When all batches are processed:
 
 ```bash
-rpgkit script run_batch.py --final-test --json
+cmind script run_batch.py --final-test --json
 ```
 
 This runs pytest (full suite) and smoke test (import check, entry point, stub detection).
@@ -140,7 +140,7 @@ If smoke test reports errors, a repair agent is dispatched automatically.
 After final test passes, run the global review:
 
 ```bash
-rpgkit script run_batch.py --global-review --json
+cmind script run_batch.py --global-review --json
 ```
 
 This dispatches a sub-agent that:
@@ -167,7 +167,7 @@ This step can be re-run independently without re-running `--final-test`.
 
    Next steps:
       • Review failed batches (branches preserved for inspection)
-      • Run: rpgkit script run_batch.py --retry <batch_id> --json
+      • Run: cmind script run_batch.py --retry <batch_id> --json
 ```
 
 ---
@@ -176,19 +176,19 @@ This step can be re-run independently without re-running `--final-test`.
 
 ```bash
 # Resume an interrupted batch
-rpgkit script run_batch.py --resume --json
+cmind script run_batch.py --resume --json
 
 # Retry a specific failed batch
-rpgkit script run_batch.py --retry <batch_id> --json
+cmind script run_batch.py --retry <batch_id> --json
 
 # Run a specific batch by ID
-rpgkit script run_batch.py --batch-id <id> --json
+cmind script run_batch.py --batch-id <id> --json
 
 # Repo validation (pytest + smoke)
-rpgkit script run_batch.py --final-test --json
+cmind script run_batch.py --final-test --json
 
 # Full feature review + visual QA
-rpgkit script run_batch.py --global-review --json
+cmind script run_batch.py --global-review --json
 ```
 
 ## Recovery
@@ -196,11 +196,11 @@ rpgkit script run_batch.py --global-review --json
 To resume from any state:
 
 ```bash
-rpgkit script check_code_gen.py --json
+cmind script check_code_gen.py --json
 ```
 
 Follow the `next_action` field — it always tells you the exact command to run.
-State is persisted in `.rpgkit/data/code_gen_state.jsonl`.
+State is persisted in `.cmind/data/code_gen_state.jsonl`.
 
 ## Notes
 

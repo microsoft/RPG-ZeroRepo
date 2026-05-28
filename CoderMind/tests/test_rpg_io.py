@@ -29,12 +29,12 @@ requires_git = pytest.mark.skipif(not _has_git(), reason="git not on PATH")
 
 
 def _make_home_layout(tmp_path: Path, hash_id: str = "abc123def456") -> Path:
-    """Create the ``~/.rpgkit/workspaces/<workspace-id>/`` layout for tests.
+    """Create the ``~/.cmind/workspaces/<workspace-id>/`` layout for tests.
 
     Returns the home_dir (the dir that gets ``git init``).  Caller is
     responsible for git-initialising and snapshotting it.
     """
-    home_root = tmp_path / ".rpgkit" / "workspaces" / hash_id
+    home_root = tmp_path / ".cmind" / "workspaces" / hash_id
     (home_root / "data").mkdir(parents=True)
     return home_root
 
@@ -201,7 +201,7 @@ class TestSafeLoadRecovery:
     def test_works_when_target_outside_known_layout(
         self, tmp_path: Path
     ) -> None:
-        """For paths that don't look like ``~/.rpgkit/workspaces/...``,
+        """For paths that don't look like ``~/.cmind/workspaces/...``,
         recovery silently no-ops and the original error re-raises."""
         target = tmp_path / "rpg.json"  # not in a home-layout
         target.write_text("not valid")

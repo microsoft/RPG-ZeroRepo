@@ -8,13 +8,13 @@ Typical usage::
 
     from rpg.service import RPGService
 
-    svc = RPGService.load('.rpgkit/data/repo_rpg.json')
+    svc = RPGService.load('.cmind/data/repo_rpg.json')
     svc.refresh_stage_edges("build_data_flow")
     src = svc.find_functional_area_by_name("Data Models")
     dst = svc.find_functional_area_by_name("Auth Routes")
     svc.add_dependency_edge(src, dst, EdgeType.REFERENCES, "build_data_flow",
                             description="User model provides auth data")
-    svc.save('.rpgkit/data/repo_rpg.json')
+    svc.save('.cmind/data/repo_rpg.json')
 """
 
 from __future__ import annotations
@@ -534,7 +534,7 @@ class RPGService:
     # Environment variable that disables `meta.git` writes during sync.
     # Set in CI environments where the RPG is committed and you don't
     # want every CI run to advance `head_commit` to ephemeral CI commits.
-    _NO_GIT_META_ENV = "RPGKIT_NO_GIT_META"
+    _NO_GIT_META_ENV = "CMIND_NO_GIT_META"
 
     def sync_from_commit_diff(
         self,
@@ -563,7 +563,7 @@ class RPGService:
         =========================  =========================================
 
         After a successful run, advances ``meta.git`` to the current HEAD
-        (unless ``RPGKIT_NO_GIT_META=1`` or the workspace isn't a git
+        (unless ``CMIND_NO_GIT_META=1`` or the workspace isn't a git
         repo).  The dep_graph is **always** persisted to ``save_path``;
         the RPG file itself is saved by the caller (this method only
         mutates ``self.rpg``).
@@ -601,7 +601,7 @@ class RPGService:
         # ── Step 1: read current HEAD (silent-fail outside a git repo) ──
         current = read_head(workspace_root)
         # ``last_commit`` may be None for:
-        #   * fresh RPG produced by /rpgkit.build_skeleton
+        #   * fresh RPG produced by /cmind.build_skeleton
         #   * legacy RPG without meta.git
         #   * workspace not under git (current is None too)
         last_commit = (self.rpg.git_meta or {}).get("head_commit")
@@ -1360,7 +1360,7 @@ class RPGService:
         encoder and code-gen pipelines.  Previously this method emitted the
         legacy ``::class X`` / ``::function X`` prefixed form, which would
         silently revert canonical paths to legacy on every
-        ``rpgkit update`` (a real bug — the prefix-stripped form on next read
+        ``cmind update`` (a real bug — the prefix-stripped form on next read
         produced a *different* lookup key and broke dep<->RPG correlation).
 
         The ``G`` argument is kept for backward compatibility with callers
@@ -1379,7 +1379,7 @@ class RPGService:
             "models/user.py::User::login"   -> "models/user.py:User.login"
 
         Legacy input is also tolerated so that rpg.json files written by
-        older encoder versions can still be aligned during ``rpgkit update``
+        older encoder versions can still be aligned during ``cmind update``
         without a separate migration step::
 
             "models/user.py::class User"           -> "models/user.py:User"

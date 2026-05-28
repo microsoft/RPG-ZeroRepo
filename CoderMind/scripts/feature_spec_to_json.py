@@ -8,11 +8,11 @@ This script parses:
 Output: A structured JSON file with all parsed content.
 
 Usage:
-    rpgkit script feature_spec_to_json.py [--input-dir DIR] [--output FILE] [--no-evidence]
+    cmind script feature_spec_to_json.py [--input-dir DIR] [--output FILE] [--no-evidence]
 
 Arguments:
     --input-dir    Directory containing feature_spec.md and features/ folder
-                   Default: .rpgkit/data/feature_spec
+                   Default: .cmind/data/feature_spec
     --output       Output JSON file path
                    Default: feature_spec.json in input directory
     --no-evidence  Exclude evidence fields from output for compact JSON
@@ -28,8 +28,8 @@ from typing import Optional
 # Use the canonical paths from common.paths so the output location
 # matches what downstream stages (feature_build, feature_build_validation,
 # ...) expect.  That resolves to
-# ``~/.rpgkit/workspaces/<workspace-id>/data/feature_spec.json`` rather than the
-# workspace-local ``.rpgkit/data/feature_spec.json`` this script used
+# ``~/.cmind/workspaces/<workspace-id>/data/feature_spec.json`` rather than the
+# workspace-local ``.cmind/data/feature_spec.json`` this script used
 # to compute on its own — a mismatch that previously broke the
 # feature_spec → feature_build handoff.
 from common.paths import FEATURE_SPEC_FILE
@@ -381,9 +381,9 @@ def main():
     if args.input_dir:
         input_dir = args.input_dir
     else:
-        # Try to find .rpgkit/data/feature_spec relative to current directory
+        # Try to find .cmind/data/feature_spec relative to current directory
         cwd = Path.cwd()
-        default_path = cwd / ".rpgkit" / "data" / "feature_spec"
+        default_path = cwd / ".cmind" / "data" / "feature_spec"
         if default_path.exists():
             input_dir = default_path
         else:

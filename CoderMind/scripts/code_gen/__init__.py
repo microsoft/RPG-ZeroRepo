@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Code generation utilities used by ``scripts/run_batch.py`` and friends.
 
-This package groups the libraries that drive the ``/rpgkit.code_gen``
+This package groups the libraries that drive the ``/cmind.code_gen``
 pipeline:
 
 * :mod:`scripts.code_gen.prompts` — prompt templates

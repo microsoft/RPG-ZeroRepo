@@ -7,8 +7,8 @@ Function: Create implementation tasks from interfaces using LLM
 - Validates that all units are covered without duplicates
 - Generates tasks.json with ordered implementation tasks
 
-Input: .rpgkit/interfaces.json, .rpgkit/data_flow.json, .rpgkit/repo_rpg.json
-Output: .rpgkit/tasks.json (ordered implementation tasks)
+Input: .cmind/interfaces.json, .cmind/data_flow.json, .cmind/repo_rpg.json
+Output: .cmind/tasks.json (ordered implementation tasks)
 """
 
 import json
@@ -1549,13 +1549,13 @@ def main():
     # Load interfaces
     if not args.interfaces.exists():
         print(f"\n   Error: Interfaces file not found: {args.interfaces}")
-        print("   Please run /rpgkit.design_interfaces first.")
+        print("   Please run /cmind.design_interfaces first.")
         return 1
     
     # Load data_flow
     if not args.data_flow.exists():
         print(f"\n   Error: Data flow file not found: {args.data_flow}")
-        print("   Please run /rpgkit.build_data_flow first.")
+        print("   Please run /cmind.build_data_flow first.")
         return 1
     
     print(f"\n   Loading interfaces from: {args.interfaces}")

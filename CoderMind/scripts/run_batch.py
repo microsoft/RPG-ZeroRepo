@@ -417,7 +417,7 @@ def _refresh_dep_graph_safe(
     The codegen pipeline does its own commit hygiene (each batch lands
     on its own git branch then merges), so this entry point intentionally
     does NOT advance ``meta.git`` — that's owned by the pre-commit /
-    post-merge hooks and ``/rpgkit.update_rpg``.
+    post-merge hooks and ``/cmind.update_rpg``.
     """
     try:
         import sys
@@ -995,7 +995,7 @@ def main() -> int:
         if isinstance(handler, logging.StreamHandler) and not isinstance(handler, logging.FileHandler):
             handler.setLevel(log_level)
 
-    # File handler: capture DEBUG records to .rpgkit/logs/code_gen.log via
+    # File handler: capture DEBUG records to .cmind/logs/code_gen.log via
     # the shared helper (idempotent; degrades gracefully on read-only FS).
     from common.logging_setup import setup_file_logging
     setup_file_logging("code_gen")

@@ -6,7 +6,7 @@ code-based search (from search_by_meta.py) into a single tool interface.
 
 Ported from: RPG-ZeroRepo/zerorepo/rpg_encoder/rpg_agent/tools/search_node.py
 Adaptations:
-  - RPG-Kit imports (scripts.common.tools, scripts.rpg_agent)
+  - CoderMind imports (scripts.common.tools, scripts.rpg_agent)
   - search_code_snippets takes file2code dict instead of repo_skeleton/bm25_retriever
 """
 

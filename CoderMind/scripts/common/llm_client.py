@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""LLM Client Module for RPG-Kit.
+"""LLM Client Module for CoderMind.
 
 This module provides a common LLM client with trajectory recording support.
 All LLM calls (prompts and responses) are recorded in the trajectory when
@@ -41,8 +41,8 @@ def _set_pdeathsig() -> None:
 #
 # Resolution priority:
 #   P1. LLMClient(tool="...") constructor argument
-#   P2. RPGKIT_AI_CLI_CMD env var
-#   P3. <workspace>/.rpgkit/config.toml  [rpgkit].ai_cli_cmd
+#   P2. CMIND_AI_CLI_CMD env var
+#   P3. <workspace>/.cmind/config.toml  [cmind].ai_cli_cmd
 #   P4. _BAKED_IN_VALUE (release-zip builds substitute it at packaging time;
 #                        bundle builds leave the placeholder unchanged)
 #
@@ -72,18 +72,18 @@ def _load_ai_cli_cmd() -> str:
     """
     # P2: env var (highest non-P1 priority — useful in tests and one-off
     # overrides without editing the workspace config).
-    env_val = _os.environ.get("RPGKIT_AI_CLI_CMD", "").strip()
+    env_val = _os.environ.get("CMIND_AI_CLI_CMD", "").strip()
     if env_val:
         return env_val
 
     # P3: workspace config.toml.
     try:
         workspace = _paths._find_workspace_root()
-        cfg_path = workspace / ".rpgkit" / "config.toml"
+        cfg_path = workspace / ".cmind" / "config.toml"
         if cfg_path.exists():
             with open(cfg_path, "rb") as f:
                 data = tomllib.load(f)
-            cfg_val = (data.get("rpgkit") or {}).get("ai_cli_cmd", "")
+            cfg_val = (data.get("cmind") or {}).get("ai_cli_cmd", "")
             if isinstance(cfg_val, str):
                 cfg_val = cfg_val.strip()
                 if cfg_val:
@@ -202,7 +202,7 @@ class LLMClient:
     
     # Workspace root — sourced from common.paths so that symlink-based
     # dev workflows resolve correctly (see paths._find_workspace_root).
-    # Used for session trace storage (.rpgkit/logs/<agent>/) and to
+    # Used for session trace storage (.cmind/logs/<agent>/) and to
     # express captured-trace paths relative to the workspace.
     _INFERRED_PROJECT_DIR: Path = _WORKSPACE_ROOT
 
@@ -333,8 +333,8 @@ class LLMClient:
         if not self.tool or self.tool == _PLACEHOLDER_LITERAL:
             raise RuntimeError(
                 "AI CLI command not configured.  Run "
-                "`rpgkit init --ai <name>` in this workspace, or set the "
-                "RPGKIT_AI_CLI_CMD environment variable."
+                "`cmind init --ai <name>` in this workspace, or set the "
+                "CMIND_AI_CLI_CMD environment variable."
             )
 
         # Create call record
@@ -571,8 +571,8 @@ class LLMClient:
         if not self.tool or self.tool == _PLACEHOLDER_LITERAL:
             raise RuntimeError(
                 "AI CLI command not configured.  Run "
-                "`rpgkit init --ai <name>` in this workspace, or set the "
-                "RPGKIT_AI_CLI_CMD environment variable."
+                "`cmind init --ai <name>` in this workspace, or set the "
+                "CMIND_AI_CLI_CMD environment variable."
             )
 
         prompt = self._flatten_memory(memory)

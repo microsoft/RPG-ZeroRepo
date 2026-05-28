@@ -3,7 +3,7 @@
 Bridges the *forward* (requirements -> code) and *reverse* (code -> RPG)
 pipelines so that they can be composed seamlessly.
 
-This is an **original** RPG-Kit module -- it is NOT ported from
+This is an **original** CoderMind module -- it is NOT ported from
 RPG-ZeroRepo.
 
 Key class:
@@ -51,7 +51,7 @@ from rpg import (
     method_node_path,
 )
 
-from .config import RPGKitConfig
+from .config import CMindConfig
 from .version_control import RPGVersionControl, RPG_FILE_NAME
 from common.rpg_io import atomic_write_rpg
 
@@ -68,7 +68,7 @@ class WorkflowIntegration:
 
     All public methods are class-methods or static-methods so that no
     persistent state is required.  Configuration is read from the
-    ``RPGKitConfig`` object when needed.
+    ``CMindConfig`` object when needed.
 
     Design rationale:
     - **No modifications to existing forward-flow code.**  The forward
@@ -308,7 +308,7 @@ class WorkflowIntegration:
     @staticmethod
     def save_rpg(
         rpg: RPG,
-        rpgkit_dir: str,
+        cmind_dir: str,
         message: str = "",
         source: str = "mixed",
         version_control: bool = True,
@@ -317,7 +317,7 @@ class WorkflowIntegration:
 
         Args:
             rpg: The RPG instance to save.
-            rpgkit_dir: Path to the ``.rpgkit`` directory.
+            cmind_dir: Path to the ``.cmind`` directory.
             message: Description for the version snapshot.
             source: Source label (``"generated"``/``"encoded"``/``"mixed"``).
             version_control: Whether to also save a versioned snapshot.
@@ -325,7 +325,7 @@ class WorkflowIntegration:
         Returns:
             Dictionary with ``rpg_path`` and optional ``version``.
         """
-        data_dir = os.path.join(rpgkit_dir, "data")
+        data_dir = os.path.join(cmind_dir, "data")
         os.makedirs(data_dir, exist_ok=True)
 
         rpg_path = os.path.join(data_dir, RPG_FILE_NAME)
@@ -344,11 +344,11 @@ class WorkflowIntegration:
 
         if version_control:
             try:
-                config = RPGKitConfig.load(
-                    os.path.dirname(rpgkit_dir)
+                config = CMindConfig.load(
+                    os.path.dirname(cmind_dir)
                 )
                 vc = RPGVersionControl(
-                    rpgkit_dir=rpgkit_dir,
+                    cmind_dir=cmind_dir,
                     max_history=config.workflow.versioning.max_history,
                 )
                 version = vc.save_version(rpg, message=message, source=source)
@@ -360,20 +360,20 @@ class WorkflowIntegration:
         return result
 
     # ------------------------------------------------------------------
-    # load_rpg  (convenience: load from .rpgkit/data/rpg.json)
+    # load_rpg  (convenience: load from .cmind/data/rpg.json)
     # ------------------------------------------------------------------
 
     @staticmethod
-    def load_rpg(rpgkit_dir: str) -> Optional[RPG]:
-        """Load the current RPG from ``<rpgkit_dir>/data/rpg.json``.
+    def load_rpg(cmind_dir: str) -> Optional[RPG]:
+        """Load the current RPG from ``<cmind_dir>/data/rpg.json``.
 
         Args:
-            rpgkit_dir: Path to the ``.rpgkit`` directory.
+            cmind_dir: Path to the ``.cmind`` directory.
 
         Returns:
             The loaded RPG, or ``None`` if the file does not exist.
         """
-        rpg_path = os.path.join(rpgkit_dir, "data", RPG_FILE_NAME)
+        rpg_path = os.path.join(cmind_dir, "data", RPG_FILE_NAME)
         if not os.path.isfile(rpg_path):
             return None
 

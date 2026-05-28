@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Check Skeleton Script.
 
-Inspect .rpgkit/skeleton.json and validate its structure.
+Inspect .cmind/skeleton.json and validate its structure.
 Also cross-validate feature paths between refactor_feature.json and skeleton.json.
 
 Decision rules:
@@ -325,7 +325,7 @@ def inspect_state() -> Dict[str, Any]:
     # Determine type and message
     if not input_valid:
         type_value = "error"
-        message = "Input file missing or invalid. Run /rpgkit.refactor_feature first."
+        message = "Input file missing or invalid. Run /cmind.refactor_feature first."
     elif not output_exists or not output_valid:
         type_value = "init"
         message = "Ready to build skeleton."
@@ -357,9 +357,9 @@ def inspect_state() -> Dict[str, Any]:
 
     # Add next_action for clear guidance
     if type_value == "init":
-        result["next_action"] = "rpgkit script build_skeleton.py --max-iterations 10"
+        result["next_action"] = "cmind script build_skeleton.py --max-iterations 10"
     elif type_value == "warning":
-        result["next_action"] = "rpgkit script build_skeleton.py --patch"
+        result["next_action"] = "cmind script build_skeleton.py --patch"
     else:
         result["next_action"] = "Skeleton is consistent. Proceed to next step."
     

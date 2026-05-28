@@ -5,7 +5,7 @@ Phase 1: Planning - Analyze all components and generate edit plan
 Phase 2: Execution - Execute the plan precisely on each component
 Phase 3: Review - Verify changes and auto-fix if needed (up to 3 rounds)
 
-Input/Output: .rpgkit/data/feature_tree.json
+Input/Output: .cmind/data/feature_tree.json
 """
 
 import json

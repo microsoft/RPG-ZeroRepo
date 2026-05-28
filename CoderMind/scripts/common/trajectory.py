@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Trajectory Recording Module for RPG-Kit.
+"""Trajectory Recording Module for CoderMind.
 
 This module provides utilities for recording command execution trajectories,
 including:
@@ -10,7 +10,7 @@ including:
 - Resume support for interrupted executions
 
 Each command (build_feature, refactor_feature, build_skeleton, etc.) 
-maintains its own trajectory file in .rpgkit/trajectory/
+maintains its own trajectory file in .cmind/trajectory/
 """
 
 import json

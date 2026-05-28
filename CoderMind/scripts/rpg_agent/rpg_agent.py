@@ -9,12 +9,12 @@ feeds the result back into the next turn.
 Ported from:
     RPG-ZeroRepo/zerorepo/rpg_encoder/rpg_agent/rpg_agent.py
 
-Adaptations for RPG-Kit:
+Adaptations for CoderMind:
   - Uses ``LLMClient`` (``scripts.common.llm_client``) for CLI-based generation.
   - Uses ``Memory``, ``SystemMessage``, ``UserMessage``, ``AssistantMessage``
     from ``scripts.common.llm_types``.
   - Uses ``Env`` from ``scripts.rpg_agent.env.env`` (no ``persist_dir`` param).
-  - Token usage keys aligned with RPG-Kit's ``LLMUsage.to_dict()`` output
+  - Token usage keys aligned with CoderMind's ``LLMUsage.to_dict()`` output
     (``input_tokens`` / ``output_tokens`` / ``total_tokens``).
   - Removed unused ``repo_skeleton`` / ``data_flow`` computations from
     ``load_task_to_env_prompt`` (they were computed but never used in

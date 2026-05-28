@@ -1,9 +1,9 @@
-"""Home-directory workspace storage layout for RPG-Kit.
+"""Home-directory workspace storage layout for CoderMind.
 
-Replaces the legacy ``workspace/.rpgkit/{data,logs,.git}`` layout with a
-centralised one rooted at ``~/.rpgkit/``:
+Replaces the legacy ``workspace/.cmind/{data,logs,.git}`` layout with a
+centralised one rooted at ``~/.cmind/``:
 
-    ~/.rpgkit/
+    ~/.cmind/
         workspaces/<workspace-id>/
             .meta.toml          {workspace_path, channel, created_at, last_seen_at}
             .git/               inner git snapshot repo
@@ -12,7 +12,7 @@ centralised one rooted at ``~/.rpgkit/``:
 
 The workspace itself retains only two minimal items::
 
-    <workspace>/.rpgkit/
+    <workspace>/.cmind/
         config.toml             AI configuration (team-shared, committed)
         reports/                user-facing reports (e.g. rpg.html)
 
@@ -35,7 +35,7 @@ by comparing ``workspace_path`` recorded in ``.meta.toml``; a
 collision aborts cleanly rather than silently overwriting state.
 
 Why a readable slug and not a flat hash?  Users routinely browse
-``~/.rpgkit/workspaces/`` to find logs, delete stale state, or sanity-
+``~/.cmind/workspaces/`` to find logs, delete stale state, or sanity-
 check which workspace a process is talking to; a slug makes that ten
 times easier than an opaque hex hash.  We accept a small (negligible
 in practice) collision risk in exchange.
@@ -48,8 +48,8 @@ Resolution
 ----------
 
 The "workspace root" is discovered by walking up from the caller's
-current directory looking for the marker ``.rpgkit/config.toml``.  Both
-the MCP server and ``rpgkit script <name>`` use the same logic so a user
+current directory looking for the marker ``.cmind/config.toml``.  Both
+the MCP server and ``cmind script <name>`` use the same logic so a user
 who ``cd``-s into any subdirectory of a workspace gets the right home
 directory automatically.
 
@@ -57,7 +57,7 @@ Public surface
 --------------
 
 * :func:`workspace_id` - the slug (or slug+hash suffix) for a workspace path.
-* :func:`home_workspace_dir` - ``~/.rpgkit/workspaces/<workspace_id>/``.
+* :func:`home_workspace_dir` - ``~/.cmind/workspaces/<workspace_id>/``.
 * :func:`workspace_data_dir`, :func:`workspace_logs_dir`,
   :func:`workspace_inner_git_dir`, :func:`workspace_reports_dir` -
   convenience wrappers for the four canonical subdirectories.
@@ -76,7 +76,7 @@ Design constraints
 * All path inputs are run through :py:meth:`Path.resolve` so symlinked
   workspace roots map to a single canonical id.
 * All filesystem mutations are best-effort idempotent so re-running
-  ``rpgkit init`` or ``rpgkit update`` is safe.
+  ``cmind init`` or ``cmind update`` is safe.
 """
 from __future__ import annotations
 
@@ -98,12 +98,12 @@ except ImportError:  # pragma: no cover - fallback for older Pythons
 # Public constants
 # ---------------------------------------------------------------------------
 
-#: Subdirectory of the user's home where rpgkit keeps all per-workspace data.
-HOME_ROOT_RELPATH = Path(".rpgkit") / "workspaces"
+#: Subdirectory of the user's home where cmind keeps all per-workspace data.
+HOME_ROOT_RELPATH = Path(".cmind") / "workspaces"
 
-#: Marker file inside the workspace that identifies it as an rpgkit
-#: workspace. ``rpgkit init`` writes this; cwd-walk-up looks for it.
-WORKSPACE_MARKER_RELPATH = Path(".rpgkit") / "config.toml"
+#: Marker file inside the workspace that identifies it as an cmind
+#: workspace. ``cmind init`` writes this; cwd-walk-up looks for it.
+WORKSPACE_MARKER_RELPATH = Path(".cmind") / "config.toml"
 
 #: Standard subdirectories created under each home workspace dir.
 _DATA_SUBDIR = "data"
@@ -113,7 +113,7 @@ _META_FILENAME = ".meta.toml"
 
 #: Reports directory inside the workspace (small, user-facing artefacts
 #: like ``rpg.html``).
-WORKSPACE_REPORTS_SUBDIR = Path(".rpgkit") / "reports"
+WORKSPACE_REPORTS_SUBDIR = Path(".cmind") / "reports"
 
 #: Channel values written to ``.meta.toml``.
 CHANNEL_BUNDLE = "bundle"
@@ -164,7 +164,7 @@ def _slugify_path(workspace_path: Path) -> str:
     use as a directory name on every filesystem we target.
 
     Examples:
-        ``/home/hys/projects/rpgkit`` -> ``home-hys-projects-rpgkit``
+        ``/home/hys/projects/cmind`` -> ``home-hys-projects-cmind``
         ``C:\\Users\\foo\\bar``       -> ``c-users-foo-bar``
         ``/``                         -> ``root``
     """
@@ -202,8 +202,8 @@ def workspace_id(workspace_path: Path) -> str:
     Two formats:
 
     * **Short (preferred)** — when the path slug is ≤ 200 chars, use
-      the slug verbatim, e.g. ``home-hys-projects-rpgkit``.  Readable
-      at a glance; lets users browse ``~/.rpgkit/workspaces/`` and
+      the slug verbatim, e.g. ``home-hys-projects-cmind``.  Readable
+      at a glance; lets users browse ``~/.cmind/workspaces/`` and
       identify their projects without cross-referencing a hash table.
     * **Truncated (overflow)** — when the slug exceeds the budget,
       keep the first ~193 chars and append ``-<hash6>`` where
@@ -230,7 +230,7 @@ def workspace_id(workspace_path: Path) -> str:
 # ---------------------------------------------------------------------------
 
 def home_root() -> Path:
-    """Return ``~/.rpgkit/workspaces/``.
+    """Return ``~/.cmind/workspaces/``.
 
     Does not create the directory; callers should use
     :func:`ensure_workspace_storage` when they need it to exist.
@@ -241,11 +241,11 @@ def home_root() -> Path:
 def home_workspace_dir(workspace_path: Path) -> Path:
     """Return the home directory assigned to ``workspace_path``.
 
-    Normally this is ``~/.rpgkit/workspaces/<workspace_id>/`` using the
+    Normally this is ``~/.cmind/workspaces/<workspace_id>/`` using the
     slug-based id from :func:`workspace_id`.
 
     Backward compatibility: if a directory under the **legacy** 12-char
-    hex id already exists on disk (created by rpgkit < 0.1.4) and no
+    hex id already exists on disk (created by cmind < 0.1.4) and no
     slug-named directory exists for the same path, the legacy directory
     is returned so the user keeps reaching their existing state after
     upgrading.  New workspaces always use the slug-based layout.
@@ -301,7 +301,7 @@ def workspace_reports_dir(workspace_path: Path) -> Path:
 def _is_live_workspace_root(root: Path) -> bool:
     """Return True iff a candidate workspace root is still live.
 
-    A bare ``.rpgkit/config.toml`` is enough for a *fresh* workspace
+    A bare ``.cmind/config.toml`` is enough for a *fresh* workspace
     (the marker may be planted before any home-side state is written),
     so the marker alone is treated as live until proven stale.
 
@@ -322,10 +322,10 @@ def _is_live_workspace_root(root: Path) -> bool:
 
 
 def find_workspace_root_from(start: Optional[Path] = None) -> Optional[Path]:
-    """Walk up from ``start`` (default: cwd) looking for an rpgkit workspace.
+    """Walk up from ``start`` (default: cwd) looking for an cmind workspace.
 
     A directory qualifies as a workspace if it contains
-    ``.rpgkit/config.toml`` (see :data:`WORKSPACE_MARKER_RELPATH`)
+    ``.cmind/config.toml`` (see :data:`WORKSPACE_MARKER_RELPATH`)
     **and** passes :func:`_is_live_workspace_root` — i.e. either it
     has no ``.meta.toml`` (fresh workspace), or the recorded
     ``workspace_path`` in meta still matches.  Stale (moved/renamed)
@@ -395,7 +395,7 @@ def write_meta(
     workspace_path: Path,
     *,
     channel: str,
-    rpgkit_cli_version: Optional[str] = None,
+    cmind_cli_version: Optional[str] = None,
     preserve_created_at: bool = True,
 ) -> None:
     """Atomically write the workspace's ``.meta.toml``.
@@ -404,9 +404,9 @@ def write_meta(
         workspace_path: The workspace directory (resolved internally).
         channel: ``"bundle"`` or ``"legacy"`` -- which provisioning
             channel was used.
-        rpgkit_cli_version: The installed rpgkit-cli version at write
-            time.  Stored as ``rpgkit_cli_version_at_init`` (only on
-            first write) and ``rpgkit_cli_version_last_seen`` (every
+        cmind_cli_version: The installed cmind-cli version at write
+            time.  Stored as ``cmind_cli_version_at_init`` (only on
+            first write) and ``cmind_cli_version_last_seen`` (every
             write).
         preserve_created_at: When True (the default), keep the original
             ``created_at`` from any existing meta file; otherwise
@@ -430,19 +430,19 @@ def write_meta(
     if preserve_created_at:
         created_at = existing.get("created_at", now)
         # On preserve, also carry forward the version recorded at init
-        # so re-running ``rpgkit update`` doesn't blow away that history.
+        # so re-running ``cmind update`` doesn't blow away that history.
         init_version = existing.get(
-            "rpgkit_cli_version_at_init", rpgkit_cli_version or ""
+            "cmind_cli_version_at_init", cmind_cli_version or ""
         )
     else:
         # "Reset" semantics: created_at and init_version both refresh
         # to the values supplied in this call.
         created_at = now
-        init_version = rpgkit_cli_version or ""
+        init_version = cmind_cli_version or ""
 
     # Serialise by hand - tiny + avoids a TOML writer dep.
     lines = [
-        "# RPG-Kit per-workspace state. Managed by `rpgkit init/update`.",
+        "# CoderMind per-workspace state. Managed by `cmind init/update`.",
         "# Do not commit; recreated automatically if missing.",
         "",
         f'workspace_path = "{_toml_escape(str(resolved))}"',
@@ -451,10 +451,10 @@ def write_meta(
         f'last_seen_at = "{now}"',
     ]
     if init_version:
-        lines.append(f'rpgkit_cli_version_at_init = "{_toml_escape(init_version)}"')
-    if rpgkit_cli_version:
+        lines.append(f'cmind_cli_version_at_init = "{_toml_escape(init_version)}"')
+    if cmind_cli_version:
         lines.append(
-            f'rpgkit_cli_version_last_seen = "{_toml_escape(rpgkit_cli_version)}"'
+            f'cmind_cli_version_last_seen = "{_toml_escape(cmind_cli_version)}"'
         )
     payload = "\n".join(lines) + "\n"
 
@@ -481,7 +481,7 @@ class WorkspaceMetaMismatch(RuntimeError):
 
     This indicates either a hash collision (statistically very rare for
     a 48-bit truncated hash on a single machine, but possible) or a
-    user manually moving directories under ``~/.rpgkit/``.  We never
+    user manually moving directories under ``~/.cmind/``.  We never
     silently mix two workspaces' data; the user must investigate.
     """
 
@@ -490,13 +490,13 @@ def ensure_workspace_storage(
     workspace_path: Path,
     *,
     channel: str,
-    rpgkit_cli_version: Optional[str] = None,
+    cmind_cli_version: Optional[str] = None,
 ) -> Path:
     """Create the home layout for ``workspace_path`` (idempotent).
 
     Creates::
 
-        ~/.rpgkit/workspaces/<workspace-id>/
+        ~/.cmind/workspaces/<workspace-id>/
             data/
             logs/
 
@@ -507,11 +507,11 @@ def ensure_workspace_storage(
     rather than overwriting another workspace's data.
 
     The inner ``.git/`` directory is NOT created here; that's the
-    responsibility of :mod:`rpgkit_cli._inner_git`, which knows how to
+    responsibility of :mod:`cmind_cli._inner_git`, which knows how to
     seed an initial commit message.
 
     Returns:
-        The home workspace directory (``~/.rpgkit/workspaces/<workspace-id>/``).
+        The home workspace directory (``~/.cmind/workspaces/<workspace-id>/``).
     """
     resolved = _resolve(workspace_path)
     home_dir = home_workspace_dir(resolved)
@@ -532,7 +532,7 @@ def ensure_workspace_storage(
     (home_dir / _LOGS_SUBDIR).mkdir(parents=True, exist_ok=True)
     workspace_reports_dir(resolved).mkdir(parents=True, exist_ok=True)
 
-    write_meta(resolved, channel=channel, rpgkit_cli_version=rpgkit_cli_version)
+    write_meta(resolved, channel=channel, cmind_cli_version=cmind_cli_version)
     return home_dir
 
 
