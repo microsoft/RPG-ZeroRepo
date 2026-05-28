@@ -9,9 +9,6 @@
 [![Python 3.11+](https://img.shields.io/badge/python-3.11+-blue.svg)](https://www.python.org/downloads/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
-> [!NOTE]
-> **CoderMind** is the new name for **RPG-Kit**. The product has been renamed; the install command (`rpgkit`) and package (`rpgkit-cli`) will be renamed in a subsequent release.
-
 🔥 **New: [CoderMind](CoderMind/) is now open source for Claude Code and GitHub Copilot.**
 
 Coding agents often lose repository-level context across long tasks: requirements drift, architecture decisions disappear, and edits miss hidden dependencies.

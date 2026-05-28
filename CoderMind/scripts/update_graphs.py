@@ -818,12 +818,33 @@ def main():
 
     workspace_root = os.getcwd()
 
-    # For background hook processes (setsid), cwd may not be the
-    # workspace root.  Use the rpg file path to infer it:
-    # rpg_path = <workspace>/.cmind/data/rpg.json → workspace = rpg_path/../../../
+    # For background hook processes (setsid) or any caller whose cwd is
+    # not the workspace root, infer the workspace.  Earlier versions of
+    # this fallback walked up from ``args.rpg`` assuming a layout of
+    # ``<workspace>/.cmind/data/rpg.json``, which became wrong once the
+    # default ``rpg.json`` moved into the home-side store
+    # (``~/.cmind/workspaces/<id>/data/rpg.json``) in v0.1.3.  Use the
+    # storage helper that already knows how to find the live workspace,
+    # plus the ``CMIND_WORKSPACE`` env var as a final hint.
     if not os.path.isdir(os.path.join(workspace_root, ".cmind")):
-        inferred = args.rpg.resolve().parent.parent.parent
-        if (inferred / ".cmind").is_dir():
+        try:
+            from cmind_cli._storage import find_workspace_root_from
+        except Exception:
+            find_workspace_root_from = None
+
+        inferred: Path | None = None
+        if find_workspace_root_from is not None:
+            try:
+                inferred = find_workspace_root_from(Path.cwd())
+            except Exception:
+                inferred = None
+        if inferred is None:
+            env = os.environ.get("CMIND_WORKSPACE")
+            if env:
+                cand = Path(env).expanduser()
+                if cand.is_dir():
+                    inferred = cand
+        if inferred is not None and (inferred / ".cmind").is_dir():
             workspace_root = str(inferred)
             os.chdir(workspace_root)
 

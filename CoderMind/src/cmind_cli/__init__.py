@@ -839,10 +839,18 @@ _GITIGNORE_CMIND_HEADER = "# CoderMind ignores (managed by `cmind init/update`)"
 
 _GITIGNORE_CMIND_COMMON = """\
 # Runtime workspace (logs, generated data, trajectory)
-.cmind/
+# NOTE: ``.cmind/*`` (glob), not ``.cmind/`` (whole-dir).  Git does not
+# descend into a directory ignored as a whole, so the ``!`` negation
+# below would have no effect with the directory form.
+.cmind/*
 # but DO track the workspace AI config so collaborators see the same
 # default — see docs/configuration.md
 !.cmind/config.toml
+
+# Legacy runtime dir from pre-cmind (rpgkit) workspaces — kept so users
+# upgrading don't accidentally commit stale data while the old directory
+# still exists alongside .cmind/.
+.rpgkit/
 
 # Codegen dev environments
 .venv_dev/

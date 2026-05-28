@@ -624,7 +624,7 @@ def main():
     if not input_path.exists():
         logger.error(f"Input file not found: {input_path}")
         print(f"ERROR: Input file not found: {input_path}")
-        print("Please run /cmind.refactor_feature first.")
+        print("Please run /cmind.feature_refactor first.")
         return 1
 
     try:

@@ -24,7 +24,7 @@ Run the script `cmind script check_skeleton.py` to verify the current state.
 
 1. Inspect the `type` field in the output:
 
-   * `error` → Display the error message and stop. Instruct user to run `/cmind.refactor_feature` first. Terminate this command.
+   * `error` → Display the error message and stop. Instruct user to run `/cmind.feature_refactor` first. Terminate this command.
    * `init` → Proceed to Step 2.
    * `warning` → Display the following prompt and wait for user confirmation:
 

@@ -225,10 +225,15 @@ plans/
 .claude
 
 # CoderMind ignores (managed by `cmind init/update`)
-.cmind/
+.cmind/*
 # But DO commit the workspace AI config so collaborators get a sane default.
 # Plan: plans/01-package-bundle-and-ai-config.md decision 15.
+# (Must use `.cmind/*` above, not `.cmind/`, so this negation can take effect:
+# git does not descend into a directory ignored as a whole.)
 !.cmind/config.toml
+# Legacy runtime dir from pre-cmind workspaces — still ignored so old
+# data doesn't accidentally get committed during upgrades.
+.rpgkit/
 .vscode/mcp.json
 .vscode/tasks.json
 .mcp.json

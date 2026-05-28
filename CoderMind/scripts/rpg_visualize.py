@@ -1877,7 +1877,7 @@ def main():
 
     parser = argparse.ArgumentParser(description="Visualize RPG as interactive graph")
     parser.add_argument("rpg_file", nargs="?", default=str(RPG_FILE),
-                        help="Path to rpg.json (default: .cmind/data/rpg.json)")
+                        help="Path to rpg.json (default: home-side workspace store at ~/.cmind/workspaces/<id>/data/rpg.json)")
     parser.add_argument("--dep-graph", default=None,
                         help="Path to dep_graph.json (default: dep_graph_file field or sibling dep_graph.json)")
     parser.add_argument("-o", "--output", default=None,

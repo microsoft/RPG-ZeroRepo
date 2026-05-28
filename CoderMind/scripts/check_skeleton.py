@@ -325,7 +325,7 @@ def inspect_state() -> Dict[str, Any]:
     # Determine type and message
     if not input_valid:
         type_value = "error"
-        message = "Input file missing or invalid. Run /cmind.refactor_feature first."
+        message = "Input file missing or invalid. Run /cmind.feature_refactor first."
     elif not output_exists or not output_valid:
         type_value = "init"
         message = "Ready to build skeleton."

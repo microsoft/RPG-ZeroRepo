@@ -145,6 +145,7 @@ def _filter_build(file_id: str) -> bool:
         ".venv", "venv", ".idea", ".vscode",
         ".pytest_cache", ".mypy_cache", "build", "dist",
         ".cmind", ".venv_dev",
+        ".rpgkit",  # legacy runtime dir (pre-rename), skip if still present
     }
     FILE_BL = {
         "Makefile", "CMakeLists.txt", "Dockerfile",
