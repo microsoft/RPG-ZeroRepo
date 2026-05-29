@@ -75,13 +75,25 @@ def get_all_units_from_tasks(tasks_path: Path) -> Set[str]:
     """
     with open(tasks_path, 'r', encoding='utf-8') as f:
         data = json.load(f)
-    
+
     units = set()
-    
+
+    # ``plan_tasks.py`` emits auxiliary scaffolding tasks (README,
+    # requirements.txt, integration tests, cross-module wiring, UI
+    # polish, main entry, comprehensive tests) using synthetic file-path
+    # placeholders wrapped in angle-brackets such as ``<README>`` or
+    # ``<INTEGRATION_TEST>_Foo``. These are by design not present in
+    # ``interfaces.json``; skipping them prevents false-positive
+    # ``missing_in_interfaces`` warnings from the cross-validation step.
+    def _is_synthetic(file_path: str) -> bool:
+        return file_path.startswith("<") and ">" in file_path
+
     # Support planned_tasks_dict format
     if "planned_tasks_dict" in data:
         for component_name, files_dict in data["planned_tasks_dict"].items():
             for file_path, task_list in files_dict.items():
+                if _is_synthetic(file_path):
+                    continue
                 for task in task_list:
                     # units_key contains the unit names
                     for unit_name in task.get("units_key", []):
@@ -92,9 +104,9 @@ def get_all_units_from_tasks(tasks_path: Path) -> Set[str]:
             for unit in batch.get("units", []):
                 file_path = unit.get("file_path", "")
                 unit_name = unit.get("unit_name", "")
-                if file_path and unit_name:
+                if file_path and unit_name and not _is_synthetic(file_path):
                     units.add(f"{file_path}::{unit_name}")
-    
+
     return units
 
 
