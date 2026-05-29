@@ -486,7 +486,7 @@ def main(argv: Optional[list[str]] = None) -> int:
         build_extra = _build_args_for(s.stage, args)
         rc = _run_stage(invoker, s.stage.build_script, build_extra)
         if rc != 0:
-            _print_failure_hint(s.stage, rc, phase="build")
+            _print_failure_hint(invoker, s.stage, rc, phase="build")
             return rc
 
         # Re-run the check to confirm the artifact came out valid.  Parse
@@ -516,7 +516,7 @@ def main(argv: Optional[list[str]] = None) -> int:
             )
             for err in verify.get("validation_errors", [])[:5]:
                 print(f"     - {err}", file=sys.stderr)
-            _print_failure_hint(s.stage, 1, phase="check")
+            _print_failure_hint(invoker, s.stage, 1, phase="check")
             return 1
 
         elapsed = time.monotonic() - stage_started
@@ -536,26 +536,39 @@ def main(argv: Optional[list[str]] = None) -> int:
     print(f"Plan complete in {total_elapsed:.1f}s.")
     print("Next: `/cmind.code_gen` to generate source code.")
     print("Graph: see the 'Writing visualization to:' line above for the generated HTML path.")
+    return 0
 
 
-def _print_failure_hint(stage: Stage, rc: int, *, phase: str) -> None:
+def _print_failure_hint(
+    invoker: list[str],
+    stage: Stage,
+    rc: int,
+    *,
+    phase: str,
+) -> None:
     """Print recovery hints to stderr after a stage fails.
 
     ``phase`` is ``"build"`` or ``"check"``; the debug command points at
-    the script that actually failed so the user can reproduce.
+    the script that actually failed so the user can reproduce. Commands
+    are rendered using the current *invoker* so the hint stays correct
+    whether ``cmind`` is on ``$PATH`` (``cmind script <name>``) or the
+    Python fallback is in use (``python <abspath>``).
     """
     debug_script = stage.build_script if phase == "build" else stage.check_script
+
+    def _fmt(name: str, *extra: str) -> str:
+        # Render the command using the basename of the invoker so
+        # users see e.g. ``cmind script ...`` or ``python ...`` rather
+        # than the resolved absolute path that subprocess actually uses.
+        argv = _script_argv(invoker, name)
+        display = [Path(argv[0]).name, *argv[1:], *extra]
+        return " ".join(display)
+
     print(file=sys.stderr)
     print(f"✗ {stage.name} {phase} failed (exit {rc})", file=sys.stderr)
-    print("  Resume :  cmind script plan.py", file=sys.stderr)
-    print(
-        f"  Debug  :  cmind script {debug_script} --verbose",
-        file=sys.stderr,
-    )
-    print(
-        "  Status :  cmind script plan.py --check-only",
-        file=sys.stderr,
-    )
+    print(f"  Resume :  {_fmt('plan.py')}", file=sys.stderr)
+    print(f"  Debug  :  {_fmt(debug_script, '--verbose')}", file=sys.stderr)
+    print(f"  Status :  {_fmt('plan.py', '--check-only')}", file=sys.stderr)
 
 
 if __name__ == "__main__":

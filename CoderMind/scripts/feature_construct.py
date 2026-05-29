@@ -366,14 +366,34 @@ def _install_sigint_handler() -> None:
     signal.signal(signal.SIGINT, _handle)
 
 
-def _print_failure_hint(stage: Stage, rc: int, *, phase: str) -> None:
+def _print_failure_hint(
+    invoker: list[str],
+    stage: Stage,
+    rc: int,
+    *,
+    phase: str,
+) -> None:
+    """Print recovery hints to stderr after a stage fails.
+
+    Commands are rendered using the current *invoker* so the hint stays
+    correct whether ``cmind`` is on ``$PATH`` (``cmind script <name>``)
+    or the Python fallback is in use (``python <abspath>``).
+    """
     debug_args = _debug_args_for(stage)
-    debug_cmd = " ".join(["cmind", "script", stage.build_script, *debug_args])
+
+    def _fmt(name: str, *extra: str) -> str:
+        # Render the command using the basename of the invoker so
+        # users see e.g. ``cmind script ...`` or ``python ...`` rather
+        # than the resolved absolute path that subprocess actually uses.
+        argv = _script_argv(invoker, name)
+        display = [Path(argv[0]).name, *argv[1:], *extra]
+        return " ".join(display)
+
     print(file=sys.stderr)
     print(f"X {stage.name} {phase} failed (exit {rc})", file=sys.stderr)
-    print("  Resume :  cmind script feature_construct.py", file=sys.stderr)
-    print(f"  Debug  :  {debug_cmd}", file=sys.stderr)
-    print("  Status :  cmind script feature_construct.py --check-only", file=sys.stderr)
+    print(f"  Resume :  {_fmt('feature_construct.py')}", file=sys.stderr)
+    print(f"  Debug  :  {_fmt(stage.build_script, *debug_args)}", file=sys.stderr)
+    print(f"  Status :  {_fmt('feature_construct.py', '--check-only')}", file=sys.stderr)
 
 
 def main(argv: Optional[list[str]] = None) -> int:
@@ -420,7 +440,7 @@ def main(argv: Optional[list[str]] = None) -> int:
         _reset_output_if_needed(state)
         rc = _run_stage(invoker, state.stage.build_script, _build_args_for(state.stage, args))
         if rc != 0:
-            _print_failure_hint(state.stage, rc, phase="build")
+            _print_failure_hint(invoker, state.stage, rc, phase="build")
             return rc
 
         verify = _check_stage(state.stage)
@@ -429,7 +449,7 @@ def main(argv: Optional[list[str]] = None) -> int:
                 f"   verification failed: {verify.type} — {verify.message}",
                 file=sys.stderr,
             )
-            _print_failure_hint(state.stage, 1, phase="check")
+            _print_failure_hint(invoker, state.stage, 1, phase="check")
             return 1
 
         elapsed = time.monotonic() - stage_started
