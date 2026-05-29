@@ -69,7 +69,7 @@ Run the full Phase 1 pipeline (`feature_spec` → `feature_build` → `feature_r
 - **Auto-detect:** omit input to use existing `docs/*.md` files automatically.
 - **Inline prompt:** if neither direct input nor usable docs exist, the command asks for requirements and then continues in the same flow.
 
-**Output:** the three Phase 1 JSON artefacts — `feature_spec.json`, `feature_build.json`, and `feature_tree.json` — in the CoderMind data store. No intermediate Markdown documents are produced.
+**Output:** the three Phase 1 JSON artefacts — `feature_spec.json`, `feature_build.json`, and `feature_tree.json` — in the CoderMind data store.
 
 **Process:**
 
@@ -121,8 +121,7 @@ documentation files.
 **Output:** `.cmind/data/feature_spec.json` — a Pydantic-validated JSON
 document containing `meta`, `repository_name`, `repository_purpose`,
 `background_and_overview`, `non_functional_requirements`, and a
-recursive `functional_requirements` tree. No intermediate Markdown
-artefacts are produced.
+recursive `functional_requirements` tree.
 
 **Examples:**
 
