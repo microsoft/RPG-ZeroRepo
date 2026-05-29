@@ -149,7 +149,7 @@ class TestExecutionReset:
 
         def fake_run_stage(invoker: list[str], script_name: str, extra: list[str]) -> int:
             calls.append(script_name)
-            if script_name == "feature_spec_to_json.py":
+            if script_name == "feature_spec.py":
                 _write_json(artifact_paths["feature_spec"], _valid_feature_spec())
             elif script_name == "feature_build.py":
                 assert not artifact_paths["feature_build"].exists()
@@ -164,7 +164,7 @@ class TestExecutionReset:
         rc = feature_construct.main(["--force"])
 
         assert rc == 0
-        assert calls == ["feature_spec_to_json.py", "feature_build.py", "feature_refactor.py"]
+        assert calls == ["feature_spec.py", "feature_build.py", "feature_refactor.py"]
 
     def test_cascade_removes_stale_downstream_artifacts_before_stage_invocation(
         self,
@@ -180,7 +180,7 @@ class TestExecutionReset:
 
         def fake_run_stage(invoker: list[str], script_name: str, extra: list[str]) -> int:
             calls.append(script_name)
-            if script_name == "feature_spec_to_json.py":
+            if script_name == "feature_spec.py":
                 _write_json(artifact_paths["feature_spec"], _valid_feature_spec())
             elif script_name == "feature_build.py":
                 assert not artifact_paths["feature_build"].exists()
@@ -195,7 +195,7 @@ class TestExecutionReset:
         rc = feature_construct.main([])
 
         assert rc == 0
-        assert calls == ["feature_spec_to_json.py", "feature_build.py", "feature_refactor.py"]
+        assert calls == ["feature_spec.py", "feature_build.py", "feature_refactor.py"]
 
     def test_invalid_output_sensitive_artifact_is_removed_before_stage_invocation(
         self,
@@ -359,7 +359,23 @@ class TestBuildArgs:
         assert refactor_args[refactor_args.index("--log-level") + 1] == "DEBUG"
         assert "--no-trajectory" in refactor_args
 
-    def test_feature_spec_receives_no_unsupported_options(self) -> None:
-        ns = feature_construct._parse_args(["--verbose", "--no-trajectory"])
+    def test_feature_spec_receives_supported_facade_options(self) -> None:
+        # ``feature_spec.py`` (the new Python+LLMClient pipeline) accepts
+        # the standard facade flags --force / --verbose / --no-trajectory.
+        ns = feature_construct._parse_args(["--force", "--verbose", "--no-trajectory"])
         stage = next(stage for stage in feature_construct.STAGES if stage.name == "feature_spec")
-        assert feature_construct._build_args_for(stage, ns) == []
+        args = feature_construct._build_args_for(stage, ns)
+        assert "--force" in args
+        assert "--verbose" in args
+        assert "--no-trajectory" in args
+        # Build/refactor-only options must NOT leak into feature_spec.
+        ns2 = feature_construct._parse_args([
+            "--review-threshold", "99",
+            "--review-max-iterations", "3",
+            "--max-iter-refactor", "5",
+        ])
+        args2 = feature_construct._build_args_for(stage, ns2)
+        assert "--review-threshold" not in args2
+        assert "--review-max-iterations" not in args2
+        assert "--max-iter-refactor" not in args2
+        assert "--max-iterations" not in args2
