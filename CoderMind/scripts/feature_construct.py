@@ -14,7 +14,6 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Optional
 
-from common.paths import DATA_DIR
 from common.paths import FEATURE_BUILD_FILE as _FEATURE_BUILD_FILE
 from common.paths import FEATURE_SPEC_FILE as _FEATURE_SPEC_FILE
 from common.paths import FEATURE_TREE_FILE as _FEATURE_TREE_FILE
@@ -50,7 +49,7 @@ class Stage:
 
 
 STAGES: tuple[Stage, ...] = (
-    Stage(name="feature_spec", build_script="feature_spec_to_json.py"),
+    Stage(name="feature_spec", build_script="feature_spec.py"),
     Stage(name="feature_build", build_script="feature_build.py"),
     Stage(name="feature_refactor", build_script="feature_refactor.py"),
 )
@@ -263,7 +262,18 @@ def _format_number(value: float) -> str:
 
 def _build_args_for(stage: Stage, args: argparse.Namespace) -> list[str]:
     extra: list[str] = []
-    if stage.name == "feature_build":
+    if stage.name == "feature_spec":
+        # ``feature_spec.py`` accepts the standard facade flags only;
+        # inline requirement text reaches it via the slash-command layer
+        # (which calls ``feature_spec.py --input-text "..."`` directly
+        # before resuming the orchestrator).
+        if args.force:
+            extra.append("--force")
+        if args.verbose:
+            extra.append("--verbose")
+        if args.no_trajectory:
+            extra.append("--no-trajectory")
+    elif stage.name == "feature_build":
         extra.extend(["--mode", "step1"])
         if args.review_threshold is not None:
             extra.extend(["--review-threshold", _format_number(args.review_threshold)])
@@ -293,6 +303,7 @@ def _debug_args_for(stage: Stage) -> list[str]:
 
 def _target_output_for(stage: Stage) -> Optional[Path]:
     return {
+        "feature_spec": FEATURE_SPEC_FILE,
         "feature_build": FEATURE_BUILD_FILE,
         "feature_refactor": FEATURE_TREE_FILE,
     }.get(stage.name)
@@ -380,9 +391,9 @@ def main(argv: Optional[list[str]] = None) -> int:
 
     runnable = [state for state in states if state.will_run]
     if not runnable:
-        print("All 3 Phase 1 feature construction stages are already complete — nothing to do.")
-        print("Use `cmind script feature_construct.py --force` to rebuild from scratch.")
-        print("Next: `/cmind.plan` to build the RPG planning pipeline.")
+        print("All Phase 1 stages are already complete — nothing to do.")
+        print("Use `--force` to rebuild from scratch.")
+        print("Next: `/cmind.plan` to build the Repository Planning Graph (RPG).")
         return 0
 
     print(f"Feature construction pipeline: {len(runnable)} of {len(states)} stages to run.")
@@ -425,9 +436,7 @@ def main(argv: Optional[list[str]] = None) -> int:
     total_elapsed = time.monotonic() - started
     print()
     print(f"Feature construct complete in {total_elapsed:.1f}s.")
-    print("Next: `/cmind.plan` to build the RPG planning pipeline.")
-    print("Optional: expand features, or run `/cmind.feature_edit <instructions>` for small tree adjustments.")
-    print("Granular debug commands remain available: `/cmind.feature_spec`, `/cmind.feature_build`, `/cmind.feature_refactor`.")
+    print("Next: `/cmind.plan` to build the Repository Planning Graph (RPG).")
     return 0
 
 
