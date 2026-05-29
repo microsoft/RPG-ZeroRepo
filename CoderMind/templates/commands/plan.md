@@ -135,7 +135,4 @@ Planning pipeline complete.
 
 Next:
   /cmind.code_gen        — generate source code from the plan
-
-Inspect progress:
-  cmind script plan.py --check-only   — re-print the progress table
 ```

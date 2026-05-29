@@ -484,10 +484,24 @@ def main(argv: Optional[list[str]] = None) -> int:
         # its JSON quietly; surface details only when the verification
         # fails, otherwise the user would see a JSON dump after every
         # stage.
+        #
+        # ``update``  -> stage is fully valid; continue.
+        # ``warning`` -> artefact is usable but a soft inconsistency was
+        #                detected (e.g. tasks.json having auxiliary tasks
+        #                without a 1:1 interface mapping). Print the
+        #                message and continue; do not fail the pipeline.
+        # ``init`` / ``error`` -> artefact is missing or unusable; fail.
         verify = _run_check(invoker, s.stage.check_script)
-        if verify.get("type") != "update":
+        verify_type = verify.get("type", "error")
+        if verify_type == "warning":
             print(
-                f"   verification failed: {verify.get('type', 'error')} — "
+                f"   warning: {verify.get('message', 'no message')}"
+                f" (continuing)",
+                file=sys.stderr,
+            )
+        elif verify_type != "update":
+            print(
+                f"   verification failed: {verify_type} — "
                 f"{verify.get('message', 'no message')}",
                 file=sys.stderr,
             )
