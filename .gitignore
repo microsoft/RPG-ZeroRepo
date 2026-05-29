@@ -421,3 +421,4 @@ FodyWeavers.xsd
 CoderMind/.genreleases/
 release_notes.md
 workspace/
+.cmind
