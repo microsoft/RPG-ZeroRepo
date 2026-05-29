@@ -69,7 +69,7 @@ Run the full Phase 1 pipeline (`feature_spec` → `feature_build` → `feature_r
 - **Auto-detect:** omit input to use existing `docs/*.md` files automatically.
 - **Inline prompt:** if neither direct input nor usable docs exist, the command asks for requirements and then continues in the same flow.
 
-**Output:** every artifact produced by the three individual Phase 1 commands — `.cmind/data/feature_spec/`, `feature_spec.json`, `feature_build.json`, and `feature_tree.json`.
+**Output:** the three Phase 1 JSON artefacts — `feature_spec.json`, `feature_build.json`, and `feature_tree.json` — in the CoderMind data store. No intermediate Markdown documents are produced.
 
 **Process:**
 
@@ -574,7 +574,6 @@ All intermediate data is stored in `.cmind/data/`:
 
 | File | Produced by | Description |
 | ---- | ----------- | ----------- |
-| `feature_spec/` | `feature_construct` / `feature_spec` | Evidence and feature specification documents |
 | `feature_spec.json` | `feature_construct` / `feature_spec` | Structured feature specification |
 | `feature_build.json` | `feature_construct` / `feature_build` | Expanded feature tree |
 | `feature_tree.json` | `feature_construct` / `feature_refactor` / `feature_edit` | Component architecture |

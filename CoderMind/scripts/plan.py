@@ -183,7 +183,13 @@ def _run_check(invoker: list[str], script_name: str) -> dict[str, Any]:
 
 
 def _extract_last_json_object(text: str) -> Optional[dict[str, Any]]:
-    """Best-effort: pull the last ``{...}`` block out of ``text``."""
+    """Best-effort: pull the last ``{...}`` block out of ``text``.
+
+    Robust to unmatched ``}`` characters that may appear in surrounding
+    log lines (e.g. error messages quoting JSON fragments). When depth
+    would go negative, reset the parser state so a later, well-formed
+    object can still be captured.
+    """
     depth = 0
     start = -1
     last: Optional[str] = None
@@ -193,6 +199,9 @@ def _extract_last_json_object(text: str) -> Optional[dict[str, Any]]:
                 start = i
             depth += 1
         elif ch == "}":
+            if depth == 0:
+                # Stray ``}`` outside any object — ignore and stay reset.
+                continue
             depth -= 1
             if depth == 0 and start >= 0:
                 last = text[start : i + 1]
@@ -438,7 +447,7 @@ def main(argv: Optional[list[str]] = None) -> int:
             file=sys.stderr,
         )
         print(
-            "Run `/cmind.feature_refactor` first to produce "
+            "Run `/cmind.feature_construct` first to produce "
             "`feature_tree.json`, then re-run `/cmind.plan`.",
             file=sys.stderr,
         )
@@ -536,7 +545,7 @@ def _print_failure_hint(stage: Stage, rc: int, *, phase: str) -> None:
     the script that actually failed so the user can reproduce.
     """
     debug_script = stage.build_script if phase == "build" else stage.check_script
-    print()
+    print(file=sys.stderr)
     print(f"✗ {stage.name} {phase} failed (exit {rc})", file=sys.stderr)
     print("  Resume :  cmind script plan.py", file=sys.stderr)
     print(

@@ -74,7 +74,9 @@ def _resolve_invoker() -> list[str]:
 
 
 def _script_argv(invoker: list[str], script_name: str) -> list[str]:
-    if Path(invoker[0]).name == "cmind":
+    # Use ``.stem`` so the check matches both ``cmind`` (POSIX) and
+    # ``cmind.exe`` (Windows packaging) uniformly.
+    if Path(invoker[0]).stem == "cmind":
         return [*invoker, script_name]
     return [*invoker, str(_SCRIPTS_DIR / script_name)]
 

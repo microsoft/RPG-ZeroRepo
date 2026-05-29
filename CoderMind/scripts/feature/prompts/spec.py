@@ -33,7 +33,7 @@ document that downstream code-generation stages can consume directly.
 
 Emit **exactly one** ``<result_json>...</result_json>`` block at the end of
 your response.  The block must contain a JSON object validating against
-the following Pydantic schema (camel-case names are JSON keys):
+the following Pydantic schema (snake_case attribute names are the JSON keys):
 
 ```python
 class Evidence(BaseModel):
