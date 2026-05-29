@@ -1,5 +1,5 @@
 ---
-description: Run the full RPG planning pipeline (skeleton → data_flow → base_classes → interfaces → tasks) in one step with automatic resume
+description: Build the complete Phase 2 Repository Planning Graph (RPG) from the feature tree in one step, with automatic resume on failure
 name: cmind.plan
 ---
 
@@ -15,11 +15,9 @@ If empty, proceed with default behavior.
 
 ## **Outline**
 
-This command consolidates the five planning sub-commands
-(`/cmind.build_skeleton`, `/cmind.build_data_flow`,
-`/cmind.design_base_classes`, `/cmind.design_interfaces`,
-`/cmind.plan_tasks`) into a single non-interactive run with
-automatic resume.
+Given the feature tree produced by `/cmind.feature_construct`, this
+command builds the complete Repository Planning Graph (RPG) in a single
+non-interactive run with automatic resume on failure.
 
 > [!WARNING]
 > A full pipeline run can take from a few minutes to over an hour
@@ -138,13 +136,6 @@ Planning pipeline complete.
 Next:
   /cmind.code_gen        — generate source code from the plan
 
-Inspect:
-  ~/.cmind/workspaces/<workspace-id>/data/data_flow_viz.html   — interactive DAG visualization
-  cmind script plan.py --check-only — re-print the progress table
-
-For surgical adjustments to individual stages, the granular
-slash-commands are still available:
-  /cmind.build_skeleton, /cmind.build_data_flow,
-  /cmind.design_base_classes, /cmind.design_interfaces,
-  /cmind.plan_tasks
+Inspect progress:
+  cmind script plan.py --check-only   — re-print the progress table
 ```

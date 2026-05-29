@@ -51,17 +51,17 @@ Inspect the `type` field in the output:
    - `file_not_found`:
 
      ```markdown
-     > **Error**: The file `.cmind/data/feature_tree.json` does not exist.
+     > **Error**: No feature tree found.
      > 
-     > Please run `/cmind.feature_refactor` first to generate the feature tree.
+     > Please run `/cmind.feature_construct` first to build the feature tree.
      ```
 
    - `field_empty` or `field_missing`:
 
      ```markdown
-     > **Error**: The file exists but the `components` field is missing or empty.
+     > **Error**: The feature tree exists but is incomplete.
      > 
-     > Please run `/cmind.feature_refactor` to generate a valid feature tree structure.
+     > Please run `/cmind.feature_construct` to rebuild a valid feature tree.
      ```
 
 2. **If `type` is `"ready"`**: Proceed to Step 2.
@@ -133,5 +133,5 @@ After the script completes:
    If you are satisfied with the feature tree and ready to proceed to the **next step**, run:
 
    ```text
-   /cmind.build_skeleton
+   /cmind.plan
    ```
