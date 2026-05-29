@@ -133,9 +133,7 @@ uvx --from "git+https://github.com/microsoft/RPG-ZeroRepo.git#subdirectory=Coder
 4. 运行正向流水线：
 
    ```text
-   /cmind.feature_spec <feature description>
-   /cmind.feature_build
-   /cmind.feature_refactor
+   /cmind.feature_construct <feature description>
    [Optional] /cmind.feature_edit <edit instructions>
    /cmind.plan
    /cmind.code_gen
@@ -145,8 +143,8 @@ uvx --from "git+https://github.com/microsoft/RPG-ZeroRepo.git#subdirectory=Coder
 > [!IMPORTANT]
 > **不同 Coding Agent 的调用方式略有不同**：
 >
-> - **Claude Code**：直接在对话中输入 `/cmind.feature_spec ...`，slash command 会被识别并触发对应 workflow。
-> - **GitHub Copilot CLI**：不支持 slash command（但支持自定义 agent），需要先 `/agent cmind.feature_spec` 切换到目标 agent，然后输入 `start` 让它执行内置的 workflow。
+> - **Claude Code**：直接在对话中输入 `/cmind.feature_construct ...`，slash command 会被识别并触发对应 workflow。
+> - **GitHub Copilot CLI**：不支持 slash command（但支持自定义 agent），需要先 `/agent cmind.feature_construct` 切换到目标 agent，然后输入 `start` 让它执行内置的 workflow。
 
 CoderMind 会渐进式地在 home-side 运行时目录（`~/.cmind/workspaces/<workspace-id>/data/rpg.json`）里创建 `rpg.json`，并用它把需求、规划产物、生成的代码和依赖信息保持对齐。你的工作区源文件不会被污染。
 
@@ -188,7 +186,7 @@ CoderMind 会渐进式地在 home-side 运行时目录（`~/.cmind/workspaces/<w
 
 ```text
 my-project/
-├── docs/                 # /cmind.feature_spec 的可选需求文档
+├── docs/                 # /cmind.feature_construct 的可选需求文档
 ├── .github/ or .claude/  # AI 助手的命令定义和设置
 ├── .vscode/              # 适用时的 Copilot/VS Code MCP 配置
 ├── .cmind/              # 包含生成的报告和配置文件

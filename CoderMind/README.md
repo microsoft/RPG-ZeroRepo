@@ -136,9 +136,7 @@ Use this path when you want CoderMind to turn requirements into a new codebase.
 4. Run the forward pipeline:
 
    ```text
-   /cmind.feature_spec <feature description>
-   /cmind.feature_build
-   /cmind.feature_refactor
+   /cmind.feature_construct <feature description>
    [Optional] /cmind.feature_edit <edit instructions>
    /cmind.plan
    /cmind.code_gen
@@ -148,8 +146,8 @@ Use this path when you want CoderMind to turn requirements into a new codebase.
 > [!IMPORTANT]
 > **Coding Agents are invoked slightly differently**:
 >
-> - **Claude Code**: type `/cmind.feature_spec ...` directly in the chat — slash commands are recognised and dispatch the matching workflow.
-> - **GitHub Copilot CLI**: slash commands are not supported (custom agents are), so first run `/agent cmind.feature_spec` to switch to the target agent, then type `start` to run its built-in workflow.
+> - **Claude Code**: type `/cmind.feature_construct ...` directly in the chat — slash commands are recognised and dispatch the matching workflow.
+> - **GitHub Copilot CLI**: slash commands are not supported (custom agents are), so first run `/agent cmind.feature_construct` to switch to the target agent, then type `start` to run its built-in workflow.
 
 CoderMind progressively builds `rpg.json` in the home-side runtime directory (`~/.cmind/workspaces/<workspace-id>/data/rpg.json`) and uses it to keep requirements, planning artifacts, generated code, and dependency information aligned. Your workspace source files are not polluted.
 
@@ -191,7 +189,7 @@ Use this path when you already have a repository and want an AI agent to underst
 
 ```text
 my-project/
-├── docs/                 # Optional requirement docs for /cmind.feature_spec
+├── docs/                 # Optional requirement docs for /cmind.feature_construct
 ├── .github/ or .claude/  # Coding Agent command definitions and settings
 ├── .vscode/              # Copilot/VS Code MCP configuration when applicable
 ├── .cmind/              # Generated reports and configuration files

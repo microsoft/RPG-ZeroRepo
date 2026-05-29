@@ -106,29 +106,23 @@ Use `--` to separate options from requirement text:
 
 ### `/cmind.feature_spec`
 
-Create structured feature specifications from user input or documentation files.
+Generate a structured feature specification from user input or
+documentation files.
+
+> **Recommended workflow:** Use `/cmind.feature_construct` for the
+> end-to-end Phase 1 flow. `/cmind.feature_spec` is the granular
+> single-stage command, kept available for debugging and surgical reruns.
 
 **Input modes:**
 
 - **Direct input:** provide a description after the command
 - **Auto-detect:** omit input to auto-detect `docs/*.md` files
 
-**Output:**
-
-```text
-.cmind/data/feature_spec/
-├── evidence/                # Source evidence files
-│   ├── user_input.md        # From direct user input, or
-│   ├── 01_project_charter.md
-│   └── ...
-├── feature_spec.md          # Meta + Background + NFR
-└── features/                # Feature tree documents
-    ├── FT-001.md
-    ├── FT-002.md
-    └── ...
-```
-
-Also generates `.cmind/data/feature_spec.json`.
+**Output:** `.cmind/data/feature_spec.json` — a Pydantic-validated JSON
+document containing `meta`, `repository_name`, `repository_purpose`,
+`background_and_overview`, `non_functional_requirements`, and a
+recursive `functional_requirements` tree. No intermediate Markdown
+artefacts are produced.
 
 **Examples:**
 

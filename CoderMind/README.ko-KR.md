@@ -133,9 +133,7 @@ uvx --from "git+https://github.com/microsoft/RPG-ZeroRepo.git#subdirectory=Coder
 4. 포워드 파이프라인을 실행합니다:
 
    ```text
-   /cmind.feature_spec <feature description>
-   /cmind.feature_build
-   /cmind.feature_refactor
+   /cmind.feature_construct <feature description>
    [Optional] /cmind.feature_edit <edit instructions>
    /cmind.plan
    /cmind.code_gen
@@ -145,8 +143,8 @@ uvx --from "git+https://github.com/microsoft/RPG-ZeroRepo.git#subdirectory=Coder
 > [!IMPORTANT]
 > **Coding Agent마다 호출 방식이 조금씩 다릅니다**:
 >
-> - **Claude Code**: 채팅에 직접 `/cmind.feature_spec ...` 을 입력하면 slash command가 인식되어 해당 workflow가 트리거됩니다.
-> - **GitHub Copilot CLI**: slash command는 지원하지 않으나(커스텀 agent는 지원), 먼저 `/agent cmind.feature_spec` 으로 대상 agent로 전환한 다음 `start` 를 입력해 내장된 workflow를 실행합니다.
+> - **Claude Code**: 채팅에 직접 `/cmind.feature_construct ...` 을 입력하면 slash command가 인식되어 해당 workflow가 트리거됩니다.
+> - **GitHub Copilot CLI**: slash command는 지원하지 않으나(커스텀 agent는 지원), 먼저 `/agent cmind.feature_construct` 으로 대상 agent로 전환한 다음 `start` 를 입력해 내장된 workflow를 실행합니다.
 
 CoderMind은 `~/.cmind/workspaces/<workspace-id>/data/rpg.json` 을 점진적으로 생성하고, 이를 사용해 요구사항, 계획 산출물, 생성된 코드, 의존성 정보를 정합 상태로 유지합니다. 워크스페이스의 소스 파일은 오염되지 않습니다.
 
@@ -188,7 +186,7 @@ CoderMind은 `~/.cmind/workspaces/<workspace-id>/data/rpg.json` 을 점진적으
 
 ```text
 my-project/
-├── docs/                 # /cmind.feature_spec 용 선택적 요구사항 문서
+├── docs/                 # /cmind.feature_construct 용 선택적 요구사항 문서
 ├── .github/ or .claude/  # Coding Agent 커맨드 정의 및 설정
 ├── .vscode/              # 해당하는 경우 Copilot/VS Code MCP 구성
 ├── .cmind/              # 생성된 리포트와 설정 파일
