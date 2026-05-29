@@ -1,0 +1,37 @@
+{
+  // Mirror of the workspace-root `.markdownlint-cli2.jsonc` so running
+  // `markdownlint-cli2` from `CoderMind/` picks up the same rules.
+  // The slash-command templates under `templates/commands/` are prompt
+  // material consumed verbatim by Coding Agents — wrapping at 80 cols
+  // or forcing an H1 would damage their semantics, so the corresponding
+  // rules are disabled here.
+  //
+  // https://github.com/DavidAnson/markdownlint/blob/main/doc/Rules.md
+  "config": {
+    "default": true,
+    "MD003": { "style": "atx" },
+    "MD007": { "indent": 2 },
+    "MD013": false,
+    "MD024": { "siblings_only": true },
+    "MD033": false,
+    "MD041": false,
+    "MD049": { "style": "asterisk" },
+    "MD050": { "style": "asterisk" },
+    // MD060 cannot count double-width CJK / emoji characters correctly,
+    // so visually-aligned tables containing ✅ / ⌛ etc. trigger false
+    // positives. Disable.
+    "MD060": false
+  },
+  "ignores": [
+    ".genreleases/",
+    ".pytest_cache/",
+    "**/__pycache__/",
+    ".venv/",
+    "node_modules/",
+    // Internal design notes / WIP plans — not user-facing docs.
+    "plans/",
+    // The entire workspace/ tree is for e2e fixtures + backups; not
+    // part of cmind's published docs.
+    "workspace/"
+  ]
+}

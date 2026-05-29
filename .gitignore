@@ -417,7 +417,7 @@ FodyWeavers.xsd
 *.msm
 *.msp
 
-# RPG-Kit release artifacts
-RPG-Kit/.genreleases/
+# CoderMind release artifacts
+CoderMind/.genreleases/
 release_notes.md
 workspace/

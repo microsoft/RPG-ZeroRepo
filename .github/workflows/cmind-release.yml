@@ -1,0 +1,56 @@
+name: CoderMind Release
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "CoderMind/**"
+      - ".github/workflows/cmind-release.yml"
+      - ".github/workflows/scripts/cmind/**"
+  workflow_dispatch:
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+    env:
+      PROJECT_DIR: CoderMind
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Prepare scripts
+        run: chmod +x .github/workflows/scripts/cmind/*.sh
+
+      - name: Get next CoderMind version
+        id: get_tag
+        run: .github/workflows/scripts/cmind/get-next-version.sh
+
+      - name: Check if release already exists
+        id: check_release
+        run: .github/workflows/scripts/cmind/check-release-exists.sh "${{ steps.get_tag.outputs.tag_name }}"
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Update version in pyproject.toml
+        if: steps.check_release.outputs.exists == 'false'
+        run: .github/workflows/scripts/cmind/update-version.sh "${{ steps.get_tag.outputs.new_version }}"
+
+      - name: Create release package variants
+        if: steps.check_release.outputs.exists == 'false'
+        run: .github/workflows/scripts/cmind/create-release-packages.sh "${{ steps.get_tag.outputs.new_version }}"
+
+      - name: Generate release notes
+        if: steps.check_release.outputs.exists == 'false'
+        run: .github/workflows/scripts/cmind/generate-release-notes.sh "${{ steps.get_tag.outputs.new_version }}" "${{ steps.get_tag.outputs.latest_tag }}" stable
+
+      - name: Create GitHub release
+        if: steps.check_release.outputs.exists == 'false'
+        run: .github/workflows/scripts/cmind/create-github-release.sh "${{ steps.get_tag.outputs.new_version }}" "${{ steps.get_tag.outputs.tag_name }}" stable
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

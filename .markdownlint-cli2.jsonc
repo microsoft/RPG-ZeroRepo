@@ -22,8 +22,8 @@
     }
   },
   "ignores": [
-    "RPG-Kit/.genreleases/",
-    "RPG-Kit/.pytest_cache/",
-    "RPG-Kit/**/__pycache__/"
+    "CoderMind/.genreleases/",
+    "CoderMind/.pytest_cache/",
+    "CoderMind/**/__pycache__/"
   ]
 }
