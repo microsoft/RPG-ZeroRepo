@@ -1151,12 +1151,19 @@ class InterfacesStore:
                 if not units:
                     continue
 
-                subtree_interfaces[file_path] = {
+                file_dict: Dict[str, Any] = {
                     "units": [u.name for u in units],
                     "units_to_features": {u.name: u.features for u in units},
                     "units_to_code": {u.name: u.code for u in units},
                     "file_code": "\n\n".join(u.code for u in units),
                 }
+                # Preserve handler-added tag for downstream diagnostics
+                # and so a subsequent ``from_legacy_format`` round-trip
+                # keeps the prune protection.
+                handler_added_units = [u.name for u in units if u.handler_added]
+                if handler_added_units:
+                    file_dict["_handler_added"] = handler_added_units
+                subtree_interfaces[file_path] = file_dict
 
             subtrees[subtree_name] = {
                 "files_order": files,
