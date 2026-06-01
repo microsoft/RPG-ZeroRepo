@@ -31,9 +31,9 @@ from typing import Any, Dict, List, Optional, Tuple, Union
 from common.utils import (
     exclude_files,
     filter_excluded_files,
-    is_test_file,
     normalize_path,
 )
+from lang_parser import is_supported_source, is_test_file as is_supported_test_file
 from rpg.code_unit import CodeSnippetBuilder, CodeUnit, ParsedFile
 from rpg import NodeType, RPG
 
@@ -50,13 +50,15 @@ logger = logging.getLogger(__name__)
 
 
 def _filter_non_test_py_files(path: str) -> bool:
-    """Return True if *path* is a non-test ``.py`` file.
+    """Return True if *path* is a parseable, non-test source file.
 
     Used as a filter predicate when walking the repository directory.
+    The name keeps the historical ``py`` suffix for API stability, but the
+    predicate now accepts any language supported by ``lang_parser``.
     """
-    if not path.endswith(".py"):
+    if not is_supported_source(path):
         return False
-    return not is_test_file(path)
+    return not is_supported_test_file(path)
 
 
 def _load_skeleton_from_repo(
@@ -424,7 +426,7 @@ class RPGEvolution:
         # Build code map for new files only
         file_code_map: Dict[str, str] = {}
         for fpath in new_files:
-            if not fpath.endswith(".py"):
+            if not is_supported_source(fpath) or is_supported_test_file(fpath):
                 continue
             if fpath in file_code_map_all:
                 file_code_map[fpath] = file_code_map_all[fpath]
@@ -734,12 +736,12 @@ class RPGEvolution:
             "last_rpg": last_rpg,
         }
 
-        # Filter to .py files
+        # Filter to supported source files (any language registered with lang_parser)
         add_files = [
-            f for f in all_diff.get("added", {}).keys() if f.endswith(".py")
+            f for f in all_diff.get("added", {}).keys() if is_supported_source(f)
         ]
         deleted_files = [
-            f for f in all_diff.get("deleted", {}).keys() if f.endswith(".py")
+            f for f in all_diff.get("deleted", {}).keys() if is_supported_source(f)
         ]
         modified_result = {
             f: d
@@ -747,7 +749,7 @@ class RPGEvolution:
             if (
                 isinstance(d, dict)
                 and any(d.get(k) for k in ("changed", "added", "deleted"))
-                and f.endswith(".py")
+                and is_supported_source(f)
             )
         }
 

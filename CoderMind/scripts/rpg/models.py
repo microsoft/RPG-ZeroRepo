@@ -98,6 +98,11 @@ class NodeMetaData:
     description: str = ""
     content: str = ""
     generator: str = ""
+    # Source language ("python", "go", "typescript", ...). Populated by the
+    # encoder via lang_parser.detect_language for any FILE / code-entity node
+    # backed by an on-disk source file. ``None`` for non-code nodes
+    # (features, directories, etc.) or when detection is unavailable.
+    language: Optional[str] = None
 
     def to_dict(self) -> Dict[str, Any]:
         return {
@@ -106,6 +111,7 @@ class NodeMetaData:
             "content": self.content,
             "description": self.description,
             "generator": self.generator,
+            "language": self.language,
         }
 
     @classmethod
@@ -120,6 +126,7 @@ class NodeMetaData:
             description=d.get("description", ""),
             content=d.get("content", ""),
             generator=d.get("generator", ""),
+            language=d.get("language"),
         )
 
 

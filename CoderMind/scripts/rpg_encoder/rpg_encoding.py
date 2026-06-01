@@ -38,6 +38,7 @@ from common.utils import (
     parse_solution_output,
     truncate_by_token,
 )
+from lang_parser import is_supported_source, is_test_file
 from rpg import RPG
 
 from .prompts import EXCLUDE_FILES, GENERATE_REPO_INFO
@@ -139,7 +140,7 @@ class RPGParser:
                 rel_path = os.path.join(rel_root, fname) if rel_root else fname
                 rel_path = rel_path.replace("\\", "/")
                 tree_lines.append(rel_path)
-                if fname.endswith(".py"):
+                if is_supported_source(rel_path) and not is_test_file(rel_path):
                     valid_files.append(rel_path)
 
         skeleton_info = "\n".join(tree_lines)

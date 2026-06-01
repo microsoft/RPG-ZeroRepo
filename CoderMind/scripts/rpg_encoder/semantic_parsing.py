@@ -41,6 +41,7 @@ from common.utils import (
     normalize_path,
     parse_solution_output,
 )
+from lang_parser import is_supported_source, is_test_file
 from rpg.code_unit import CodeSnippetBuilder, CodeUnit, ParsedFile
 from rpg.path_format import (
     desc_key_class as _desc_key_class,
@@ -916,17 +917,17 @@ class ParseFeatures:
         if excluded_files is None:
             excluded_files = []
 
-        # Step 1: Collect valid Python files
+        # Step 1: Collect valid source files (any language registered with lang_parser)
         filtered_files = filter_excluded_files(
             valid_files=self.valid_files, excluded_files=excluded_files
         )
         py_files = [
             os.path.join(self.repo_dir, f)
             for f in filtered_files
-            if f.endswith(".py")
+            if is_supported_source(f) and not is_test_file(f)
         ]
 
-        self.logger.info("Total valid Python files to parse: %d", len(py_files))
+        self.logger.info("Total valid source files to parse: %d", len(py_files))
 
         file_code_map: Dict[str, str] = {}
         for file_path in py_files:

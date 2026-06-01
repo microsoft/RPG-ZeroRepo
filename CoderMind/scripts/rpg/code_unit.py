@@ -74,14 +74,16 @@ class CodeUnit:
         """Get starting line number."""
         if isinstance(self.node, ast.AST):
             return getattr(self.node, "lineno", None)
-        return None
+        # For non-AST nodes (units produced by lang_parser for Go/TS/...),
+        # the line info lives in ``extra``.
+        return self.extra.get("line_start")
     
     @property
     def end_lineno(self) -> Optional[int]:
         """Get ending line number."""
         if isinstance(self.node, ast.AST):
             return getattr(self.node, "end_lineno", None)
-        return None
+        return self.extra.get("line_end")
     
     @property
     def is_top_level(self) -> bool:
@@ -345,25 +347,99 @@ class CodeUnit:
 
 
 class ParsedFile:
-    """Parses a Python file and extracts CodeUnits.
-    
+    """Parses a source file and extracts CodeUnits.
+
+    For Python files, uses the built-in ``ast`` module (unchanged historical
+    path). For other supported source languages (Go, TypeScript/JavaScript,
+    C/C++, Rust, ...), delegates to ``lang_parser`` and adapts the result
+    into the same ``CodeUnit`` shape so downstream consumers don't need to
+    branch on language.
+
     Handles syntax errors gracefully by storing the error and returning
     an empty units list.
     """
-    
+
     def __init__(self, code: str, file_path: str):
         self.code = code
         self.file_path = file_path
         self.error: Optional[Exception] = None
-        
+
+        # Try the lang_parser path first; if it doesn't claim the file (i.e.
+        # the file is not a registered non-Python source, or lang_parser is
+        # unavailable in this environment), fall through to the original
+        # Python ast path so existing behaviour is preserved exactly.
+        lp_result = self._parse_with_language_parser()
+        if lp_result is not None:
+            file_result, tree, error = lp_result
+            self.tree = tree
+            self.error = error
+            self.units: List[CodeUnit] = self._code_units_from_parser_result(file_result)
+            return
+
         try:
             self.tree = ast.parse(code)
         except SyntaxError as e:
             self.error = e
             logging.error(f"SyntaxError parsing {file_path}: {e}")
             self.tree = ast.Module(body=[], type_ignores=[])
-        
+
         self.units: List[CodeUnit] = self._extract_units()
+
+    def _parse_with_language_parser(self):
+        """Attempt to parse ``self.code`` via ``lang_parser``.
+
+        Returns ``(file_result, tree, error)`` on success, or ``None`` if
+        the file is not recognised by ``lang_parser`` (callers should then
+        fall back to the original ast path). Never raises.
+        """
+        try:
+            from lang_parser import get_parser_for_file
+        except ImportError:
+            return None
+
+        parser = get_parser_for_file(self.file_path)
+        if parser is None:
+            return None
+        # For Python, lang_parser delegates back to ast, but downstream code
+        # (notably ``_extract_units``) relies on ``self.tree`` being the raw
+        # ast.Module. Keep Python on the original path to avoid divergence.
+        try:
+            from lang_parser import detect_language
+            if detect_language(self.file_path) == "python":
+                return None
+        except ImportError:
+            return None
+
+        if hasattr(parser, "parse_file_with_ast"):
+            return parser.parse_file_with_ast(self.file_path, self.code)
+
+        file_result = parser.parse_file(self.file_path, self.code)
+        error = Exception(file_result.syntax_error) if file_result.syntax_error else None
+        empty_tree = ast.Module(body=[], type_ignores=[])
+        return file_result, empty_tree, error
+
+    def _code_units_from_parser_result(self, file_result) -> List["CodeUnit"]:
+        """Adapt ``LPFileResult`` units into the ``CodeUnit`` shape.
+
+        ``unit_type == "file"`` entries are skipped (no Python-side equivalent).
+        The ast-node slot is populated from ``unit.extra['ast_node']`` when
+        the parser provides one; otherwise the raw source slice is used so
+        downstream code-snippet building still works.
+        """
+        units: List[CodeUnit] = []
+        for unit in file_result.units:
+            if unit.unit_type == "file":
+                continue
+            node = unit.extra.get("ast_node") or unit.code
+            extra = dict(unit.extra)
+            extra.setdefault("language", unit.language)
+            extra.setdefault("line_start", unit.line_start)
+            extra.setdefault("line_end", unit.line_end)
+            units.append(CodeUnit(
+                unit.name, node, unit.unit_type, self.file_path,
+                unit.parent, extra=extra,
+            ))
+        return units
     
     def _extract_units(self) -> List[CodeUnit]:
         """Extract all code units from the AST."""
@@ -645,6 +721,27 @@ class CodeSnippetBuilder:
                     result.append(cls_unit)
         return result
 
+    def _language_for_units(self, units: List[CodeUnit]) -> Optional[str]:
+        """Best-effort language for a homogeneous-by-file unit list.
+
+        First looks at ``unit.extra['language']`` (set by lang_parser); if
+        absent, falls back to detecting from the first ``file_path``. Used
+        to skip Python-only ast helpers when the snippet is e.g. Go / TS.
+        """
+        for unit in units:
+            language = unit.extra.get("language")
+            if language:
+                return language
+        for unit in units:
+            if not unit.file_path:
+                continue
+            try:
+                from lang_parser import detect_language
+                return detect_language(unit.file_path)
+            except ImportError:
+                return None
+        return None
+
     def generate_code_snippet(
         self,
         source_code: str,
@@ -679,14 +776,21 @@ class CodeSnippetBuilder:
                     if cls_unit and cls_unit.lineno:
                         keep[cls_unit.lineno - 1] = True
 
-        # 2) Import / assignment lines
+        # 2) Import / assignment lines (Python only — non-Python sources
+        #    come from lang_parser which already populates the import
+        #    unit's line range, so the import lines are kept via step 1).
         if keep_imports or keep_assignments:
-            tree = ast.parse(source_code)
-            for node in tree.body:
-                if keep_imports and isinstance(node, (ast.Import, ast.ImportFrom)):
-                    keep[node.lineno - 1] = True
-                if keep_assignments and isinstance(node, ast.Assign):
-                    keep[node.lineno - 1] = True
+            language = self._language_for_units(units)
+            if language in (None, "python"):
+                try:
+                    tree = ast.parse(source_code)
+                    for node in tree.body:
+                        if keep_imports and isinstance(node, (ast.Import, ast.ImportFrom)):
+                            keep[node.lineno - 1] = True
+                        if keep_assignments and isinstance(node, ast.Assign):
+                            keep[node.lineno - 1] = True
+                except SyntaxError:
+                    pass
 
         # 3) Adjacent blank lines near core lines
         core_idx = {i for i, k in enumerate(keep) if k}
@@ -751,10 +855,15 @@ class CodeSnippetBuilder:
                 keep_assignments=keep_assignments,
                 with_lineno=with_lineno,
             )
+            try:
+                from lang_parser import markdown_fence_for_path
+                fence = markdown_fence_for_path(file_path)
+            except ImportError:
+                fence = "python"
             if with_file_path:
-                sections.append(f"```python\n## File Path: {file_path}\n\n{body}\n```")
+                sections.append(f"```{fence}\n## File Path: {file_path}\n\n{body}\n```")
             else:
-                sections.append(f"```python\n## Tool Block\n\n{body}\n```")
+                sections.append(f"```{fence}\n## Tool Block\n\n{body}\n```")
         return "\n\n".join(sections)
 
     def build_file_map(
