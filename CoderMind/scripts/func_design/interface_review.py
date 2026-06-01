@@ -480,30 +480,79 @@ class InterfaceReviewer:
             # Step 4: Apply fixes
             recommended_fixes = llm_review.get("recommended_fixes", [])
             if recommended_fixes:
-                applied_count = self._apply_fixes(
+                fix_stats = self._apply_fixes(
                     fixes=recommended_fixes,
                     interfaces_data=interfaces_data,
                     enhanced_data_flow=enhanced_data_flow,
                     global_registry=global_registry,
                     dependency_collector=dependency_collector,
                 )
+                review_result["fix_stats"] = fix_stats
+                unapplied_n = len(fix_stats["unapplied"])
+                tail = f" ({unapplied_n} unapplied)" if unapplied_n else ""
                 self.logger.info(
-                    f"[InterfaceReviewer] Applied {applied_count}/{len(recommended_fixes)} fixes"
+                    f"[InterfaceReviewer] Applied {fix_stats['applied_edges']} edge(s) "
+                    f"from {fix_stats['applied_fixes']}/{fix_stats['requested_fixes']} fix request(s)"
+                    + tail
                 )
             else:
                 self.logger.info("[InterfaceReviewer] No fixes recommended, stopping iteration")
                 break
-        
-        # Compile final summary
+
+        # ------------------------------------------------------------------
+        # Final re-check: fixes applied in the LAST iteration were never
+        # re-evaluated inside the loop, so connectivity / feature_orphans
+        # stored in review_history may be stale. Re-run the structural
+        # checks once more against the (now patched) enhanced_data_flow
+        # and use those numbers for the final verdict.
+        # ------------------------------------------------------------------
+        final_entry_points = (
+            review_history[-1]["entry_points"] if review_history else []
+        )
+        final_orphan_units: List[Any] = []
+        final_feature_orphans: List[Any] = []
+        if review_history:
+            final_connectivity = check_call_graph_connectivity(
+                interfaces_data, enhanced_data_flow, final_entry_points
+            )
+            final_feature_orphans = check_feature_dependency_coverage(
+                interfaces_data, enhanced_data_flow, final_entry_points
+            )
+            final_orphan_units = final_connectivity["orphan_units"]
+            self.logger.info(
+                f"[InterfaceReviewer] Final re-check: "
+                f"{len(final_orphan_units)} orphan unit(s), "
+                f"{len(final_feature_orphans)} orphan feature(s)"
+            )
+
+        # Collect unapplied fixes from every iteration (modify_interface /
+        # add_interface requests that have no auto-handler). These block
+        # passed=true because they represent acknowledged-but-unresolved
+        # architectural issues.
+        unapplied_fixes: List[Dict[str, Any]] = []
+        for entry in review_history:
+            stats = entry.get("fix_stats") or {}
+            for u in stats.get("unapplied", []):
+                unapplied_fixes.append({**u, "iteration": entry.get("iteration")})
+
+        last_llm_pass = (
+            review_history[-1]["llm_review"].get("pass", False)
+            if review_history else False
+        )
+        code_passed = (
+            len(final_orphan_units) == 0
+            and len(final_feature_orphans) == 0
+            and len(unapplied_fixes) == 0
+        )
+
         final_result = {
             "review_history": review_history,
-            "final_entry_points": review_history[-1]["entry_points"] if review_history else [],
-            "final_feature_orphans": review_history[-1]["feature_orphans"] if review_history else [],
+            "final_entry_points": final_entry_points,
+            "final_feature_orphans": final_feature_orphans,
+            "final_orphan_units": final_orphan_units,
+            "unapplied_fixes": unapplied_fixes,
             "iterations_run": len(review_history),
-            "passed": (
-                review_history[-1]["llm_review"].get("pass", False)
-                if review_history else False
-            ),
+            "passed": bool(last_llm_pass and code_passed),
         }
 
         return final_result
@@ -610,19 +659,24 @@ Please perform the review tasks and return the JSON result.
         enhanced_data_flow: Dict[str, Any],
         global_registry: GlobalInterfaceRegistry,
         dependency_collector: Optional[DependencyCollector] = None,
-    ) -> int:
+    ) -> Dict[str, Any]:
         """Apply recommended fixes from the LLM review.
-        
+
         Supported actions:
-        - add_dependency: Add a call dependency edge
-        - add_interface: (logged as warning — requires manual or future LLM action)
-        - modify_interface: (logged as warning — requires manual or future LLM action)
-        
+        - add_dependency: Add a call dependency edge (auto-applied)
+        - add_interface: Logged + recorded as unapplied (needs manual action)
+        - modify_interface: Logged + recorded as unapplied (needs manual action)
+
         Returns:
-            Number of fixes successfully applied
+            Stats dict with keys ``requested_fixes`` (top-level fix count),
+            ``applied_fixes`` (fixes that produced >=1 edge),
+            ``applied_edges`` (total dependency edges added), and
+            ``unapplied`` (list of fixes with no auto-handler).
         """
-        applied = 0
-        
+        applied_edges = 0
+        applied_fixes = 0
+        unapplied: List[Dict[str, Any]] = []
+
         for fix in fixes:
             action = fix.get("action", "")
             file_path = fix.get("file_path", "")
@@ -631,6 +685,9 @@ Please perform the review tasks and return the JSON result.
             
             if action == "add_dependency":
                 calls_to_add = fix.get("calls_to_add", [])
+                edges_added = 0
+                edges_already_existed = 0
+                edges_unresolved = 0
                 for call_info in calls_to_add:
                     callee = call_info.get("callee", "")
                     callee_file = call_info.get("callee_file", "")
@@ -647,6 +704,7 @@ Please perform the review tasks and return the JSON result.
                             f"[InterfaceReviewer] Cannot resolve callee '{callee}' "
                             f"for fix on {file_path}::{unit_name}"
                         )
+                        edges_unresolved += 1
                         continue
                     
                     # Add to enhanced_data_flow
@@ -660,51 +718,96 @@ Please perform the review tasks and return the JSON result.
                         for e in inv_edges
                     )
                     
-                    if not exists:
-                        new_edge = {
-                            "caller": unit_name,
-                            "callee": callee,
-                            "caller_file": file_path,
-                            "callee_file": callee_file,
-                            "edge_type": "invokes",
-                            "generator": "global_review",
-                        }
-                        inv_edges.append(new_edge)
-                        enhanced_data_flow["invocation_edges"] = inv_edges
-                        
-                        # Also add to dependency_collector if available
-                        if dependency_collector:
-                            dependency_collector.add_invocation(
-                                caller=unit_name,
-                                callee=callee,
-                                caller_file=file_path,
-                                callee_file=callee_file,
-                            )
-                        
-                        self.logger.info(
-                            f"[InterfaceReviewer] Added dependency: "
-                            f"{unit_name} ({file_path}) -> {callee} ({callee_file})"
+                    if exists:
+                        edges_already_existed += 1
+                        continue
+
+                    new_edge = {
+                        "caller": unit_name,
+                        "callee": callee,
+                        "caller_file": file_path,
+                        "callee_file": callee_file,
+                        "edge_type": "invokes",
+                        "generator": "global_review",
+                    }
+                    inv_edges.append(new_edge)
+                    enhanced_data_flow["invocation_edges"] = inv_edges
+
+                    # Also add to dependency_collector if available
+                    if dependency_collector:
+                        dependency_collector.add_invocation(
+                            caller=unit_name,
+                            callee=callee,
+                            caller_file=file_path,
+                            callee_file=callee_file,
                         )
-                        applied += 1
-            
+
+                    self.logger.info(
+                        f"[InterfaceReviewer] Added dependency: "
+                        f"{unit_name} ({file_path}) -> {callee} ({callee_file})"
+                    )
+                    applied_edges += 1
+                    edges_added += 1
+                # A fix counts as applied if at least one edge was added OR
+                # all its edges already existed (LLM repeated a prior fix).
+                # Only mark as unapplied when nothing happened AND there were
+                # unresolved callees that actually need attention.
+                if edges_added > 0 or (edges_already_existed > 0 and edges_unresolved == 0):
+                    applied_fixes += 1
+                elif edges_unresolved > 0:
+                    unapplied.append({
+                        "action": action,
+                        "file_path": file_path,
+                        "unit_name": unit_name,
+                        "description": description[:200],
+                        "reason": f"{edges_unresolved} callee(s) could not be resolved",
+                    })
+                # else: empty calls_to_add — silently ignore (LLM bug, not actionable)
+
             elif action == "add_interface":
                 self.logger.warning(
                     f"[InterfaceReviewer] add_interface fix requested but not auto-applied: "
                     f"{description} (file: {file_path})"
                 )
-            
+                unapplied.append({
+                    "action": action,
+                    "file_path": file_path,
+                    "unit_name": unit_name,
+                    "description": description[:200],
+                    "reason": "add_interface has no auto-handler",
+                })
+
             elif action == "modify_interface":
                 self.logger.warning(
                     f"[InterfaceReviewer] modify_interface fix requested but not auto-applied: "
                     f"{description} (file: {file_path}, unit: {unit_name})"
                 )
-            
+                unapplied.append({
+                    "action": action,
+                    "file_path": file_path,
+                    "unit_name": unit_name,
+                    "description": description[:200],
+                    "reason": "modify_interface has no auto-handler",
+                })
+
             else:
                 self.logger.warning(
                     f"[InterfaceReviewer] Unknown fix action: {action}"
                 )
-        
-        return applied
+                unapplied.append({
+                    "action": action,
+                    "file_path": file_path,
+                    "unit_name": unit_name,
+                    "description": description[:200],
+                    "reason": f"unknown action '{action}'",
+                })
+
+        return {
+            "requested_fixes": len(fixes),
+            "applied_fixes": applied_fixes,
+            "applied_edges": applied_edges,
+            "unapplied": unapplied,
+        }
     
     def _build_interface_summary(
         self,
