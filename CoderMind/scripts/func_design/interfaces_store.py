@@ -99,6 +99,8 @@ class InterfaceUnit:
     subtree_name: str
     features: List[str]     # feature paths this unit implements (existing + new combined)
     code: str               # interface source code
+    handler_added: bool = False  # True if added by InterfaceReviewer.add_interface handler
+                                 # (protected from orphan-prune; carries _handler_added tag)
 
     @property
     def key(self) -> str:
@@ -554,15 +556,24 @@ class InterfacesStore:
     def find_orphan_units(self) -> List[str]:
         """Find isolated units (no incoming/outgoing edges, not entry point).
 
+        Handler-added units (``InterfaceUnit.handler_added == True``) are
+        EXCLUDED from the candidate set: they were deliberately materialised
+        by ``InterfaceReviewer._apply_add_interface`` during the global
+        review step, and their lack of incoming edges is expected — they
+        are the missing pieces the review just installed and the next
+        iteration / downstream stages must wire them up.
+
         Returns:
             List of unit keys that are candidates for pruning
         """
         outgoing, incoming = self.build_adjacency()
 
         isolated_keys: List[str] = []
-        for key in list(self._units.keys()):
+        for key, unit in self._units.items():
             if key in self._entry_point_keys:
                 continue
+            if unit.handler_added:
+                continue  # protected: handler-added is treated as required
             has_outgoing = key in outgoing and len(outgoing[key]) > 0
             has_incoming = key in incoming and len(incoming[key]) > 0
             if not has_outgoing and not has_incoming:
@@ -1212,6 +1223,10 @@ class InterfacesStore:
             for file_path, file_data in file_interfaces.items():
                 units_to_features = file_data.get("units_to_features", {})
                 units_to_code = file_data.get("units_to_code", {})
+                # Track which units were materialised by the
+                # InterfaceReviewer.add_interface handler so we can protect
+                # them from orphan-prune in `find_orphan_units`.
+                handler_added_set = set(file_data.get("_handler_added", []) or [])
 
                 for unit_name in file_data.get("units", []):
                     unit = InterfaceUnit(
@@ -1220,6 +1235,7 @@ class InterfacesStore:
                         subtree_name=subtree_name,
                         features=units_to_features.get(unit_name, []),
                         code=units_to_code.get(unit_name, ""),
+                        handler_added=unit_name in handler_added_set,
                     )
                     store.add_unit(unit)
 
