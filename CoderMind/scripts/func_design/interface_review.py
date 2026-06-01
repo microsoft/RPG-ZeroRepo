@@ -60,9 +60,21 @@ role in the architecture means they don't need an internal caller. This includes
 - Application entry points: a `MainLoop` class, a CLI `main()` function, an `Application` class
 - Standalone submodules: components that can function independently (e.g., a `TestRunner`, a `Benchmark` harness)
 - Externally-invoked APIs: interfaces designed to be called by external code, plugins, or frameworks
-- Framework callbacks: handlers registered with an event system or framework
+- Framework callbacks: handlers registered with an event system or framework.
+  This explicitly includes (do not omit these):
+  * HTTP route handlers (Flask `@route` / FastAPI / Django view functions) —
+    even if not decorated in the signature, any unit whose role is "respond
+    to an HTTP request" is invoked by the web framework, not by other Python
+    code. Always mark these as entry_points.
+  * CLI subcommand handlers (click commands, argparse callbacks).
+  * Event / signal subscribers, background workers, scheduled job entry
+    functions, message-queue consumers.
+  * Test fixtures / hooks that pytest, unittest, or other test runners
+    invoke automatically.
 
 Use semantic judgment based on the module's role and the project's architecture.
+Lean towards MORE entry points when in doubt — false positives only add an
+"externally invoked" tag, but false negatives create spurious orphan reports.
 
 ### Task 2: Wiring Completeness
 - Does every non-top-level module's output have at least one consumer?
