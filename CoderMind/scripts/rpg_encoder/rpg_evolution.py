@@ -736,12 +736,15 @@ class RPGEvolution:
             "last_rpg": last_rpg,
         }
 
-        # Filter to supported source files (any language registered with lang_parser)
+        # Filter to supported source files (any language registered with lang_parser),
+        # excluding tests so the encoder doesn't index test code as features.
         add_files = [
-            f for f in all_diff.get("added", {}).keys() if is_supported_source(f)
+            f for f in all_diff.get("added", {}).keys()
+            if is_supported_source(f) and not is_supported_test_file(f)
         ]
         deleted_files = [
-            f for f in all_diff.get("deleted", {}).keys() if is_supported_source(f)
+            f for f in all_diff.get("deleted", {}).keys()
+            if is_supported_source(f) and not is_supported_test_file(f)
         ]
         modified_result = {
             f: d
@@ -750,6 +753,7 @@ class RPGEvolution:
                 isinstance(d, dict)
                 and any(d.get(k) for k in ("changed", "added", "deleted"))
                 and is_supported_source(f)
+                and not is_supported_test_file(f)
             )
         }
 

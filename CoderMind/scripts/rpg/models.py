@@ -258,7 +258,17 @@ def infer_type_name_from_path(path: str, has_children: bool = False) -> Optional
     
     if path.endswith(".py"):
         return "file"
-    
+
+    # Non-Python source files (Go / TypeScript / JavaScript / C / C++ /
+    # Rust, ...). Delegate to lang_parser if available so the inference
+    # stays in sync with the parser registry.
+    try:
+        from lang_parser import is_supported_source
+        if is_supported_source(path):
+            return "file"
+    except ImportError:
+        pass
+
     return "directory"
 
 

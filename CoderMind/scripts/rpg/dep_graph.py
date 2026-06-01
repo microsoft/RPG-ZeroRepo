@@ -1784,22 +1784,43 @@ class DependencyGraph:
         """Reparse source code to restore AST and code structure.
 
         Must be called after :meth:`from_dict` to reconstruct AST objects and
-        semantic edges that are not serialized.
+        semantic edges that are not serialized. Mirrors the language
+        dispatch in :meth:`parse`: Python files keep the original ast path,
+        non-Python files re-run through ``lang_parser``.
         """
+        lp_results: list[tuple[str, lang_parser.LPFileResult]] = []
         for nid, attrs in list(self.G.nodes(data=True)):
             if attrs.get("type") != NodeType.FILE or not filter_func(nid):
                 continue
 
             content = self._read_code(nid)
-            try:
-                tree = ast.parse(content)
-            except SyntaxError:
+            language = lang_parser.detect_language(nid)
+            if language == "python":
+                try:
+                    tree = ast.parse(content)
+                except SyntaxError:
+                    continue
+
+                self.G.nodes[nid]["ast"] = tree
+                self.G.nodes[nid]["language"] = "python"
+
+                # Rebuild functions / classes nodes
+                self._parse_file(nid, tree, content)
                 continue
 
-            self.G.nodes[nid]["ast"] = tree
+            if language is None:
+                continue
 
-            # Rebuild functions / classes nodes
-            self._parse_file(nid, tree, content)
+            try:
+                result = lang_parser.parse_file(nid, content)
+            except lang_parser.NotSupported:
+                continue
+            self._parse_lp_file_result(nid, result)
+            lp_results.append((nid, result))
+
+        # Second pass for lang_parser invokes (needs full unit registry).
+        for nid, result in lp_results:
+            self._parse_lp_invoke_dependencies(nid, result)
 
         # Re-run import / invoke / inherit pass
         alias_links: nx.DiGraph = nx.DiGraph()
