@@ -804,6 +804,9 @@ class InterfaceDesigner:
             result["global_review"] = {
                 "entry_points": review_result.get("final_entry_points", []),
                 "feature_orphans_count": len(review_result.get("final_feature_orphans", [])),
+                "orphan_units_count": len(review_result.get("final_orphan_units", [])),
+                "unapplied_fixes_count": len(review_result.get("unapplied_fixes", [])),
+                "unapplied_fixes": review_result.get("unapplied_fixes", []),
                 "iterations_run": review_result.get("iterations_run", 0),
                 "passed": review_result.get("passed", False),
             }
@@ -1045,6 +1048,17 @@ class InterfaceDesigner:
             orphans = global_review.get("feature_orphans_count", 0)
             if orphans:
                 print(f"  -  Orphan features: {orphans}")
+            orphan_units = global_review.get("orphan_units_count", 0)
+            if orphan_units:
+                print(f"  -  Orphan units (no incoming edges): {orphan_units}")
+            unapplied_count = global_review.get("unapplied_fixes_count", 0)
+            if unapplied_count:
+                print(f"  -  Unapplied fixes: {unapplied_count}")
+                for u in global_review.get("unapplied_fixes", [])[:3]:
+                    print(f"     - [{u.get('action','?')}] {u.get('file_path','?')}::{u.get('unit_name','?')}"
+                          f" — {u.get('reason','?')}")
+                if unapplied_count > 3:
+                    print(f"     ... and {unapplied_count - 3} more")
             if result.get("import_warnings_count"):
                 print(f"  -  Import cross-validation warnings: {result['import_warnings_count']}")
             

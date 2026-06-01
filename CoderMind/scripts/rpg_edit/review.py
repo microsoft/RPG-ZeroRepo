@@ -423,7 +423,18 @@ def impact_review(
     # 3. Pre-check: smoke_test
     try:
         smoke = run_smoke_test(repo_path)
-        smoke_status = f"{'PASS' if smoke.get('success') else 'FAIL'}: {json.dumps(smoke.get('summary', {}))}"
+        # ``run_smoke_test`` returns a ``SmokeResult`` dataclass, not a dict.
+        smoke_dict = smoke.to_dict()
+        # SmokeResult has no "summary" key; surface a compact per-layer
+        # pass/fail map so the agent sees what actually failed.
+        layer_summary = {
+            name: bool(info.get("passed", False)) if isinstance(info, dict) else None
+            for name, info in (smoke_dict.get("layers") or {}).items()
+        }
+        smoke_status = (
+            f"{'PASS' if smoke_dict.get('success') else 'FAIL'}: "
+            f"{json.dumps(layer_summary)}"
+        )
     except Exception as e:
         smoke_status = f"ERROR: {e}"
 
