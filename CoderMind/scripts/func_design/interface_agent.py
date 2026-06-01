@@ -452,7 +452,53 @@ class GlobalInterfaceRegistry:
                 if file_path not in self.file_units:
                     self.file_units[file_path] = []
                 self.file_units[file_path].extend(file_unit_list)
-    
+
+    def register_unit(
+        self,
+        file_path: str,
+        unit_name: str,
+        subtree_name: str,
+        features: Optional[List[str]] = None,
+        signature_summary: str = "",
+    ) -> bool:
+        """Idempotently register a single new unit.
+
+        Used by ``InterfaceReviewer._apply_add_interface`` to plug a handler-added
+        interface into the registry without re-running the bulk
+        ``register_from_subtree_result`` pass on an already-registered subtree.
+
+        Returns:
+            True if newly registered, False if a unit with the same
+            ``(file_path, unit_name)`` already exists.
+        """
+        existing = self.units.get(unit_name)
+        if existing is not None and existing.get("file_path") == file_path:
+            return False
+
+        if unit_name.startswith("class "):
+            unit_type = "class"
+            bare_name = unit_name[len("class "):]
+            self.class_to_file[bare_name] = file_path
+        elif unit_name.startswith("function "):
+            unit_type = "function"
+            bare_name = unit_name[len("function "):]
+            self.function_to_file[bare_name] = file_path
+        else:
+            unit_type = "unknown"
+            bare_name = unit_name
+
+        unit_info = {
+            "file_path": file_path,
+            "subtree_name": subtree_name,
+            "unit_type": unit_type,
+            "bare_name": bare_name,
+            "signature_summary": signature_summary,
+            "features": list(features) if features else [],
+        }
+        self.units[unit_name] = unit_info
+        self.file_units.setdefault(file_path, []).append(unit_info)
+        return True
+
     def resolve_callee(self, callee_name: str) -> Optional[str]:
         """Resolve a callee name to its file_path across all registered subtrees.
         

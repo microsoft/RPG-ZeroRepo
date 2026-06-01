@@ -77,8 +77,18 @@ def count_total_files(skeleton: Dict[str, Any]) -> int:
 
 def count_total_features(skeleton: Dict[str, Any]) -> int:
     """Count total features in skeleton."""
-    features = set()
-    
+    return len(collect_skeleton_features(skeleton))
+
+
+def collect_skeleton_features(skeleton: Dict[str, Any]) -> set:
+    """Return the canonical set of feature paths declared in skeleton.json.
+
+    Used by ``InterfaceReviewer._apply_add_interface`` to validate that an
+    LLM-requested ``feature_path`` corresponds to a real feature, not an
+    invented one.
+    """
+    features: set = set()
+
     def traverse(node):
         if node.get("type") == "file":
             for fp in node.get("feature_paths", []):
@@ -86,10 +96,37 @@ def count_total_features(skeleton: Dict[str, Any]) -> int:
         elif node.get("type") == "directory":
             for child in node.get("children", []):
                 traverse(child)
-    
+
     root = skeleton.get("root", skeleton)
     traverse(root)
-    return len(features)
+    return features
+
+
+def collect_rpg_feature_paths(rpg_path: Path) -> set:
+    """Return the set of feature paths present in the current repo_rpg.json.
+
+    Walking the RPG tree (not just ``skeleton``) is required because earlier
+    pipeline phases may have **pruned** orphan feature nodes. The
+    ``add_interface`` handler must reject requests for pruned features
+    because ``update_rpg`` silently drops ``meta.path`` write-backs that
+    target missing nodes.
+
+    Returns an empty set on any I/O / parsing error (handler then degrades
+    gracefully — ``rpg_features=set()`` disables the RPG-presence check).
+    """
+    if not rpg_path or not Path(rpg_path).is_file():
+        return set()
+    try:
+        rpg = RPG.load_json(str(rpg_path))
+    except Exception:  # noqa: BLE001 — best-effort, degraded mode on any failure
+        return set()
+    paths: set = set()
+    for node in rpg.nodes.values():
+        if node.node_type == "feature":
+            fp = node.feature_path()
+            if fp:
+                paths.add(fp)
+    return paths
 
 
 def extract_known_classes_and_types(base_classes: Dict[str, Any]) -> tuple:
@@ -795,6 +832,8 @@ class InterfaceDesigner:
                 data_flow_edges=data_flow.get("data_flow", []),
                 dependency_collector=dependency_collector,
                 max_fix_iterations=2,
+                skeleton_features=collect_skeleton_features(skeleton),
+                rpg_features=collect_rpg_feature_paths(REPO_RPG_FILE),
             )
             
             # Update enhanced_data_flow in result (may have been modified by fixes)
@@ -950,136 +989,179 @@ class InterfaceDesigner:
         return result
     
     def print_summary(self, result: Dict[str, Any]) -> None:
-        """Print summary of interface design."""
+        """Print summary of interface design.
+
+        Organised as three explicit stages so the user can tell which check
+        a failure came from:
+
+          Stage 1 (Generation) — did the LLM produce signatures for every
+            file? Counts files attempted vs files with at least one unit.
+          Stage 2 (Coverage)   — is every skeleton feature mapped to some
+            unit? Schema-level completeness, no graph reasoning.
+          Stage 3 (Global Review) — is the call graph connected and
+            self-consistent? This is the strictest check and the source of
+            the canonical ``passed`` verdict.
+
+        The overall "Overall: PASS/FAIL" line at the bottom mirrors Stage
+        3's ``passed`` value.
+        """
         print("\n" + "=" * 60)
         print("INTERFACE DESIGN SUMMARY")
         print("=" * 60)
-        
+
         subtrees = result.get("subtrees", {})
         subtree_order = result.get("subtree_order", [])
-        
-        print(f"\nSubtrees Processed: {len(subtrees)}")
-        
-        # Summary per subtree
+
+        # ------------------------------------------------------------------
+        # Pre-compute counters used by the three stages.
+        # ------------------------------------------------------------------
         total_files = 0
         total_success = 0
         total_interfaces = 0
-        
-        rows = []
+        failed_files: List[str] = []
+        rows: List[List[Any]] = []
+        all_unit_features: set = set()
+
         for subtree_name in subtree_order:
             subtree_data = subtrees.get(subtree_name, {})
-            # Support both "interfaces" (reference format) and "files" (old format)
             file_container = subtree_data.get("interfaces", subtree_data.get("files", {}))
-            
             file_count = len(file_container)
             success_count = sum(1 for f in file_container.values() if f.get("units"))
             interface_count = sum(len(f.get("units", [])) for f in file_container.values())
-            
+
             total_files += file_count
             total_success += success_count
             total_interfaces += interface_count
-            
+            for file_path, file_data in file_container.items():
+                if not file_data.get("units"):
+                    failed_files.append(file_path)
+                for unit_features in (file_data.get("units_to_features", {}) or {}).values():
+                    if isinstance(unit_features, list):
+                        all_unit_features.update(unit_features)
+
             status = "[OK]" if success_count == file_count else f"[WARNING] {success_count}/{file_count}"
             rows.append([subtree_name[:25], file_count, interface_count, status])
-        
+
+        # ------------------------------------------------------------------
+        # Stage 1: Generation
+        # ------------------------------------------------------------------
+        print("\n[Stage 1] Generation — did the LLM produce signatures for every file?")
         if rows:
             print_unicode_table(
                 headers=["Subtree", "Files", "Interfaces", "Status"],
                 rows=rows,
                 title="Per-Subtree Summary"
             )
-        
-        print(f"\nTotal Files: {total_files}")
-        print(f"Successful: {total_success}")
-        print(f"Total Interfaces: {total_interfaces}")
-        
-        if total_files > 0:
-            success_rate = (total_success / total_files) * 100
-            print(f"Success Rate: {success_rate:.1f}%")
-        
-        # List any failures
-        failed_files = []
-        for subtree_name, subtree_data in subtrees.items():
-            # Support both "interfaces" (reference format) and "files" (old format)
-            file_container = subtree_data.get("interfaces", subtree_data.get("files", {}))
-            for file_path, file_data in file_container.items():
-                if not file_data.get("units"):
-                    failed_files.append(file_path)
-        
+        print(f"  Files attempted: {total_files}")
+        print(f"  Files successful: {total_success}"
+              + (f"  ({(total_success / total_files) * 100:.1f}%)" if total_files else ""))
+        print(f"  Total interfaces (units): {total_interfaces}")
         if failed_files:
-            print(f"\n[WARNING] Failed Files ({len(failed_files)}):")
+            print(f"  [WARNING] {len(failed_files)} file(s) produced no units:")
             for f in failed_files[:10]:
-                print(f"  -  {f}")
+                print(f"    - {f}")
             if len(failed_files) > 10:
-                print(f"  ... and {len(failed_files) - 10} more")
-        
-        # Print dependency summary
-        enhanced_data_flow = result.get("enhanced_data_flow", {})
-        if enhanced_data_flow:
-            inheritance_count = len(enhanced_data_flow.get("inheritance_edges", []))
-            invocation_count = len(enhanced_data_flow.get("invocation_edges", []))
-            reference_count = len(enhanced_data_flow.get("reference_edges", []))
-            
-            if inheritance_count or invocation_count or reference_count:
-                print("\nCollected Dependencies:")
-                print(f"  -  Inheritance edges: {inheritance_count}")
-                print(f"  -  Invocation edges: {invocation_count}")
-                print(f"  -  Reference edges: {reference_count}")
-                
-                # Show cross-file vs same-file breakdown
-                cross_file = sum(
-                    1 for e in enhanced_data_flow.get("invocation_edges", [])
-                    if e.get("caller_file") != e.get("callee_file") and e.get("callee_file")
-                )
-                no_callee = sum(
-                    1 for e in enhanced_data_flow.get("invocation_edges", [])
-                    if not e.get("callee_file")
-                )
-                print(f"  -  Cross-file invocations: {cross_file}")
-                if no_callee:
-                    print(f"  -  Unresolved callee_file: {no_callee}")
-        
-        # Print global review summary
-        global_review = result.get("global_review", {})
-        if global_review:
-            print("\nGlobal Review:")
-            print(f"  -  Passed: {'[OK]' if global_review.get('passed') else '[FAIL]'}")
-            print(f"  -  Entry points: {len(global_review.get('entry_points', []))}")
-            orphans = global_review.get("feature_orphans_count", 0)
-            if orphans:
-                print(f"  -  Orphan features: {orphans}")
+                print(f"    ... and {len(failed_files) - 10} more")
+
+        # Dependency edge summary — diagnostic, belongs with Stage 1.
+        enhanced_data_flow = result.get("enhanced_data_flow", {}) or {}
+        inheritance_count = len(enhanced_data_flow.get("inheritance_edges", []))
+        invocation_count = len(enhanced_data_flow.get("invocation_edges", []))
+        reference_count = len(enhanced_data_flow.get("reference_edges", []))
+        if inheritance_count or invocation_count or reference_count:
+            print("  Dependency edges collected:")
+            print(f"    - Inheritance: {inheritance_count}")
+            print(f"    - Invocation: {invocation_count}")
+            print(f"    - Reference:  {reference_count}")
+            cross_file = sum(
+                1 for e in enhanced_data_flow.get("invocation_edges", [])
+                if e.get("caller_file") != e.get("callee_file") and e.get("callee_file")
+            )
+            no_callee = sum(
+                1 for e in enhanced_data_flow.get("invocation_edges", [])
+                if not e.get("callee_file")
+            )
+            print(f"    - Cross-file invocations: {cross_file}")
+            if no_callee:
+                print(f"    - Unresolved callee_file: {no_callee}")
+
+        # ------------------------------------------------------------------
+        # Stage 2: Coverage
+        # ------------------------------------------------------------------
+        print("\n[Stage 2] Coverage — is every skeleton feature mapped to some unit?")
+        # NOTE: We can compute the skeleton-feature universe from
+        # interfaces.json alone (every unit declares its features); for a
+        # canonical count we'd need skeleton.json again. The cross-validate
+        # path already runs `check_interfaces.py` for that; here we just
+        # report what the produced data carries.
+        print(f"  Distinct features mapped to a unit: {len(all_unit_features)}")
+        if not all_unit_features:
+            print("  [WARNING] no feature mappings at all — likely Stage 1 failed")
+
+        # ------------------------------------------------------------------
+        # Stage 3: Global Review
+        # ------------------------------------------------------------------
+        global_review = result.get("global_review", {}) or {}
+        print("\n[Stage 3] Global Review — is the call graph connected and self-consistent?")
+        if not global_review:
+            print("  (no global review was performed)")
+        else:
+            print(f"  Entry points: {len(global_review.get('entry_points', []))}")
             orphan_units = global_review.get("orphan_units_count", 0)
-            if orphan_units:
-                print(f"  -  Orphan units (no incoming edges): {orphan_units}")
+            orphan_features = global_review.get("feature_orphans_count", 0)
             unapplied_count = global_review.get("unapplied_fixes_count", 0)
-            if unapplied_count:
-                print(f"  -  Unapplied fixes: {unapplied_count}")
-                for u in global_review.get("unapplied_fixes", [])[:3]:
-                    print(f"     - [{u.get('action','?')}] {u.get('file_path','?')}::{u.get('unit_name','?')}"
-                          f" — {u.get('reason','?')}")
-                if unapplied_count > 3:
-                    print(f"     ... and {unapplied_count - 3} more")
+            print(f"  Orphan units (no incoming edges): {orphan_units}")
+            print(f"  Orphan features (no unit reachable from entry): {orphan_features}")
+            print(f"  Unapplied fix requests: {unapplied_count}")
+            for u in global_review.get("unapplied_fixes", [])[:3]:
+                print(f"    - [{u.get('action','?')}] "
+                      f"{u.get('file_path','?')}::{u.get('unit_name','?')}"
+                      f" — {u.get('reason','?')}")
+            if unapplied_count > 3:
+                print(f"    ... and {unapplied_count - 3} more")
+
             if result.get("import_warnings_count"):
-                print(f"  -  Import cross-validation warnings: {result['import_warnings_count']}")
-            
-            # Pruning info
+                print(f"  Import cross-validation warnings: {result['import_warnings_count']}")
+
+            # Handler-added units (review-time interface completion).
+            handler_added: List[str] = []
+            for st_data in subtrees.values():
+                file_container = st_data.get("interfaces", st_data.get("files", {}))
+                for file_path, file_data in file_container.items():
+                    for uname in file_data.get("_handler_added", []) or []:
+                        handler_added.append(f"{file_path}::{uname}")
+            if handler_added:
+                print(f"  Handler-added units (review-time interface completion): {len(handler_added)}")
+                for k in handler_added[:5]:
+                    print(f"    + {k}")
+                if len(handler_added) > 5:
+                    print(f"    ... and {len(handler_added) - 5} more")
+
+            # Pruning info (post-Stage-3 housekeeping).
             pruned_units_count = global_review.get("pruned_units_count", 0)
             pruned_files_count = global_review.get("pruned_files_count", 0)
             if pruned_units_count:
-                print(f"  -  Pruned orphan units: {pruned_units_count}")
+                print(f"  Pruned orphan units: {pruned_units_count}")
             if pruned_files_count:
-                print(f"  -  Pruned empty files: {pruned_files_count}")
-            orphan_features = global_review.get("orphan_features", [])
-            if orphan_features:
-                print(f"  -  Orphan features (pruned from RPG): {len(orphan_features)}")
-                for of in orphan_features[:5]:
+                print(f"  Pruned empty files: {pruned_files_count}")
+            pruned_feats = global_review.get("orphan_features", [])
+            if pruned_feats:
+                print(f"  Orphan features pruned from RPG: {len(pruned_feats)}")
+                for of in pruned_feats[:5]:
                     print(f"    - {of['feature_path']} ({of['unit_key']})")
-                if len(orphan_features) > 5:
-                    print(f"    ... and {len(orphan_features) - 5} more")
+                if len(pruned_feats) > 5:
+                    print(f"    ... and {len(pruned_feats) - 5} more")
             rpg_pruned = global_review.get("rpg_pruned_nodes", 0)
             if rpg_pruned:
-                print(f"  -  RPG nodes pruned: {rpg_pruned}")
-        
+                print(f"  RPG nodes pruned (cascading): {rpg_pruned}")
+
+        # ------------------------------------------------------------------
+        # Verdict — mirrors Stage 3's `passed`.
+        # ------------------------------------------------------------------
+        passed = bool(global_review.get("passed"))
+        verdict = "✓ PASS" if passed else "✗ FAIL — see Stage 3 above"
+        print(f"\nOverall: {verdict}")
+        print("(Stage 3 is the strictest; PASS requires Stages 1+2 also clean.)")
         print("=" * 60)
 
 

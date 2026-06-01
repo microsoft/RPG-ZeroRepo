@@ -100,16 +100,36 @@ If `cross_validation.is_consistent` is `false`, display warnings about unmapped 
 
 ### Step 4: Completion
 
-Summarize what was designed:
+The script prints a three-stage summary; use it to communicate the result:
 
-* Number of components processed
-* Total number of units (functions + classes)
-* Feature coverage
+* **Stage 1 (Generation)** — files attempted vs files with at least one
+  unit produced; dependency edges collected.
+* **Stage 2 (Coverage)**   — distinct skeleton features mapped to a unit.
+* **Stage 3 (Global Review)** — call-graph connectivity, entry points,
+  orphan units / features, and any unapplied fix requests
+  (e.g. `modify_interface` suggestions that have no auto-handler, or
+  malformed `add_interface` requests).
 
-Guide user to the next step:
+The bottom of the summary prints `Overall: ✓ PASS` or
+`Overall: ✗ FAIL — see Stage 3 above`. This single line mirrors
+`interfaces.json:global_review.passed` and is the canonical verdict.
+
+If PASS, guide the user to the next step:
 
 ```text
 > Interface design complete! Your next step is:
 > 
-> **/cmind.plan_tasks** - Create implementation tasks
+> **/cmind.plan_tasks** — Create implementation tasks
 ```
+
+If FAIL, surface the concrete blockers from
+`interfaces.json:global_review`:
+
+* `feature_orphans_count` / `orphan_units_count` > 0 → still missing
+  wiring; another `/cmind.design_interfaces` run may help, or the user
+  may need to revise `/cmind.build_skeleton` to remove unreachable
+  features.
+* `unapplied_fixes_count` > 0 → the LLM raised architectural suggestions
+  the auto-handler can't apply (typically `modify_interface`). List the
+  first few from `unapplied_fixes` and let the user decide whether to
+  act on them manually or accept them as known limitations.
