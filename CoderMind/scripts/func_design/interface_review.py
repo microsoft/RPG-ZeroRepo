@@ -871,10 +871,14 @@ Please perform the review tasks and return the JSON result.
                     inv_edges = enhanced_data_flow.get("invocation_edges", [])
                     
                     # Check if edge already exists
+                    # (must match all four identity fields: same
+                    # callee_name can resolve to different callee_file
+                    # when two unrelated units share a name)
                     exists = any(
                         e.get("caller") == unit_name
                         and e.get("callee") == callee
                         and e.get("caller_file") == file_path
+                        and e.get("callee_file") == callee_file
                         for e in inv_edges
                     )
                     

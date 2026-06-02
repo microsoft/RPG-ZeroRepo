@@ -323,7 +323,25 @@ class DependencyCollector:
 
             cleaned.append(edge)
 
-        self.invocation_edges = cleaned
+        # --- 4. Dedup: drop exact-duplicate invocation edges -------------
+        # Two sources can emit the same edge: AST inspection
+        # (`analyze_code_dependencies`) and LLM declarations
+        # (`process_llm_dependencies`). Without this pass duplicates
+        # silently inflate `incoming` counts and can mask real orphans.
+        seen: Set[Tuple[str, str, Optional[str], Optional[str]]] = set()
+        deduped: List[Dict[str, Any]] = []
+        for edge in cleaned:
+            key = (
+                edge.get("caller", ""),
+                edge.get("callee", ""),
+                edge.get("caller_file"),
+                edge.get("callee_file"),
+            )
+            if key in seen:
+                continue
+            seen.add(key)
+            deduped.append(edge)
+        self.invocation_edges = deduped
 
     def to_dict(self) -> Dict[str, Any]:
         """Convert collected dependencies to dictionary."""
@@ -396,6 +414,33 @@ class GlobalInterfaceRegistry:
         self.function_to_file: Dict[str, str] = {}
         # file_path -> list of unit info dicts
         self.file_units: Dict[str, List[Dict[str, Any]]] = {}
+        self._logger = logging.getLogger(__name__)
+
+    def _register_symbol(
+        self,
+        index: Dict[str, str],
+        symbol_kind: str,
+        name: str,
+        file_path: str,
+    ) -> None:
+        """Assign ``index[name] = file_path``, warning if it silently overrides
+        a different existing entry.
+
+        Same-named top-level symbols across files are uncommon but legal
+        (e.g. helper ``Repository`` / ``Manager`` per module). The current
+        single-valued maps lose all but one — this helper at least makes
+        the loss visible in logs so debuggers can spot ambiguous resolutions.
+        A full multi-value fix is tracked separately.
+        """
+        existing = index.get(name)
+        if existing and existing != file_path:
+            self._logger.warning(
+                "[GlobalInterfaceRegistry] %s name collision: '%s' already "
+                "registered to %s, now overwritten by %s. Cross-subtree "
+                "callee resolution may pick the wrong file.",
+                symbol_kind, name, existing, file_path,
+            )
+        index[name] = file_path
     
     def register_from_subtree_result(
         self,
@@ -424,11 +469,11 @@ class GlobalInterfaceRegistry:
                 if unit_name.startswith("class "):
                     unit_type = "class"
                     bare_name = unit_name[len("class "):]
-                    self.class_to_file[bare_name] = file_path
+                    self._register_symbol(self.class_to_file, "class", bare_name, file_path)
                 elif unit_name.startswith("function "):
                     unit_type = "function"
                     bare_name = unit_name[len("function "):]
-                    self.function_to_file[bare_name] = file_path
+                    self._register_symbol(self.function_to_file, "function", bare_name, file_path)
                 else:
                     unit_type = "unknown"
                     bare_name = unit_name
@@ -478,11 +523,11 @@ class GlobalInterfaceRegistry:
         if unit_name.startswith("class "):
             unit_type = "class"
             bare_name = unit_name[len("class "):]
-            self.class_to_file[bare_name] = file_path
+            self._register_symbol(self.class_to_file, "class", bare_name, file_path)
         elif unit_name.startswith("function "):
             unit_type = "function"
             bare_name = unit_name[len("function "):]
-            self.function_to_file[bare_name] = file_path
+            self._register_symbol(self.function_to_file, "function", bare_name, file_path)
         else:
             unit_type = "unknown"
             bare_name = unit_name
@@ -1777,18 +1822,42 @@ class InterfaceOrchestrator:
                 max_iterations=self.max_file_iterations,
                 logger=self.logger
             )
-            
-            file_results = agent.design_subtree_interfaces(
-                file_nodes=file_nodes,
-                file_order=file_order,
-                repo_info=repo_info,
-                data_flow_str=filtered_data_flow_str,
-                base_classes_str=base_classes_str,
-                upstream_context=upstream_context,
-                dependency_collector=dependency_collector,
-                base_class_files=base_class_files,
-                subtree_name=subtree_name,
-            )
+
+            # Layer-2 retry: if the agent's internal 10-iteration loop
+            # leaves any file with no units, give the whole subtree ONE
+            # second chance. This is the simple variant — attempt 2
+            # reruns the entire subtree (not just failed files). The
+            # cost (extra LLM round) is bounded and only paid when at
+            # least one file actually failed, which is rare in practice.
+            max_subtree_attempts = 2
+            file_results: Dict[str, Any] = {}
+            for attempt in range(max_subtree_attempts):
+                file_results = agent.design_subtree_interfaces(
+                    file_nodes=file_nodes,
+                    file_order=file_order,
+                    repo_info=repo_info,
+                    data_flow_str=filtered_data_flow_str,
+                    base_classes_str=base_classes_str,
+                    upstream_context=upstream_context,
+                    dependency_collector=dependency_collector,
+                    base_class_files=base_class_files,
+                    subtree_name=subtree_name,
+                )
+                failed_paths = [
+                    fp for fp, r in file_results.items()
+                    if fp != "__new_features__"
+                    and isinstance(r, dict)
+                    and not r.get("units")
+                ]
+                if not failed_paths:
+                    break
+                if attempt + 1 < max_subtree_attempts:
+                    self.logger.warning(
+                        f"[InterfaceOrchestrator] Subtree '{subtree_name}' "
+                        f"left {len(failed_paths)} file(s) without units "
+                        f"after attempt {attempt + 1}/{max_subtree_attempts}; "
+                        f"retrying whole subtree once. Failed: {failed_paths[:5]}"
+                    )
 
             # Extract new features from this subtree
             subtree_new_features = file_results.pop("__new_features__", [])
