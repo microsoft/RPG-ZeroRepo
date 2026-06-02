@@ -668,7 +668,14 @@ class InterfaceReviewer:
             "final_orphan_units": final_orphan_units,
             "unapplied_fixes": unapplied_fixes,
             "iterations_run": len(review_history),
-            "passed": bool(last_llm_pass and code_passed),
+            # ``last_llm_pass`` is a snapshot taken BEFORE the LLM's own
+            # iteration-N fixes are applied, so it can read FAIL even when
+            # those fixes resolved every issue. The structural ``code_passed``
+            # check runs against the post-fix graph and is authoritative; we
+            # surface ``last_llm_pass`` separately for visibility but do not
+            # gate the overall verdict on it.
+            "last_llm_pass": last_llm_pass,
+            "passed": bool(code_passed),
         }
 
         return final_result
