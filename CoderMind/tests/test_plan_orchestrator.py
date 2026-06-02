@@ -87,11 +87,16 @@ class TestDecideCascade:
         # downstream reasons should mention cascade
         assert "upstream" in states[1].reason
 
-    def test_warning_triggers_run(self) -> None:
+    def test_warning_is_treated_as_done(self) -> None:
+        # ``warning`` means the artefact is present and usable, only a
+        # soft inconsistency was flagged. decide() must NOT rebuild it
+        # (otherwise re-running plan.py would loop forever on a stage
+        # whose check perpetually emits warning).
         states = _states(["update", "warning", "update", "update", "update"])
         plan.decide(states, force=False)
-        # data_flow runs because warning; downstream cascades.
-        assert [s.will_run for s in states] == [False, True, True, True, True]
+        assert [s.will_run for s in states] == [False, False, False, False, False]
+        # The warning state should still be visible in the reason string.
+        assert "warning" in states[1].reason
 
     def test_force_runs_everything(self) -> None:
         states = _states(["update"] * 5)
