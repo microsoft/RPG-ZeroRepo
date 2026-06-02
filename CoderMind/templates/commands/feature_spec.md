@@ -62,8 +62,10 @@ auto-detection already covers it.
 
 ### Step 3: Overwrite decision
 
-If `feature_spec.json` already exists and `--force` was not supplied,
-the helper exits with `[SKIP]`. To regenerate, ask the user:
+If a **valid** `feature_spec.json` already exists and `--force` was not
+supplied, the helper exits with `[SKIP]` without calling the LLM.
+(Missing or schema-invalid existing files do not trigger `[SKIP]`;
+the helper regenerates them.) To regenerate a valid spec, ask the user:
 
 ```text
 feature_spec.json already exists. Regenerate?

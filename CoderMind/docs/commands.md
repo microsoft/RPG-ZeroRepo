@@ -237,12 +237,10 @@ step. This is the recommended entry point for Phase 2.
    `check_*.py` script re-runs to validate the produced artifact. If
    verification fails the pipeline stops and prints recovery hints.
 
-**Resume semantics:** the command treats `type == "update"` from each
-`check_*.py` as the source of truth for "this stage is done". If you
-press Ctrl-C halfway through, running `/cmind.plan` again automatically
-resumes from the first not-done stage. When any earlier stage is
-re-run, every downstream stage is rebuilt too so artifacts never drift
-apart.
+**Resume semantics:** if you press Ctrl-C halfway through, running
+`/cmind.plan` again automatically resumes from the first incomplete
+stage. When any earlier stage is re-run, every downstream stage is
+rebuilt too so artifacts never drift apart.
 
 **CLI flags forwarded after `$ARGUMENTS`:**
 

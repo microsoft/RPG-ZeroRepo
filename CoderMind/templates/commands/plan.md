@@ -36,9 +36,10 @@ cmind script plan.py --check-only --json
 Parse the JSON. The fields you need:
 
 * `total` — total number of stages (always 5)
-* `done`  — count of stages whose `type` is `update`
+* `done`  — count of stages whose `type` is `update` or `warning`
 * `next`  — name of the first not-done stage (or `null` if all done)
-* `stages[*].name`, `stages[*].done`
+* `stages[*].name`, `stages[*].type` (`update` / `warning` / `init` /
+  `error`), `stages[*].done`
 
 ### Step 2: One decision (the only prompt of this command)
 
@@ -77,9 +78,14 @@ Then execute: `cmind script plan.py $ARGUMENTS`
 
 **Case C — Partial progress (`0 < done < total`):**
 
-Display this prompt, with each stage marked using its real status
-from `stages[*].done` (`✓` for done, `▸` for the first not-done one,
-`·` for the rest):
+Display this prompt. Glyph per stage:
+
+* `stages[*].done == true` → `✓`
+* the first not-done stage → `▸`
+* every other not-done stage → `·`
+
+(Per-stage warning details, if any, are surfaced by `plan.py`'s own
+stdout when it runs; the user-facing prompt only conveys done/not-done.)
 
 ```text
 Planning is partially complete: <done>/<total> stages done.
