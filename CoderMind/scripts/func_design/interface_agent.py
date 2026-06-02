@@ -83,6 +83,26 @@ class FileImplementationGraph(BaseModel):
 # Dependency Collector
 # ============================================================================
 
+def _dedup_edges_in_place(edges: List[Dict[str, Any]], key_fields: Tuple[str, ...]) -> int:
+    """Remove duplicate edges in place (first-seen wins). Returns count removed.
+
+    Edges are identified by the tuple of values for ``key_fields``. The first
+    occurrence is kept (preserving earliest ``generator`` provenance).
+    """
+    seen = set()
+    deduped: List[Dict[str, Any]] = []
+    for e in edges:
+        key = tuple(e.get(f) for f in key_fields)
+        if key in seen:
+            continue
+        seen.add(key)
+        deduped.append(e)
+    removed = len(edges) - len(deduped)
+    if removed:
+        edges[:] = deduped  # mutate in place to keep shared references valid
+    return removed
+
+
 class DependencyCollector:
     """Collect fine-grained dependencies discovered during interface design.
     
@@ -116,7 +136,17 @@ class DependencyCollector:
         source_file: str,
         parent_file: Optional[str] = None
     ):
-        """Add an inheritance relationship (child extends parent)."""
+        """Add an inheritance relationship (child extends parent).
+
+        Duplicate (child, parent, source_file, parent_file) entries are
+        skipped so repeated calls from AST + LLM paths don't double-count.
+        """
+        for existing in self.inheritance_edges:
+            if (existing.get("child") == child_class
+                and existing.get("parent") == parent_class
+                and existing.get("source_file") == source_file
+                and existing.get("parent_file") == parent_file):
+                return
         self.inheritance_edges.append({
             "child": child_class,
             "parent": parent_class,
@@ -134,14 +164,25 @@ class DependencyCollector:
         callee_file: Optional[str] = None
     ):
         """Add an invocation relationship (caller calls callee).
-        
+
         Self-calls (same bare name + same or unknown file) are silently skipped.
+        Duplicate edges (same caller/callee/files) are also skipped so
+        callers can safely invoke this from multiple paths (AST inspection,
+        LLM declarations, global-review fixes) without inflating counts.
         """
         # --- self-call filter ---
         bare_caller = caller.split(" ", 1)[-1] if " " in caller else caller
         bare_callee = callee.split(" ", 1)[-1] if " " in callee else callee
         if bare_caller == bare_callee and (callee_file is None or callee_file == caller_file):
             return
+
+        # --- duplicate filter: ignore identical (caller, callee, files) ---
+        for existing in self.invocation_edges:
+            if (existing.get("caller") == caller
+                and existing.get("callee") == callee
+                and existing.get("caller_file") == caller_file
+                and existing.get("callee_file") == callee_file):
+                return
 
         self.invocation_edges.append({
             "caller": caller,
@@ -151,7 +192,7 @@ class DependencyCollector:
             "edge_type": "invokes",
             "generator": "design_interfaces"
         })
-    
+
     def add_reference(
         self,
         unit_name: str,
@@ -159,7 +200,17 @@ class DependencyCollector:
         source_file: str,
         type_file: Optional[str] = None
     ):
-        """Add a type reference relationship."""
+        """Add a type reference relationship.
+
+        Duplicate (unit, referenced_type, source_file, type_file) entries
+        are skipped so AST and LLM-declared references don't double-count.
+        """
+        for existing in self.reference_edges:
+            if (existing.get("unit") == unit_name
+                and existing.get("referenced_type") == referenced_type
+                and existing.get("source_file") == source_file
+                and existing.get("type_file") == type_file):
+                return
         self.reference_edges.append({
             "unit": unit_name,
             "referenced_type": referenced_type,
@@ -341,15 +392,53 @@ class DependencyCollector:
                 continue
             seen.add(key)
             deduped.append(edge)
+        removed_count = len(cleaned) - len(deduped)
+        if removed_count:
+            import logging as _logging
+            _logging.getLogger(__name__).info(
+                "[DependencyCollector] post_process_edges deduped "
+                "%d / %d invocation edges",
+                removed_count, len(cleaned),
+            )
         self.invocation_edges = deduped
 
     def to_dict(self) -> Dict[str, Any]:
-        """Convert collected dependencies to dictionary."""
+        """Convert collected dependencies to dictionary.
+
+        Performs a final in-place dedup on each edge bucket as a backstop:
+        callers (especially ``_apply_fixes`` / ``_apply_add_interface``)
+        sometimes append edges directly to the lists returned by an earlier
+        ``to_dict()`` call (shared references) before re-feeding via
+        ``add_invocation``. Without this pass, the same edge appended directly
+        and then re-added via ``add_invocation`` could appear twice if the
+        write-time dedup in ``add_invocation`` were ever bypassed.
+
+        In-place mutation preserves shared list references so downstream
+        callers holding the prior result still see the deduped contents.
+        """
+        inh_removed = _dedup_edges_in_place(
+            self.inheritance_edges,
+            ("child", "parent", "source_file", "parent_file"),
+        )
+        inv_removed = _dedup_edges_in_place(
+            self.invocation_edges,
+            ("caller", "callee", "caller_file", "callee_file"),
+        )
+        ref_removed = _dedup_edges_in_place(
+            self.reference_edges,
+            ("unit", "referenced_type", "source_file", "type_file"),
+        )
+        if inh_removed or inv_removed or ref_removed:
+            logging.getLogger(__name__).info(
+                f"[DependencyCollector.to_dict] Final dedup removed "
+                f"{inh_removed} inheritance / {inv_removed} invocation / "
+                f"{ref_removed} reference duplicate edges"
+            )
         return {
             "original_edges": self.original_edges,
             "inheritance_edges": self.inheritance_edges,
             "invocation_edges": self.invocation_edges,
-            "reference_edges": self.reference_edges
+            "reference_edges": self.reference_edges,
         }
     
     def get_summary(self) -> Dict[str, int]:
