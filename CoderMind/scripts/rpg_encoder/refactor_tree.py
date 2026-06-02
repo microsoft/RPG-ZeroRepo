@@ -83,6 +83,8 @@ class RefactorTree:
         skeleton_info: str = "",
         logger: Optional[logging.Logger] = None,
         llm_client: Optional[Any] = None,
+        language: str = "python",
+        language_map: Optional[Dict[str, str]] = None,
         **kwargs,
     ):
         self.repo_name = repo_name
@@ -90,6 +92,19 @@ class RefactorTree:
         self.repo_info = repo_info
         self.repo_skeleton = repo_skeleton
         self.skeleton_info = skeleton_info
+
+        # Language metadata propagated into every NodeMetaData this
+        # encoder mints. ``language`` is the repo-wide default;
+        # ``language_map`` (path-prefix -> language) lets multi-language
+        # repos override per-subtree. ``_resolve_language(path)`` returns
+        # the best match (longest matching prefix) or falls back to
+        # ``language``. Keys are normalised so callers can pass
+        # ``"cmd/"`` or ``"cmd"`` and either form matches.
+        self.language = language
+        self._language_map: Dict[str, str] = {
+            self._normalise_lang_prefix(k): v
+            for k, v in (language_map or {}).items()
+        }
 
         self.rpg = RPG(repo_name=self.repo_name)
 
@@ -116,6 +131,32 @@ class RefactorTree:
     def _uuid8() -> str:
         """Short uuid (8-char hex) for node ID generation."""
         return uuid.uuid4().hex[:8]
+
+    @staticmethod
+    def _normalise_lang_prefix(prefix: str) -> str:
+        """Strip trailing ``/`` from a ``language_map`` key for matching."""
+        return prefix.rstrip("/")
+
+    def _resolve_language(self, path: Optional[str]) -> str:
+        """Return the language for ``path``.
+
+        Looks up the longest path-prefix match in ``language_map``;
+        falls back to the repo-wide ``self.language``. ``None`` /
+        empty paths return the default.
+        """
+        if not path or not self._language_map:
+            return self.language
+        normalised_path = str(path).lstrip("/")
+        best: Optional[str] = None
+        best_len = -1
+        for prefix, lang in self._language_map.items():
+            if not prefix:
+                continue
+            if normalised_path == prefix or normalised_path.startswith(prefix + "/"):
+                if len(prefix) > best_len:
+                    best = lang
+                    best_len = len(prefix)
+        return best if best is not None else self.language
 
     def step(self, memory: Memory):
         """Single LLM step: generate, parse solution JSON.
@@ -614,6 +655,7 @@ class RefactorTree:
                     path=file_node_path(file_path),
                     description=f_features.get("_file_summary_", ""),
                     generator="rpg_encoder",
+                    language=self._resolve_language(file_path),
                 ),
             )
             file2node[file_path] = file_node
@@ -650,6 +692,7 @@ class RefactorTree:
                                     "",
                                 ),
                                 generator="rpg_encoder",
+                                language=self._resolve_language(file_path),
                             ),
                             unit=func_unit.key(),
                         )
@@ -675,6 +718,7 @@ class RefactorTree:
                                         "",
                                     ),
                                     generator="rpg_encoder",
+                                    language=self._resolve_language(file_path),
                                 ),
                                 unit=cls_unit.key(),
                             )
@@ -706,6 +750,7 @@ class RefactorTree:
                                             "",
                                         ),
                                         generator="rpg_encoder",
+                                        language=self._resolve_language(file_path),
                                     ),
                                     unit=mtd_unit.key(),
                                 )
@@ -998,6 +1043,7 @@ class RefactorTree:
                     path=file_node_path(file_path),
                     description=current_summary,
                     generator="rpg_encoder",
+                    language=instance._resolve_language(file_path),
                 ),
             )
             instance.rpg.add_node(file_node)
@@ -1033,6 +1079,7 @@ class RefactorTree:
                                     desc_key_function(func_name, feature), ""
                                 ),
                                 generator="rpg_encoder",
+                                language=instance._resolve_language(file_path),
                             ),
                             unit=func_unit.key(),
                         )
@@ -1058,6 +1105,7 @@ class RefactorTree:
                                         desc_key_class(class_name, feat), ""
                                     ),
                                     generator="rpg_encoder",
+                                    language=instance._resolve_language(file_path),
                                 ),
                                 unit=cls_unit.key(),
                             )
@@ -1086,6 +1134,7 @@ class RefactorTree:
                                             "",
                                         ),
                                         generator="rpg_encoder",
+                                        language=instance._resolve_language(file_path),
                                     ),
                                     unit=mtd_unit.key(),
                                 )
