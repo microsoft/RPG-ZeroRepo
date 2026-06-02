@@ -17,12 +17,17 @@ def test_parsed_file_handles_go_without_ast_parse_crash():
     parsed = ParsedFile(code, "main.go")
 
     assert parsed.has_error() is False
+    # Go struct is normalised to ``class`` so semantic_parsing.py's
+    # class-vs-function grouping picks it up; the original kind is kept
+    # in ``extra['lp_kind']`` for callers that need the raw taxonomy.
     assert [(unit.unit_type, unit.name, unit.parent) for unit in parsed.units] == [
         ("package", "main", None),
         ("import", "fmt", None),
-        ("struct", "Server", None),
+        ("class", "Server", None),
         ("method", "Handle", "Server"),
     ]
+    struct_unit = parsed.get_unit_by_name("Server")
+    assert struct_unit.extra["lp_kind"] == "struct"
     method = parsed.get_unit_by_name("Handle")
     assert method.lineno == 6
     assert method.end_lineno == 6
@@ -34,7 +39,7 @@ def test_snippet_builder_uses_go_fence_and_skips_ast_parse_for_go():
     code = "package main\n\nimport \"fmt\"\n\ntype Server struct {}\nfunc (s *Server) Handle() { fmt.Println(\"ok\") }\n"
     parsed = ParsedFile(code, path)
     builder = CodeSnippetBuilder({path: code}, {path: parsed})
-    units = [unit for unit in parsed.units if unit.unit_type in {"struct", "method"}]
+    units = [unit for unit in parsed.units if unit.unit_type in {"class", "method"}]
 
     with patch("ast.parse", side_effect=AssertionError("ast.parse should not run for Go")):
         snippet = builder.build(units)

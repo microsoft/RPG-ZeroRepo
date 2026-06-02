@@ -418,10 +418,26 @@ class ParsedFile:
         empty_tree = ast.Module(body=[], type_ignores=[])
         return file_result, empty_tree, error
 
+    # Unit kinds that other languages use to express something the rest
+    # of the encoder pipeline treats as "a class": Go struct / interface,
+    # Rust struct / enum / trait, C/C++ struct / class. Normalising them
+    # to ``"class"`` here lets semantic_parsing.py's class-vs-function
+    # grouping (which is hard-coded to ``unit_type == "class"``) pick
+    # them up without having to learn each parser's per-language taxonomy.
+    # The original kind is preserved as ``extra["lp_kind"]`` so callers
+    # that care (e.g. RPG rendering) can still recover it.
+    _LP_CLASS_LIKE_KINDS = frozenset({
+        "struct", "interface", "enum", "trait",
+    })
+
     def _code_units_from_parser_result(self, file_result) -> List["CodeUnit"]:
         """Adapt ``LPFileResult`` units into the ``CodeUnit`` shape.
 
         ``unit_type == "file"`` entries are skipped (no Python-side equivalent).
+        ``unit_type`` values listed in :attr:`_LP_CLASS_LIKE_KINDS` are
+        rewritten to ``"class"`` (with the original kind kept in
+        ``extra["lp_kind"]``) so downstream code that pivots on
+        ``unit_type == "class"`` picks them up.
         The ast-node slot is populated from ``unit.extra['ast_node']`` when
         the parser provides one; otherwise the raw source slice is used so
         downstream code-snippet building still works.
@@ -435,8 +451,12 @@ class ParsedFile:
             extra.setdefault("language", unit.language)
             extra.setdefault("line_start", unit.line_start)
             extra.setdefault("line_end", unit.line_end)
+            normalised_type = unit.unit_type
+            if normalised_type in self._LP_CLASS_LIKE_KINDS:
+                extra.setdefault("lp_kind", unit.unit_type)
+                normalised_type = "class"
             units.append(CodeUnit(
-                unit.name, node, unit.unit_type, self.file_path,
+                unit.name, node, normalised_type, self.file_path,
                 unit.parent, extra=extra,
             ))
         return units
