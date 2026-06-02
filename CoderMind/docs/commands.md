@@ -569,7 +569,7 @@ See [configuration.md](configuration.md) for MCP registration, auto-approval, ho
 
 ## Data Files
 
-All intermediate data is stored in `.cmind/data/`:
+All intermediate data is stored in `.cmind/data/` (a logical name; the actual files live under `~/.cmind/workspaces/<workspace-id>/data/` — see the note at the top of this document).
 
 | File | Produced by | Description |
 | ---- | ----------- | ----------- |

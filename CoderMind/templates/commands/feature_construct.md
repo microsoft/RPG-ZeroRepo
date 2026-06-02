@@ -77,9 +77,9 @@ cmind script feature_construct.py --check-only --json
 Parse:
 
 - `total` — always 3.
-- `done` — count of stages whose `type` is `update` (artefact present and valid).
+- `done` — count of stages whose per-stage `done` flag is `true` (artefact present and valid). The script also emits a `completed` alias with the same value for convenience.
 - `next` — first incomplete stage name, or `null` if all done.
-- `stages[*]` — per-stage `status`, `message`, `will_run`, `reason`.
+- `stages[*]` — per-stage `type` (`update` / `skip` / `run`), `message`, `done` (boolean), `will_run`, `reason`.
 
 ### Step 2: Determine requirement source
 
