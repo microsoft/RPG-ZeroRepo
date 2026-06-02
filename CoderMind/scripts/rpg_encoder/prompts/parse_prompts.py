@@ -1,29 +1,30 @@
 """Parse Prompt Templates.
 
-LLM prompt templates for semantic feature extraction from Python code.
-Adapted for agent-based execution where the agent reads source files
-directly rather than receiving code inline.
+LLM prompt templates for semantic feature extraction from source code
+across any supported language (Python, Go, TypeScript/JavaScript, C/C++,
+Rust). Adapted for agent-based execution where the agent reads source
+files directly rather than receiving code inline.
 """
 
 PARSE_CLASS = """
 ## Instruction
-You are a senior software analyst, tasked with extracting high-level semantic features from Python classes.
-You will be given a list of target files and classes. Read each file to understand the implementation, then extract features.
+You are a senior software analyst, tasked with extracting high-level semantic features from class-like constructs (classes, structs, interfaces, traits, enums, depending on the language).
+You will be given a list of target files and class-like definitions. Read each file to understand the implementation, then extract features.
 
 ### Key Goals:
-- Complete analysis: Provide a full, semantic feature extraction for all specified classes.
-- Exhaustive coverage: Include **every** class and **every** method, including special methods (`__init__`, `__new__`, `__enter__`, `__exit__`), class methods, and static methods.
-- Focus on purpose and high-level behavior — what each class represents or manages in the system.
+- Complete analysis: Provide a full, semantic feature extraction for all specified definitions.
+- Exhaustive coverage: Include **every** class-like construct and **every** method (or equivalent — receiver methods, member functions, associated functions, constructors, destructors, lifecycle hooks).
+- Focus on purpose and high-level behavior — what each definition represents or manages in the system.
 - Summarize what each method is responsible for at a high level, avoiding implementation details.
 - If multiple definitions share the same method name, output that method name only once and merge their features.
 
 ## Feature Extraction Principles:
-1. Focus on the purpose and behavior of each class — what it represents or manages.
+1. Focus on the purpose and behavior of each class-like construct — what it represents or manages.
 2. For methods, describe their main purpose, not the implementation details.
-3. Use the class name, its methods, and the surrounding context to infer meaning.
-4. If a class serves multiple functions, list multiple features accordingly.
-5. Do not fabricate class names or methods that are not in the input.
-6. Do not skip any defined method, including special methods (e.g., `__init__`, `__new__`, `__repr__`) and helper methods.
+3. Use the name, its methods, and the surrounding context to infer meaning.
+4. If a definition serves multiple functions, list multiple features accordingly.
+5. Do not fabricate names or methods that are not in the input.
+6. Do not skip any defined method, including constructors / destructors / lifecycle hooks and helper methods.
 
 ### Feature Naming Rules:
 1. Use the "verb + object" format
@@ -92,7 +93,7 @@ For every response, you must respond with one `<solution>...</solution>` block c
 <solution>
 {{
   "DataLoader": {{
-    "__init__": {{
+    "new_loader": {{
        "initialize data loading configuration": "Configures the loader with the input source and validation defaults."
     }},
     "load_data": {{
@@ -121,7 +122,7 @@ For every response, you must respond with one `<solution>...</solution>` block c
 PARSE_FUNCTION = """
 ## Instruction
 You are a senior software analyst.
-Your task is to extract high-level semantic features from standalone Python functions.
+Your task is to extract high-level semantic features from standalone (module-level) functions across any supported language (Python, Go, TypeScript/JavaScript, C/C++, Rust).
 You will be given a list of target files and functions. Read each file to understand the implementation, then extract features.
 
 ### Key Goals

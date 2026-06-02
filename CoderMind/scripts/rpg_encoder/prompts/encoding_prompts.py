@@ -50,7 +50,7 @@ EXCLUDE_FILES = """
 You are an expert in large-scale software repository auditing.
 
 ## Goal
-Exclude Python paths that clearly do NOT contribute to core library logic or functionality.
+Exclude paths that clearly do NOT contribute to core library logic or functionality.
 
 ## Key Policy
 - Default: **keep code unless exclusion is obvious**
@@ -58,10 +58,8 @@ Exclude Python paths that clearly do NOT contribute to core library logic or fun
 - Err on the side of keeping — conservative filtering
 
 ## Scope
-Consider only:
-1) `.py` files
-2) Directories containing `.py` files
-Ignore folders with no `.py`.
+Consider only source files in supported languages and the directories that
+contain them. Ignore folders with no recognised source files.
 
 ## Exclude when it is obvious the content is non-core
 Examples of clearly non-functional areas:
@@ -88,7 +86,7 @@ Return only excluded paths in this exact format:
 <solution>
 ```
 path/to/excluded_dir/
-some/other/irrelevant.py
+some/other/irrelevant
 third_party/
 tests/
 ...
@@ -97,7 +95,7 @@ tests/
 """
 
 ANALYZE_DATA_FLOW = """
-You are a system architect tasked with EXTRACTING the inter-subtree (functional area) data flows for a Python repository, based solely on the provided context.
+You are a system architect tasked with EXTRACTING the inter-subtree (functional area) data flows for a source repository, based solely on the provided context.
 
 ## Task
 From the repository context below, infer a directed data-flow graph between functional subtrees. Each edge represents a data object moving from one subtree to another.
@@ -123,8 +121,8 @@ Return ONLY a JSON array of edges inside <solution> ... </solution>. Each edge i
 
 ### Data typing guidance
 - The "data_type" field can be:
-  - a single precise type string, e.g. "pandas.DataFrame"
-  - OR an array of alternatives, e.g. ["pandas.DataFrame", "pyarrow.Table"] to indicate acceptable forms.
+  - a single precise type string, e.g. "UserRecord"
+  - OR an array of alternatives, e.g. ["UserRecord", "User"] to indicate acceptable forms.
 - Container types are allowed and should be explicit, e.g. "list[Sample]", "dict[str, MetricValue]", "tuple[Header, bytes]".
 - Prefer consistent, reusable type labels across edges when representing the same logical payload.
 

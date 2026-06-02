@@ -40,11 +40,20 @@ def test_prompt_files_do_not_scope_exclusion_to_python_extensions():
 
 
 def test_solution_output_schemas_are_preserved():
+    # The prompt was updated to emit a richer ``{feature: description}``
+    # mapping (instead of the legacy ``[feature1, feature2]`` array).
+    # The multilingual scrub must not regress the example payloads —
+    # downstream parsers (``semantic_parsing.py``) rely on these exact
+    # shapes when validating LLM output.
     assert "<solution>" in PARSE_CLASS
     assert "</solution>" in PARSE_CLASS
-    assert '"method_1": ["feature 1", "feature 2"]' in PARSE_CLASS
+    # Class examples: dict-of-dict with method -> {feature: description}.
+    assert '"method_1": {{' in PARSE_CLASS
+    assert '"feature 1": "description of feature 1"' in PARSE_CLASS
     assert "<solution>" in PARSE_FUNCTION
     assert "</solution>" in PARSE_FUNCTION
-    assert '"func_name_1": ["feature one", "feature two"]' in PARSE_FUNCTION
+    # Function examples: dict-of-dict with func_name -> {feature: description}.
+    assert '"func_name_1": {{' in PARSE_FUNCTION
+    assert '"feature one": "description of feature one"' in PARSE_FUNCTION
     assert "<solution>" in EXCLUDE_FILES
     assert "</solution>" in EXCLUDE_FILES
