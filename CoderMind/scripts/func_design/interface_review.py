@@ -407,8 +407,13 @@ def check_feature_dependency_coverage(
 # ============================================================================
 
 # Cheap signature sanity check used by ``_apply_add_interface``.
-# Accepts e.g. ``def foo(`` / ``def foo():`` / ``class Bar(`` / ``class Bar:``.
-_SIGNATURE_RE = __import__("re").compile(r"^(def |class )[A-Za-z_]\w*\s*[(:]")
+#
+# The prompt contract requires ``signature`` to be a single-line Python
+# header ending with ``:`` (e.g. ``def foo(arg: int) -> str:`` or
+# ``class Bar(Base):``). Enforce both shape and terminator so a
+# truncated LLM response like ``def foo(`` cannot be injected as
+# syntactically invalid code into ``file_code``.
+_SIGNATURE_RE = __import__("re").compile(r"^(def |class )[A-Za-z_]\w*\s*\(.*\)\s*(->\s*.+)?\s*:\s*$|^class\s+[A-Za-z_]\w*\s*:\s*$")
 
 
 def _insert_unit_into_file_code(file_code: str, stub: str) -> str:
@@ -1057,8 +1062,8 @@ Please perform the review tasks and return the JSON result.
                 0,
             )
 
-        if not _SIGNATURE_RE.match(signature):
-            return False, f"signature does not look like a valid Python def/class header: {signature!r}", 0
+        if not _SIGNATURE_RE.match(signature) or "\n" in signature:
+            return False, f"signature must be a single-line Python def/class header ending with ':', got: {signature!r}", 0
 
         if skeleton_features and feature_path not in skeleton_features:
             return (
