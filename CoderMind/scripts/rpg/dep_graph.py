@@ -663,16 +663,44 @@ class DependencyGraph:
             content_hash=_hash_content(content),
         )
 
-        # Parse AST + code units.  SyntaxError is non-fatal — we keep the
-        # file node (with the hash) so a later fix-up commit will trigger
-        # a real re-parse.
+        # Dispatch on language exactly like :meth:`parse` does: Python
+        # files use ast + ``_parse_file``; other supported languages
+        # route through lang_parser + ``_parse_lp_file_result``. Without
+        # this, an incremental ``update_files`` call (which goes through
+        # ``add_file``) silently dropped all units / imports / invokes
+        # for non-Python files because ``ast.parse`` raised SyntaxError
+        # and we returned early.
         try:
-            tree = ast.parse(content)
-        except SyntaxError as exc:
-            logger.debug("[add_file:syntax] %s: %s", nid, exc)
+            language = lang_parser.detect_language(nid)
+        except Exception:  # pragma: no cover - defensive
+            language = None
+
+        if language == "python" or language is None:
+            try:
+                tree = ast.parse(content)
+            except SyntaxError as exc:
+                logger.debug("[add_file:syntax] %s: %s", nid, exc)
+                return True
+            self.G.nodes[nid]["ast"] = tree
+            self.G.nodes[nid]["language"] = "python"
+            self._parse_file(nid, tree, content)
             return True
-        self.G.nodes[nid]["ast"] = tree
-        self._parse_file(nid, tree, content)
+
+        try:
+            result = lang_parser.parse_file(nid, content)
+        except lang_parser.NotSupported as exc:
+            logger.debug("[add_file:lp_unsupported] %s: %s", nid, exc)
+            return True
+        except Exception as exc:  # pragma: no cover - defensive
+            logger.debug("[add_file:lp_error] %s: %s", nid, exc)
+            return True
+        self._parse_lp_file_result(nid, result)
+        # NOTE: ``_parse_lp_invoke_dependencies`` is deliberately NOT
+        # called here. Cross-file invoke resolution needs the global
+        # unit registry to be in its final state, which is only
+        # guaranteed after ``_rerun_semantic_passes`` runs at the end
+        # of ``update_files``. That helper will re-discover this file's
+        # language attr and replay both the file-result + invoke pass.
         return True
 
     def _wipe_semantic_edges(self) -> int:
@@ -711,12 +739,22 @@ class DependencyGraph:
         lockstep with full rebuild.  Callers must ensure ``ast`` attrs
         are fresh on any file they've edited (the public entry points
         :meth:`add_file` and :meth:`update_files` do this).
+
+        Non-Python files (Go / TS / C / Rust / ...) don't carry an
+        ``ast`` attr (lang_parser produces an :class:`LPFileResult`,
+        not a :class:`ast.Module`), and their import + invoke edges are
+        produced by ``_parse_lp_file_result`` / ``_parse_lp_invoke_
+        dependencies``. Re-run those passes too — using the cached
+        ``code`` attr — otherwise an incremental ``update_files`` call
+        wipes the semantic edges and never restores them for non-Python
+        sources.
         """
         # Pass 2 prereq: alias maps must exist on every code node before
         # any _parse_imports call (it propagates aliases bidirectionally).
         for nid in list(self.G_code.nodes):
             self._init_alias_map(nid)
 
+        # ----- Python ast-based passes (unchanged behaviour) -----
         # Pass 2: imports
         alias_links: nx.DiGraph = nx.DiGraph()
         for nid, attrs in list(self.G_code.nodes(data=True)):
@@ -737,6 +775,35 @@ class DependencyGraph:
             tree = attrs.get("ast")
             if tree is not None:
                 self._parse_invokes(nid, tree)
+
+        # ----- lang_parser passes for non-Python file nodes -----
+        # Walk file nodes that carry a non-Python language and re-parse
+        # them via lang_parser. ``_parse_lp_file_result`` rebuilds
+        # IMPORTS edges (and keeps CONTAINS structure idempotently),
+        # and ``_parse_lp_invoke_dependencies`` rebuilds INVOKES edges
+        # using the unit registry the first pass populates. Two-pass
+        # ordering mirrors :meth:`parse`.
+        lp_results: List[Tuple[str, "lang_parser.LPFileResult"]] = []
+        for nid, attrs in list(self.G.nodes(data=True)):
+            if attrs.get("type") != NodeType.FILE:
+                continue
+            language = attrs.get("language")
+            if not language or language == "python":
+                continue
+            content = attrs.get("code")
+            if not content:
+                continue
+            try:
+                result = lang_parser.parse_file(nid, content)
+            except lang_parser.NotSupported:
+                continue
+            except Exception as exc:  # pragma: no cover - defensive
+                logger.debug("[rerun_semantic_passes:lp_skip] %s: %s", nid, exc)
+                continue
+            self._parse_lp_file_result(nid, result)
+            lp_results.append((nid, result))
+        for nid, result in lp_results:
+            self._parse_lp_invoke_dependencies(nid, result)
 
     def update_files(
         self,
