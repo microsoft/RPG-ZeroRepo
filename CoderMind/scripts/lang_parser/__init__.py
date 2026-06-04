@@ -2,6 +2,7 @@ from .base import BaseLanguageParser
 from .models import LanguageConfig, LPCodeUnit, LPDependency, LPFileResult, NotSupported
 from .registry import (
     detect_language,
+    dominant_language,
     get_config,
     get_config_for_path,
     get_parser,
@@ -21,6 +22,7 @@ __all__ = [
     "LPFileResult",
     "NotSupported",
     "detect_language",
+    "dominant_language",
     "get_config",
     "get_config_for_path",
     "get_parser",

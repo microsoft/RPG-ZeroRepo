@@ -123,3 +123,25 @@ def markdown_fence_for_path(path: str) -> str:
     if config is None:
         return "text"
     return config.markdown_fence
+
+
+def dominant_language(paths) -> str | None:
+    """Return the most common detectable language across ``paths``, or ``None``.
+
+    Runs :func:`detect_language` on every path; paths whose language
+    cannot be detected (unknown extension / unsupported language) are
+    skipped, not voted for ``None``. ``None`` is returned only when
+    *every* path is unknown (empty or assets-only input).
+
+    Tie-breaking is deterministic on CPython (insertion order) but
+    callers that care about precise behaviour in mixed-language repos
+    should pass a curated ``language_map`` to the consumer instead.
+    """
+    counts: dict[str, int] = {}
+    for p in paths or ():
+        lang = detect_language(p)
+        if lang:
+            counts[lang] = counts.get(lang, 0) + 1
+    if not counts:
+        return None
+    return max(counts.items(), key=lambda kv: kv[1])[0]

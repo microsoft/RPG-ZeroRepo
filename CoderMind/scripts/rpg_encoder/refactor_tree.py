@@ -964,6 +964,17 @@ class RefactorTree:
 
         logger.info("Starting incremental refactor on new files...")
 
+        # Pick up the repo's dominant language from the parsed_tree keys
+        # so every NodeMetaData this incremental pass mints carries the
+        # correct ``meta.language``. Without this, files added through
+        # the post-merge hook would silently land with ``meta.language=None``
+        # while the initial-encode path (which goes through RPGParser)
+        # gets it right via :func:`lang_parser.dominant_language`.
+        from lang_parser import dominant_language as _dominant_language
+        new_files_lang = _dominant_language(parsed_tree.keys())
+        if new_files_lang:
+            logger.info("Incremental refactor dominant language: %s", new_files_lang)
+
         instance = cls(
             repo_dir=repo_dir,
             repo_info=repo_info,
@@ -971,6 +982,7 @@ class RefactorTree:
             skeleton_info=skeleton_info,
             repo_name=repo_name,
             logger=logger,
+            language=new_files_lang,
         )
 
         instance.rpg = existing_rpg
@@ -1530,6 +1542,17 @@ class RefactorTree:
 
         logger.info("Starting refactor for modified files...")
 
+        # Same language-detection as :meth:`refactor_new_files` — keep
+        # ``meta.language`` correct for files revisited by the
+        # incremental modified-files path.
+        from lang_parser import dominant_language as _dominant_language
+        modified_files_lang = _dominant_language(parsed_tree.keys())
+        if modified_files_lang:
+            logger.info(
+                "Incremental modified-files dominant language: %s",
+                modified_files_lang,
+            )
+
         instance = cls(
             repo_dir=repo_dir,
             repo_info=repo_info,
@@ -1537,6 +1560,7 @@ class RefactorTree:
             skeleton_info=skeleton_info,
             repo_name=repo_name,
             logger=logger,
+            language=modified_files_lang,
         )
         instance.rpg = existing_rpg
 

@@ -38,8 +38,7 @@ from common.utils import (
     parse_solution_output,
     truncate_by_token,
 )
-from lang_parser import is_supported_source, is_test_file
-from lang_parser.registry import detect_language
+from lang_parser import dominant_language, is_supported_source, is_test_file
 from rpg import RPG
 
 from .prompts import EXCLUDE_FILES, GENERATE_REPO_INFO
@@ -47,31 +46,6 @@ from .refactor_tree import RefactorTree
 from .semantic_parsing import ParseFeatures
 
 logger = logging.getLogger(__name__)
-
-
-def _dominant_language(paths: List[str]) -> Optional[str]:
-    """Return the most common language across ``paths``, or ``None``.
-
-    Uses :func:`lang_parser.registry.detect_language` for each path and
-    picks the modal value. Paths whose language cannot be detected
-    (unknown extension / unsupported language) are skipped, not voted
-    for ``None``. Returns ``None`` only when *every* path is unknown
-    (e.g. an empty or assets-only skeleton).
-    """
-    if not paths:
-        return None
-    counts: Dict[str, int] = {}
-    for p in paths:
-        lang = detect_language(p)
-        if lang:
-            counts[lang] = counts.get(lang, 0) + 1
-    if not counts:
-        return None
-    # ``max`` is deterministic on ties because dict iteration order is
-    # insertion order in CPython 3.7+ — good enough for a tie-break that
-    # only matters in mixed-language repos where the user should set
-    # ``language_map`` anyway.
-    return max(counts.items(), key=lambda kv: kv[1])[0]
 
 
 class RPGParser:
@@ -530,9 +504,9 @@ class RPGParser:
         # with the correct ``meta.language``. Without this, the
         # encoder fell back to its (legacy) "python" default and
         # produced misleading meta for Go / Rust / TS / ... repos.
-        dominant_language = _dominant_language(self.valid_files)
-        if dominant_language:
-            self.logger.info("Dominant language detected: %s", dominant_language)
+        repo_dominant_language = dominant_language(self.valid_files)
+        if repo_dominant_language:
+            self.logger.info("Dominant language detected: %s", repo_dominant_language)
         else:
             self.logger.info(
                 "Dominant language could not be detected from skeleton; "
@@ -548,7 +522,7 @@ class RPGParser:
             repo_name=self.repo_name,
             logger=self.logger,
             llm_client=self.llm_client,
-            language=dominant_language,
+            language=repo_dominant_language,
         )
         self.logger.info("Refactoring to RPG...")
         final_rpg, refactor_traj, repo_rpg = refactor_agent.run(
