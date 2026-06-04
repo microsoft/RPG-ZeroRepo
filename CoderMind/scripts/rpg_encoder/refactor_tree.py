@@ -83,7 +83,7 @@ class RefactorTree:
         skeleton_info: str = "",
         logger: Optional[logging.Logger] = None,
         llm_client: Optional[Any] = None,
-        language: str = "python",
+        language: Optional[str] = None,
         language_map: Optional[Dict[str, str]] = None,
         **kwargs,
     ):
@@ -94,13 +94,15 @@ class RefactorTree:
         self.skeleton_info = skeleton_info
 
         # Language metadata propagated into every NodeMetaData this
-        # encoder mints. ``language`` is the repo-wide default;
-        # ``language_map`` (path-prefix -> language) lets multi-language
-        # repos override per-subtree. ``_resolve_language(path)`` returns
-        # the best match (longest matching prefix) or falls back to
-        # ``language``. Keys are normalised so callers can pass
-        # ``"cmd/"`` or ``"cmd"`` and either form matches.
-        self.language = language
+        # encoder mints. ``language`` is the repo-wide default; pass
+        # ``None`` (or omit) to leave ``meta.language`` unset rather
+        # than guessing. ``language_map`` (path-prefix -> language)
+        # lets multi-language repos override per-subtree.
+        # ``_resolve_language(path)`` returns the best match (longest
+        # matching prefix) or falls back to ``language``. Keys are
+        # normalised so callers can pass ``"cmd/"`` or ``"cmd"`` and
+        # either form matches.
+        self.language: Optional[str] = language
         self._language_map: Dict[str, str] = {
             self._normalise_lang_prefix(k): v
             for k, v in (language_map or {}).items()
@@ -137,11 +139,12 @@ class RefactorTree:
         """Strip trailing ``/`` from a ``language_map`` key for matching."""
         return prefix.rstrip("/")
 
-    def _resolve_language(self, path: Optional[str]) -> str:
+    def _resolve_language(self, path: Optional[str]) -> Optional[str]:
         """Return the language for ``path``.
 
         Looks up the longest path-prefix match in ``language_map``;
-        falls back to the repo-wide ``self.language``. ``None`` /
+        falls back to the repo-wide ``self.language`` (which may itself
+        be ``None`` if the caller never supplied one). ``None`` /
         empty paths return the default.
         """
         if not path or not self._language_map:
