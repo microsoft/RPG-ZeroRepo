@@ -819,8 +819,12 @@ class RPGEvolution:
         }
 
         if save_path:
-            with open(save_path, "w", encoding="utf-8") as f:
-                json.dump(result, f, indent=4)
+            # Atomic write: ``result`` embeds ``rpg.to_dict()``; a killed
+            # diff job used to leave a half-truncated artefact that
+            # downstream consumers (``cmind diff``, debug tools) would
+            # fail to parse on the next read.
+            from common.rpg_io import atomic_write_rpg
+            atomic_write_rpg(save_path, result, indent=4)
 
         total_time = time.time() - global_start
         logger.info(

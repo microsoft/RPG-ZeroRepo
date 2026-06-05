@@ -171,11 +171,15 @@ def run_update_rpg(
         except Exception as exc:
             logger.warning("set_git_meta after update_rpg failed: %s", exc)
 
-        # Save updated RPG in the same format as run_encode (rpg.to_dict())
+        # Save updated RPG in the same format as run_encode (rpg.to_dict()).
+        # Atomic write: a kill mid-update used to leave a half-truncated
+        # rpg.json that bricked every subsequent ``cmind`` invocation;
+        # ``atomic_write_rpg`` swaps a fully-written ``<output>.tmp`` into
+        # place so readers always see either the previous good rpg.json
+        # or the new one.
+        from common.rpg_io import atomic_write_rpg
         result_data = updated_rpg.to_dict()
-
-        with open(output, "w", encoding="utf-8") as fh:
-            json.dump(result_data, fh, indent=2, ensure_ascii=False)
+        atomic_write_rpg(output, result_data, indent=2, ensure_ascii=False)
 
         # Collect stats
         post_nodes = len(updated_rpg.nodes)

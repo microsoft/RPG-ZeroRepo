@@ -131,8 +131,11 @@ class RPGVersionControl:
             "rpg": rpg.to_dict(),
         }
 
-        with open(filepath, "w", encoding="utf-8") as fh:
-            json.dump(payload, fh, indent=2, ensure_ascii=False)
+        # Atomic write: a kill mid-save used to leave a truncated history
+        # snapshot that ``rollback(version=N)`` could not parse. Aligns
+        # with :meth:`rollback` which already uses ``atomic_write_rpg``
+        # for the main rpg.json write.
+        atomic_write_rpg(Path(filepath), payload, indent=2, ensure_ascii=False)
 
         logger.info(
             "Saved RPG version %d: %s (%s)",

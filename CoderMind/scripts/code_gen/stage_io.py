@@ -35,12 +35,18 @@ def save_stage_result(name: str, data: Dict[str, Any]) -> None:
 
     Each pipeline stage (final_test, smoke_test, global_review) saves
     its output independently. Global review loads all of them as context.
+
+    Uses :func:`common.rpg_io.atomic_write_rpg` so a killed codegen run
+    can't leave a half-truncated sidecar that ``global_review`` would
+    then try (and fail) to load.  ``default=str`` is forwarded through
+    ``**dump_kwargs`` to preserve the original fall-back serialiser for
+    non-JSON-native objects (e.g. ``Path``, datetimes).
     """
     LOGS_DIR.mkdir(parents=True, exist_ok=True)
     dest = stage_path(name)
     try:
-        with open(dest, "w", encoding="utf-8") as f:
-            json.dump(data, f, indent=2, default=str)
+        from common.rpg_io import atomic_write_rpg
+        atomic_write_rpg(dest, data, indent=2, default=str)
         logger.info("Saved stage result: %s", dest)
     except Exception as exc:
         logger.debug("Failed to save stage result %s: %s", name, exc)
