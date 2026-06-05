@@ -24,6 +24,11 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 from rpg.code_unit import ParsedFile, CodeUnit
 
+# Phase 3 (decoder multi-language): all AST inspection routes through
+# the decoder language backend. Direct ``import ast`` above stays for
+# now (call sites migrate incrementally; final cleanup removes it).
+from decoder_lang import get_backend
+
 # Import common LLMClient with trajectory support
 from common import (
     LLMClient,
@@ -237,39 +242,50 @@ class DependencyCollector:
             file_path: Path of the file containing this code
             base_class_files: Mapping of class names to their file paths
         """
-        try:
-            tree = ast.parse(code)
-        except SyntaxError:
-            return
-        
-        for node in ast.walk(tree):
-            # Extract inheritance
-            if isinstance(node, ast.ClassDef):
-                child_class = node.name
-                for base in node.bases:
+        # Phase 3: AST walk routes through PythonBackend.list_code_units.
+        # ``_extract_name_from_node`` and ``_extract_type_names`` still
+        # need raw ast nodes (Subscript / BinOp / Tuple) for type-name
+        # inspection; those are read from ``unit.extra['ast_node']``
+        # which the backend always populates for Python sources.
+        backend = get_backend("python")
+        units = backend.list_code_units(code, file_path)
+        # Empty list covers the historical ``except SyntaxError: return`` path.
+        for unit in units:
+            node = (unit.extra or {}).get("ast_node")
+            if node is None:
+                continue
+
+            # Extract inheritance from class declarations
+            if unit.unit_type == "class":
+                child_class = unit.name
+                for base in getattr(node, "bases", []) or []:
                     parent_name = _extract_name_from_node(base)
                     if parent_name and parent_name in self.known_base_classes:
                         parent_file = base_class_files.get(parent_name)
                         self.add_inheritance(child_class, parent_name, file_path, parent_file)
-            
-            # Extract type references from function annotations
-            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
-                func_name = node.name
-                # Check parameter types
-                for arg in node.args.args:
-                    if arg.annotation:
-                        types = _extract_type_names(arg.annotation)
-                        for t in types:
+
+            # Extract type references from function / method annotations.
+            # NOTE: original code matched only ``FunctionDef`` /
+            # ``AsyncFunctionDef`` and ignored class context, so we
+            # process both ``function`` and ``method`` unit types here
+            # to keep the dependency edges identical.
+            if unit.unit_type in ("function", "method"):
+                func_name = unit.name
+                for arg in getattr(node.args, "args", []):
+                    if arg.annotation is not None:
+                        for t in _extract_type_names(arg.annotation):
                             if t in self.known_types:
                                 type_file = base_class_files.get(t)
-                                self.add_reference(f"function {func_name}", t, file_path, type_file)
-                # Check return type
-                if node.returns:
-                    types = _extract_type_names(node.returns)
-                    for t in types:
+                                self.add_reference(
+                                    f"function {func_name}", t, file_path, type_file,
+                                )
+                if getattr(node, "returns", None) is not None:
+                    for t in _extract_type_names(node.returns):
                         if t in self.known_types:
                             type_file = base_class_files.get(t)
-                            self.add_reference(f"function {func_name}", t, file_path, type_file)
+                            self.add_reference(
+                                f"function {func_name}", t, file_path, type_file,
+                            )
     
     def process_llm_dependencies(
         self,
@@ -745,66 +761,88 @@ class GlobalInterfaceRegistry:
     
     @staticmethod
     def _extract_signature_summary(code: str, unit_type: str, bare_name: str) -> str:
-        """Extract a concise signature summary from interface code."""
+        """Extract a concise signature summary from interface code.
+
+        Phase 3: AST inspection routes through ``PythonBackend.list_code_units``
+        and ``format_signature`` (no direct ``ast.parse`` here). For
+        classes we still need ``node.bases`` to render the base-class
+        list — we read it off ``unit.extra['ast_node']`` (the raw
+        ``ClassDef`` the backend preserves for exactly this use case).
+        """
         if not code:
             return bare_name
-        
-        try:
-            tree = ast.parse(code)
-            for node in ast.iter_child_nodes(tree):
-                if unit_type == "class" and isinstance(node, ast.ClassDef) and node.name == bare_name:
-                    # For classes, list public methods with signatures
-                    methods = []
-                    for item in node.body:
-                        if isinstance(item, (ast.FunctionDef, ast.AsyncFunctionDef)):
-                            if not item.name.startswith("_") or item.name == "__init__":
-                                sig = GlobalInterfaceRegistry._format_func_signature(item)
-                                methods.append(sig)
-                    bases_str = ""
-                    if node.bases:
-                        bases = [_extract_name_from_node(b) for b in node.bases]
-                        bases = [b for b in bases if b]
-                        if bases:
-                            bases_str = f"({', '.join(bases)})"
-                    if methods:
-                        return f"{bare_name}{bases_str} [{', '.join(methods[:5])}]"
-                    return f"{bare_name}{bases_str}"
-                    
-                elif unit_type == "function" and isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and node.name == bare_name:
-                    return GlobalInterfaceRegistry._format_func_signature(node)
-        except SyntaxError:
-            pass
-        
-        return bare_name
-    
+
+        backend = get_backend("python")
+        units = backend.list_code_units(code, "<signature>")
+        if not units:
+            return bare_name
+
+        # Find the matching top-level declaration.
+        target = next(
+            (u for u in units
+             if u.unit_type == unit_type and u.name == bare_name and u.parent is None),
+            None,
+        )
+        if target is None:
+            return bare_name
+
+        if unit_type == "function":
+            return backend.format_signature(target)
+
+        # Class case: collect direct-child methods + format bases.
+        # ``backend.list_code_units`` walks BFS so methods of this
+        # class are those whose ``parent`` matches ``bare_name``;
+        # source order is preserved within a single parent.
+        method_units = [
+            u for u in units
+            if u.unit_type == "method" and u.parent == bare_name
+        ]
+        methods: List[str] = []
+        for m in method_units:
+            if not m.name.startswith("_") or m.name == "__init__":
+                methods.append(backend.format_signature(m))
+
+        bases_str = ""
+        class_node = (target.extra or {}).get("ast_node")
+        if class_node is not None and getattr(class_node, "bases", None):
+            base_names = [_extract_name_from_node(b) for b in class_node.bases]
+            base_names = [b for b in base_names if b]
+            if base_names:
+                bases_str = f"({', '.join(base_names)})"
+
+        if methods:
+            return f"{bare_name}{bases_str} [{', '.join(methods[:5])}]"
+        return f"{bare_name}{bases_str}"
+
+    # ``_format_func_signature`` was the historical formatter that took
+    # a raw ast node. Phase 3 routes signature formatting through
+    # ``PythonBackend.format_signature`` which accepts an ``LPCodeUnit``
+    # and reads the same fields. The free function is retained as a
+    # thin shim so any external import paths keep working; new code
+    # should call ``backend.format_signature`` directly.
     @staticmethod
     def _format_func_signature(node) -> str:
-        """Format a function/method AST node into a concise signature string."""
-        name = node.name
-        params = []
-        for arg in node.args.args:
-            if arg.arg == "self":
-                continue
-            param_str = arg.arg
-            if arg.annotation:
-                type_str = ast.unparse(arg.annotation) if hasattr(ast, 'unparse') else ""
-                if type_str:
-                    param_str = f"{arg.arg}: {type_str}"
-            params.append(param_str)
-        
-        ret_str = ""
-        if node.returns:
-            ret_type = ast.unparse(node.returns) if hasattr(ast, 'unparse') else ""
-            if ret_type:
-                ret_str = f" -> {ret_type}"
-        
-        # Truncate params if too many
-        if len(params) > 4:
-            params_str = ", ".join(params[:3]) + ", ..."
-        else:
-            params_str = ", ".join(params)
-        
-        return f"{name}({params_str}){ret_str}"
+        """Format a function/method AST node into a concise signature string.
+
+        Phase 3 compatibility wrapper: builds a synthetic
+        :class:`LPCodeUnit` around ``node`` and delegates to
+        :meth:`PythonBackend.format_signature`. New callers should use
+        ``backend.format_signature(unit)`` directly.
+        """
+        from lang_parser import LPCodeUnit  # local import to avoid top-level dep
+
+        unit = LPCodeUnit(
+            name=getattr(node, "name", ""),
+            unit_type="function",
+            file_path="<inline>",
+            parent=None,
+            line_start=getattr(node, "lineno", None),
+            line_end=getattr(node, "end_lineno", getattr(node, "lineno", None)),
+            code="",
+            language="python",
+            extra={"ast_node": node, "node_type": type(node).__name__},
+        )
+        return get_backend("python").format_signature(unit)
 
 
 # ============================================================================
@@ -832,50 +870,57 @@ def cross_validate_imports_vs_calls(
     """
     warnings = []
     declared_set = set(declared_calls)
-    
-    try:
-        tree = ast.parse(code)
-    except SyntaxError:
-        return warnings
-    
-    for node in ast.walk(tree):
-        if isinstance(node, ast.ImportFrom):
-            module = node.module or ""
-            for alias in node.names:
-                symbol = alias.name
-                # Check if this symbol is in the global registry
-                resolved_file = global_registry.resolve_callee(symbol)
-                if resolved_file and resolved_file != file_path:
-                    # Symbol is a known interface from another file
-                    if symbol not in declared_set:
-                        warnings.append({
-                            "imported_symbol": symbol,
-                            "imported_from": module,
-                            "resolved_file": resolved_file,
-                            "file_path": file_path,
-                            "message": (
-                                f"'{symbol}' is imported from '{module}' and is a known "
-                                f"interface in '{resolved_file}', but not declared in "
-                                f"dependencies.calls"
-                            )
-                        })
-        elif isinstance(node, ast.Import):
-            for alias in node.names:
-                symbol = alias.name.split(".")[-1] if "." in alias.name else alias.name
-                resolved_file = global_registry.resolve_callee(symbol)
-                if resolved_file and resolved_file != file_path:
-                    if symbol not in declared_set:
-                        warnings.append({
-                            "imported_symbol": symbol,
-                            "imported_from": alias.name,
-                            "resolved_file": resolved_file,
-                            "file_path": file_path,
-                            "message": (
-                                f"'{symbol}' is imported and is a known interface in "
-                                f"'{resolved_file}', but not declared in dependencies.calls"
-                            )
-                        })
-    
+
+    # Phase 3 (decoder multi-language): route AST parsing through the
+    # Python backend so this function no longer imports ``ast`` itself.
+    # ``list_imports`` returns one LPDependency per imported symbol,
+    # with ``extra["module"]`` holding the source module and
+    # ``extra["imported"]`` present only for ``from X import Y`` (the
+    # discriminator between ImportFrom and Import). On syntax error
+    # the backend returns ``[]`` — same as the old try/except branch.
+    backend = get_backend("python")
+    for dep in backend.list_imports(code, file_path):
+        extra = dep.extra or {}
+        module = extra.get("module") or ""
+
+        if "imported" in extra:
+            # ``from <module> import <imported>`` — symbol is the
+            # imported name (alias.asname has no effect on the lookup
+            # key, matching the historical behaviour).
+            symbol = extra.get("imported") or ""
+            imported_from = module
+            message_suffix = (
+                f"'{symbol}' is imported from '{module}' and is a known "
+                f"interface in '{{resolved_file}}', but not declared in "
+                f"dependencies.calls"
+            )
+        else:
+            # ``import <module>`` — symbol is the last dotted segment
+            # of the module path (mirrors the old
+            # ``alias.name.split(".")[-1]`` rule).
+            full_name = module
+            symbol = full_name.rsplit(".", 1)[-1] if "." in full_name else full_name
+            imported_from = full_name
+            message_suffix = (
+                f"'{symbol}' is imported and is a known interface in "
+                f"'{{resolved_file}}', but not declared in dependencies.calls"
+            )
+
+        if not symbol:
+            continue
+        resolved_file = global_registry.resolve_callee(symbol)
+        if not (resolved_file and resolved_file != file_path):
+            continue
+        if symbol in declared_set:
+            continue
+        warnings.append({
+            "imported_symbol": symbol,
+            "imported_from": imported_from,
+            "resolved_file": resolved_file,
+            "file_path": file_path,
+            "message": message_suffix.format(resolved_file=resolved_file),
+        })
+
     return warnings
 
 
@@ -887,32 +932,39 @@ def extract_top_level_definitions(code: str) -> Tuple[List[str], List[str]]:
     """Extract top-level function and class names from code."""
     functions = []
     classes = []
-    try:
-        tree = ast.parse(code)
-        for node in ast.iter_child_nodes(tree):
-            if isinstance(node, ast.FunctionDef):
-                functions.append(node.name)
-            elif isinstance(node, ast.AsyncFunctionDef):
-                functions.append(node.name)
-            elif isinstance(node, ast.ClassDef):
-                classes.append(node.name)
-    except SyntaxError:
-        pass
+    # Phase 3: walk via the Python backend; filter to top-level units
+    # (parent is None) to match the original ``ast.iter_child_nodes``
+    # behaviour that only inspected direct children of the module.
+    for unit in get_backend("python").list_code_units(code):
+        if unit.parent is not None:
+            continue
+        if unit.unit_type == "function":
+            functions.append(unit.name)
+        elif unit.unit_type == "class":
+            classes.append(unit.name)
     return functions, classes
 
 
 def check_has_docstring(code: str) -> Tuple[bool, str]:
     """Check if top-level functions/classes have docstrings."""
     errors = []
-    try:
-        tree = ast.parse(code)
-        for node in ast.iter_child_nodes(tree):
-            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
-                if not ast.get_docstring(node):
-                    errors.append(f"{type(node).__name__} '{node.name}' is missing a docstring")
-    except SyntaxError:
-        pass
-    
+    # Phase 3: walk via the Python backend. Docstring inspection still
+    # needs the raw ast node (``ast.get_docstring``), read from
+    # ``unit.extra['ast_node']``. Only inspect top-level definitions
+    # (parent is None) to preserve the original behaviour.
+    for unit in get_backend("python").list_code_units(code):
+        if unit.parent is not None:
+            continue
+        if unit.unit_type not in ("class", "function"):
+            continue
+        node = (unit.extra or {}).get("ast_node")
+        if node is None:
+            continue
+        if not ast.get_docstring(node):
+            errors.append(
+                f"{type(node).__name__} '{unit.name}' is missing a docstring"
+            )
+
     if errors:
         return False, "; ".join(errors)
     return True, ""
@@ -2111,17 +2163,19 @@ class InterfaceOrchestrator:
             if not file_path or not code:
                 continue
             
-            # Parse code to extract class and type names
-            try:
-                tree = ast.parse(code)
-                for node in ast.walk(tree):
-                    if isinstance(node, ast.ClassDef):
-                        mapping[node.name] = file_path
-                    elif isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
-                        # Top-level functions might be utilities
-                        mapping[node.name] = file_path
-            except SyntaxError:
-                continue
+            # Parse code to extract class and type names.
+            # Phase 3: walk via the Python backend so this loop no
+            # longer uses stdlib ``ast`` directly. Backend returns an
+            # empty list on syntax error — matches the
+            # ``except SyntaxError: continue`` branch one-to-one.
+            for unit in get_backend("python").list_code_units(code, file_path):
+                if unit.unit_type == "class":
+                    mapping[unit.name] = file_path
+                elif unit.unit_type in ("function", "method"):
+                    # The historical walk used ``ast.walk`` which
+                    # surfaces nested function defs too; keep the same
+                    # behaviour by mapping every function-like name.
+                    mapping[unit.name] = file_path
         
         # Process data structures (only those with file_path already assigned)
         if data_structures:
@@ -2132,13 +2186,12 @@ class InterfaceOrchestrator:
                 if not file_path or not code:
                     continue
                 
-                try:
-                    tree = ast.parse(code)
-                    for node in ast.walk(tree):
-                        if isinstance(node, ast.ClassDef):
-                            mapping[node.name] = file_path
-                except SyntaxError:
-                    continue
+                # Phase 3: route through PythonBackend so this loop no
+                # longer imports ``ast`` directly. Empty list mirrors
+                # the previous ``except SyntaxError: continue`` path.
+                for unit in get_backend("python").list_code_units(code, file_path):
+                    if unit.unit_type == "class":
+                        mapping[unit.name] = file_path
                 
                 # Also map data_flow_types names to file paths
                 for dt_name in ds.get("data_flow_types", []):

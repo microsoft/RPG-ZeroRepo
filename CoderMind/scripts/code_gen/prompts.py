@@ -18,7 +18,6 @@ if TYPE_CHECKING:
 # Ensure scripts dir is on path for common.paths import
 _sys.path.insert(0, str(_Path(__file__).resolve().parent.parent))
 from common.paths import REPO_DIR as _REPO_DIR
-import ast as _ast_mod
 
 
 # ============================================================================
@@ -142,20 +141,31 @@ def _format_dependency_context(ctx: Optional[Dict[str, Any]]) -> str:
             subs = bc.get("subclasses", {})
             if not code:
                 continue
-            # Extract class name and method names from code
-            try:
-                tree = _ast_mod.parse(code)
-                for node in _ast_mod.walk(tree):
-                    if isinstance(node, _ast_mod.ClassDef):
-                        methods = [n.name for n in node.body
-                                   if isinstance(n, (_ast_mod.FunctionDef, _ast_mod.AsyncFunctionDef))]
-                        parts.append(f"- `{node.name}` in `{fp}` — methods: {', '.join(methods)}")
-                        if subs:
-                            for parent, children in subs.items():
-                                if parent == node.name:
-                                    parts.append(f"  Subclasses: {', '.join(children)}")
-                        break
-            except SyntaxError:
+            # Extract class name and method names from code. Phase 4
+            # (decoder multi-language): route the walk through the
+            # Python backend so this loop no longer needs ``import
+            # ast`` directly. Empty unit list covers the historical
+            # ``except SyntaxError`` branch identically.
+            from decoder_lang import get_backend as _get_backend
+            backend = _get_backend("python")
+            classes = [
+                u for u in backend.list_code_units(code, fp)
+                if u.unit_type == "class" and u.parent is None
+            ]
+            if classes:
+                first_class = classes[0]
+                methods = [
+                    u.name for u in backend.list_code_units(code, fp)
+                    if u.unit_type == "method" and u.parent == first_class.name
+                ]
+                parts.append(
+                    f"- `{first_class.name}` in `{fp}` — methods: {', '.join(methods)}"
+                )
+                if subs:
+                    for parent, children in subs.items():
+                        if parent == first_class.name:
+                            parts.append(f"  Subclasses: {', '.join(children)}")
+            else:
                 parts.append(f"- `{fp}` (parse error — read file directly)")
         parts.append("")
 

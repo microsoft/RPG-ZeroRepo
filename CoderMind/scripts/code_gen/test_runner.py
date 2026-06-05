@@ -13,7 +13,6 @@ import re
 import signal
 import subprocess
 import sys
-import ast
 import shutil
 import importlib.util
 import logging
@@ -798,7 +797,17 @@ def scan_missing_imports(repo_root: Path) -> List[str]:
                 if child.is_dir() and not child.name.startswith('.'):
                     project_modules.add(child.name)
 
-    # Collect all external imports from source files
+    # Collect all external imports from source files. Phase 4
+    # (decoder multi-language): route through ``backend.list_imports``
+    # so this scanner no longer parses ``ast`` itself. The returned
+    # ``LPDependency.extra["module"]`` (for both Import and
+    # ImportFrom) carries the dotted module name we need; we slice
+    # the top-level segment to match the historical
+    # ``alias.name.split('.')[0]`` / ``node.module.split('.')[0]``
+    # behaviour byte-for-byte.
+    from decoder_lang import get_backend
+    backend = get_backend("python")
+
     external_imports: Set[str] = set()
     scan_dirs = [d for d in [src_dir, tests_dir] if d.is_dir()]
 
@@ -808,19 +817,17 @@ def scan_missing_imports(repo_root: Path) -> List[str]:
                 continue
             try:
                 source = py_file.read_text(encoding='utf-8')
-                tree = ast.parse(source)
-            except (SyntaxError, UnicodeDecodeError):
+            except (OSError, UnicodeDecodeError):
                 continue
-            for node in ast.walk(tree):
-                mod_name = None
-                if isinstance(node, ast.Import):
-                    for alias in node.names:
-                        mod_name = alias.name.split('.')[0]
-                elif isinstance(node, ast.ImportFrom):
-                    if node.module and node.level == 0:
-                        mod_name = node.module.split('.')[0]
-                if mod_name is None:
+            for dep in backend.list_imports(source, str(py_file)):
+                extra = dep.extra or {}
+                module = extra.get("module") or ""
+                if not module or module.startswith("."):
+                    # Skip relative ``from . import x`` (historical
+                    # code checked ``node.level == 0`` for the same
+                    # filter).
                     continue
+                mod_name = module.split(".")[0]
                 if mod_name in _STDLIB_TOP_LEVEL or mod_name in project_modules:
                     continue
                 external_imports.add(mod_name)

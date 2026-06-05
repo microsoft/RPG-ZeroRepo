@@ -367,19 +367,59 @@ class RepoSkeleton:
             data = json.load(f)
         return cls.from_dict(data)
 
-    def add_init_files(self, skip_root: bool = True, docstring_template: Optional[str] = None) -> int:
-        """Add __init__.py files to all directories in the skeleton.
+    def add_init_files(
+        self,
+        skip_root: bool = True,
+        docstring_template: Optional[str] = None,
+        backend: Optional[Any] = None,
+    ) -> int:
+        """Add package-marker files to all directories in the skeleton.
 
-        This ensures that all directories are proper Python packages.
+        Historical behaviour (Python only): walks every directory and
+        emits ``__init__.py`` under directories that contain Python
+        sources or live under conventional package roots.
+
+        Phase 2 (decoder multi-language): when ``backend`` is supplied,
+        the file name, content, and the per-directory "has source"
+        predicate are all sourced from the backend. Backends whose
+        :meth:`package_marker_filename` returns ``None`` (Go, Rust,
+        TypeScript, …) make this method a no-op — directories without
+        marker files are the language convention.
 
         Args:
-            skip_root: Whether to skip adding __init__.py to root directory.
-            docstring_template: Optional docstring template. 
-                               Use {name} for directory name, {path} for directory path.
+            skip_root: Whether to skip adding the marker to the root.
+            docstring_template: Optional template (``{name}`` /
+                ``{path}``). Used only when the backend's
+                :meth:`package_marker_content` returns None (i.e. the
+                caller wants the historical default body).
+            backend: Optional :class:`decoder_lang.LanguageBackend`.
+                When ``None``, behaves exactly as the pre-Phase-2 Python
+                path so legacy callers keep working bit-identically.
 
         Returns:
-            Number of __init__.py files added.
+            Number of marker files added (0 for languages that don't
+            use a marker file).
         """
+        # When no backend is supplied, use the historical Python
+        # constants verbatim so this code path is byte-equivalent to
+        # the pre-Phase-2 implementation.
+        if backend is None:
+            marker_filename: Optional[str] = "__init__.py"
+            source_extension: str = ".py"
+            marker_default_body = None
+        else:
+            marker_filename = backend.package_marker_filename()
+            source_extension = backend.file_extension
+            marker_default_body = None  # backend supplies its own below
+
+        # Languages without a package marker (Go / Rust / TS) → no-op.
+        if marker_filename is None:
+            logging.debug(
+                "add_init_files: backend %s has no package marker; skipping",
+                getattr(backend, "name", "?"),
+            )
+            return 0
+
         init_files_added = 0
 
         # Get all directory nodes
@@ -390,49 +430,62 @@ class RepoSkeleton:
             if skip_root and (dir_node.path == "." or dir_node == self.root):
                 continue
 
-            # Skip non-Python directories (like docs, assets, etc.)
-            # Only add __init__.py to directories that contain Python files or subdirectories
-            has_python_content = False
+            # Skip directories that contain no source files in this
+            # language (mirrors the original heuristic, just
+            # parameterised). Sub-directories still count so that an
+            # empty package-only directory tree still gets markers
+            # placed correctly.
+            has_source_content = False
             for child in dir_node.children():
-                if isinstance(child, FileNode) and child.name.endswith('.py'):
-                    has_python_content = True
+                if isinstance(child, FileNode) and child.name.endswith(source_extension):
+                    has_source_content = True
                     break
                 if isinstance(child, DirectoryNode):
-                    has_python_content = True
+                    has_source_content = True
                     break
-            
-            # Also add if the directory is under a common Python package pattern
+
+            # Also add if the directory is under a common package
+            # path. The list is unchanged from pre-Phase-2 to preserve
+            # behaviour for the Python path; non-Python backends opt
+            # out earlier via ``marker_filename is None``.
             is_python_pkg_path = any(
-                dir_node.path.startswith(prefix) 
+                dir_node.path.startswith(prefix)
                 for prefix in ['src/', 'lib/', 'pkg/', 'packages/']
             ) or '/src/' in dir_node.path
 
-            if not has_python_content and not is_python_pkg_path:
+            if not has_source_content and not is_python_pkg_path:
                 continue
 
-            # Build __init__.py path
-            init_path = normalize_path(os.path.join(dir_node.path, "__init__.py"))
+            # Build marker file path
+            init_path = normalize_path(os.path.join(dir_node.path, marker_filename))
 
-            # Skip if __init__.py already exists
+            # Skip if marker already exists
             if init_path in self.path_to_node:
                 continue
 
-            # Generate content for __init__.py
-            if docstring_template:
+            # Generate content for the marker file
+            if backend is not None:
+                content = backend.package_marker_content(dir_node.path)
+                # Backends that return None for content but emit a
+                # marker (rare; not used today) still need *some* body.
+                if content is None:
+                    content = ""
+                code = content
+            elif docstring_template:
                 code = docstring_template.format(
                     name=dir_node.name,
-                    path=dir_node.path
+                    path=dir_node.path,
                 )
             else:
-                # Default minimal docstring
+                # Default minimal docstring (pre-Phase-2 behaviour).
                 code = f'"""Package: {dir_node.name}"""\n'
 
-            # Create __init__.py file node
+            # Create marker file node
             init_node = FileNode(
-                name="__init__.py",
+                name=marker_filename,
                 path=init_path,
                 code=code,
-                feature_paths=[]
+                feature_paths=[],
             )
 
             # Add to directory and path registry
@@ -440,9 +493,9 @@ class RepoSkeleton:
             self.path_to_node[init_path] = init_node
             init_files_added += 1
 
-            logging.debug(f"Added __init__.py to: {dir_node.path}")
+            logging.debug(f"Added {marker_filename} to: {dir_node.path}")
 
-        logging.info(f"Added {init_files_added} __init__.py files to skeleton")
+        logging.info(f"Added {init_files_added} {marker_filename} files to skeleton")
         return init_files_added
 
     def get_statistics(self) -> Dict[str, Any]:

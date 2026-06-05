@@ -239,6 +239,23 @@ class FeatureSpecOutput(BaseModel):
             "repository."
         ),
     )
+    # Multi-language decoder support (Phase 1).
+    # Optional + default None so:
+    # * existing ``feature_spec.json`` files load unchanged,
+    # * the LLM is not yet required to emit the field (Phase 5 will
+    #   introduce a prompt directive),
+    # * downstream decoder stages call
+    #   ``decoder_lang.resolve_decoder_language`` to determine the
+    #   effective language with the documented three-tier fallback.
+    target_language: str | None = Field(
+        default=None,
+        description=(
+            "Target programming language for code generation, e.g. "
+            "``\"python\"`` / ``\"go\"`` / ``\"typescript\"``. When absent, "
+            "downstream stages infer the language from the RPG root "
+            "``meta.language`` and finally default to ``\"python\"``."
+        ),
+    )
 
 
 __all__ = [

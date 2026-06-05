@@ -13,7 +13,6 @@ but BEFORE the final interfaces.json is saved.
 
 import json
 import logging
-import ast
 from collections import defaultdict, deque
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional, Tuple, Any, Set
@@ -23,6 +22,11 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from common import LLMClient
+
+# Phase 3 (decoder multi-language): AST inspection routes through the
+# Python backend's ``find_main_block_lineno`` helper so this module
+# no longer needs ``import ast`` itself.
+from decoder_lang import get_backend
 
 from .interface_agent import (
     GlobalInterfaceRegistry,
@@ -434,27 +438,22 @@ def _insert_unit_into_file_code(file_code: str, stub: str) -> str:
     if not file_code.strip():
         return stub
 
-    try:
-        tree = ast.parse(file_code)
-    except SyntaxError:
-        return file_code.rstrip() + "\n\n\n" + stub
+    # Phase 3 (decoder multi-language): route AST inspection through
+    # the Python backend's ``find_main_block_lineno`` hook so this
+    # module no longer imports ``ast`` directly. Backends without a
+    # ``__name__ == "__main__"`` analogue (Go, Rust, …) won't expose
+    # the method; for non-Python projects the splice falls through to
+    # the "append at end" branch — the same behaviour the historical
+    # code took whenever the AST scan didn't find a main guard.
+    backend = get_backend("python")
+    find_main = getattr(backend, "find_main_block_lineno", None)
+    main_lineno = find_main(file_code) if find_main is not None else None
 
-    main_node: Optional[ast.If] = None
-    for node in tree.body:
-        if (
-            isinstance(node, ast.If)
-            and isinstance(node.test, ast.Compare)
-            and isinstance(node.test.left, ast.Name)
-            and node.test.left.id == "__name__"
-        ):
-            main_node = node
-            break
-
-    if main_node is None:
+    if main_lineno is None:
         return file_code.rstrip() + "\n\n\n" + stub
 
     lines = file_code.splitlines()
-    insert_at = max(main_node.lineno - 1, 0)  # ast.lineno is 1-based
+    insert_at = max(main_lineno - 1, 0)  # ast.lineno is 1-based
     prefix = lines[:insert_at]
     suffix = lines[insert_at:]
     # Ensure separation: one blank line before stub, two blank lines after.

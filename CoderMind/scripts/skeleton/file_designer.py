@@ -31,6 +31,22 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 from common import LLMClient
 from common.utils import get_project_background_context
 
+# Phase 1 (decoder multi-language): store the backend resolved from the
+# project's target language so Phase 2 can switch ``.py`` literals
+# and ``__init__.py`` logic to ``backend.file_extension`` /
+# ``backend.package_marker_filename``. In Phase 1 the backend is
+# captured but not yet consulted; behaviour is identical to before.
+# Phase 5 adds ``with_language_directive`` to prepend a per-language
+# preamble onto skeleton-stage LLM prompts. For Python projects the
+# directive is empty (zero-impact); for Go / Rust / etc. it nudges
+# the LLM toward idiomatic conventions before the bulk per-prompt
+# rewrites land (deferred to Phase 6).
+from decoder_lang import (
+    get_backend,
+    resolve_decoder_language,
+    with_language_directive,
+)
+
 
 # ============================================================================
 # Validation Functions
@@ -38,44 +54,63 @@ from common.utils import get_project_background_context
 
 def validate_directory_structure(
     dir_assignments: Dict[str, str],
-    required_components: List[str]
+    required_components: List[str],
+    backend: Optional[Any] = None,
 ) -> Tuple[bool, str]:
     """Validate that all required components have directory assignments.
-    
+
     Args:
         dir_assignments: Mapping of component_name -> directory_path
         required_components: List of component names that must be covered
-        
+        backend: Optional :class:`decoder_lang.LanguageBackend`. When
+            supplied, each path segment is validated against the
+            backend's :meth:`is_valid_module_identifier`. When
+            ``None``, the pre-Phase-2 Python rule
+            (``str.isidentifier``) is used so legacy callers behave
+            identically.
+
     Returns:
         (is_valid, error_message)
     """
     errors = []
     assigned_components = set(dir_assignments.keys())
     required_set = set(required_components)
-    
+
     # Check for missing components
     missing = required_set - assigned_components
     if missing:
         errors.append(f"Missing directory assignments for components: {sorted(missing)}")
-    
+
     # Check for extra/unrecognized components
     extra = assigned_components - required_set
     if extra:
         errors.append(f"Unrecognized components in assignments: {sorted(extra)}")
-    
-    # Check for empty directory paths and Python identifier validity
+
+    # Identifier validation. When no backend is given we keep the
+    # historical Python rule verbatim so any external caller passing
+    # only ``dir_assignments + required_components`` sees identical
+    # error messages.
+    if backend is None:
+        def _is_valid_segment(seg: str) -> bool:
+            return bool(seg) and seg.isidentifier()
+        identifier_kind = "Python identifier"
+    else:
+        _is_valid_segment = backend.is_valid_module_identifier
+        identifier_kind = f"{backend.display_name} identifier"
+
     for comp, dir_path in dir_assignments.items():
         if not dir_path or not dir_path.strip():
             errors.append(f"Component '{comp}' has empty directory path")
             continue
-        # Each path segment used as a Python package must be a valid identifier
+        # Each path segment used as a package name must be a valid
+        # identifier for the target language.
         for segment in dir_path.replace("\\", "/").strip("/").split("/"):
-            if segment and not segment.isidentifier():
+            if segment and not _is_valid_segment(segment):
                 errors.append(
                     f"Component '{comp}': directory segment '{segment}' is not a valid "
-                    f"Python identifier (avoid hyphens; use underscores instead)"
+                    f"{identifier_kind} (avoid hyphens; use underscores instead)"
                 )
-    
+
     if errors:
         return False, "\n".join(errors)
     return True, "All components have valid directory assignments."
@@ -158,7 +193,8 @@ class FileDesigner:
         max_iterations: int = 10,
         config: Optional[Dict[str, Any]] = None,
         trajectory: Optional[Any] = None,
-        step_id: Optional[str] = None
+        step_id: Optional[str] = None,
+        target_language: Optional[str] = None,
     ):
         """Initialize FileDesigner.
 
@@ -169,6 +205,13 @@ class FileDesigner:
             config: Optional configuration dictionary
             trajectory: Optional trajectory tracker for logging steps
             step_id: Optional step ID for trajectory tracking
+            target_language: Optional explicit target language
+                (e.g. ``"python"``, ``"go"``). When ``None`` the
+                effective language is resolved from RPG root meta with
+                fallback to ``"python"``. Phase 2 will switch file
+                extension and package marker logic to consult
+                ``self.backend``; in Phase 1 the value is captured
+                but not yet used to alter behaviour.
         """
         self.rpg = rpg
         self.llm_client = llm_client or LLMClient(trajectory=trajectory, step_id=step_id)
@@ -178,6 +221,26 @@ class FileDesigner:
         self.step_id = step_id
 
         self.logger = logging.getLogger(__name__)
+
+        # Phase 1: resolve target language with three-tier fallback
+        # (explicit kwarg → RPG root meta.language → "python"). The
+        # backend instance is stored on ``self.backend`` for Phase 2
+        # call-site migrations; nothing in Phase 1 dispatches on it.
+        # Build a minimal RPG-shaped dict (just the root meta) so the
+        # resolver doesn't trigger a full RPG.to_dict() serialisation.
+        rpg_meta_lang = None
+        repo_node = getattr(self.rpg, "repo_node", None)
+        if repo_node is not None and getattr(repo_node, "meta", None) is not None:
+            rpg_meta_lang = getattr(repo_node.meta, "language", None)
+        rpg_dict_minimal = {"root": {"meta": {"language": rpg_meta_lang}}}
+        feature_spec_stub = (
+            {"target_language": target_language} if target_language else None
+        )
+        self.target_language = resolve_decoder_language(
+            feature_spec=feature_spec_stub,
+            rpg_obj=rpg_dict_minimal,
+        )
+        self.backend = get_backend(self.target_language)
 
         # Load project background / technology context (empty string if unavailable)
         try:
@@ -360,7 +423,9 @@ IMPORTANT: You MUST assign ALL {len(required_components)} components: {', '.join
 
             # Call LLM
             _, result, _ = self.llm_client.call_structured(
-                system_prompt=RAW_SKELETON_PROMPT,
+                system_prompt=with_language_directive(
+                    RAW_SKELETON_PROMPT, self.backend,
+                ),
                 user_prompt=user_prompt,
                 response_model=DirectoryStructureOutput,
                 purpose=f"directory_structure_{attempt + 1}"
@@ -378,8 +443,12 @@ IMPORTANT: You MUST assign ALL {len(required_components)} components: {', '.join
             for assignment in result.assignments:
                 component_to_dir[assignment.component_name] = assignment.directory_path
 
-            # Validate completeness
-            is_valid, error_msg = validate_directory_structure(component_to_dir, required_components)
+            # Validate completeness (identifier rules come from the
+            # resolved backend so Go segments are checked against Go
+            # naming rules, not Python's).
+            is_valid, error_msg = validate_directory_structure(
+                component_to_dir, required_components, backend=self.backend,
+            )
             
             if is_valid:
                 self.logger.info("\n   Directory Structure (validated):")
@@ -454,7 +523,9 @@ Every feature MUST be assigned to exactly one file.
 
             # Call LLM for feature assignment
             _, result, _ = self.llm_client.call_structured(
-                system_prompt=GROUP_SKELETON_PROMPT,
+                system_prompt=with_language_directive(
+                    GROUP_SKELETON_PROMPT, self.backend,
+                ),
                 user_prompt=user_prompt,
                 response_model=FileAssignmentOutput,
                 purpose=f"feature_assignment_{comp_name}"
@@ -509,8 +580,10 @@ Every feature MUST be assigned to exactly one file.
             # Check for unassigned features
             unassigned = [f for f in features if f not in assigned_features]
             if unassigned:
-                # Create fallback file for unassigned features
-                fallback_file = f"{comp_dir}/misc.py"
+                # Create fallback file for unassigned features. Extension
+                # comes from the resolved language backend so a Go run
+                # produces ``misc.go`` instead of ``misc.py``.
+                fallback_file = f"{comp_dir}/misc{self.backend.file_extension}"
                 comp_assignments.append({
                     "file_path": fallback_file,
                     "features": unassigned,
@@ -548,10 +621,11 @@ Every feature MUST be assigned to exactly one file.
             )
             self.stats["files_created"] += 1
 
-        # Add __init__.py files to all directories
-        init_files_added = self.skeleton.add_init_files()
+        # Add package-marker files to all directories (Python:
+        # ``__init__.py``; Go / Rust / TS: no-op via backend).
+        init_files_added = self.skeleton.add_init_files(backend=self.backend)
         self.stats["init_files_created"] = init_files_added
-        self.logger.info(f"Added {init_files_added} __init__.py files")
+        self.logger.info(f"Added {init_files_added} package marker files")
 
         self.logger.info(f"Created skeleton with {len(self.skeleton.path_to_node)} total nodes")
 
@@ -644,7 +718,9 @@ You may add features to existing files in this directory or create new files.
 """
 
             _, result, _ = self.llm_client.call_structured(
-                system_prompt=GROUP_SKELETON_PROMPT,
+                system_prompt=with_language_directive(
+                    GROUP_SKELETON_PROMPT, self.backend,
+                ),
                 user_prompt=user_prompt,
                 response_model=FileAssignmentOutput,
                 purpose=f"patch_feature_assignment_{comp_name}"
@@ -654,7 +730,7 @@ You may add features to existing files in this directory or create new files.
 
             if not result:
                 self.logger.error(f"Patch assignment failed for component: {comp_name}")
-                fallback_file = f"{comp_dir}/misc.py"
+                fallback_file = f"{comp_dir}/misc{self.backend.file_extension}"
                 all_assignments.append({
                     "file_path": fallback_file,
                     "features": missing_features,
@@ -694,7 +770,7 @@ You may add features to existing files in this directory or create new files.
 
             unassigned = [f for f in missing_features if f not in assigned_features]
             if unassigned:
-                fallback_file = f"{comp_dir}/misc.py"
+                fallback_file = f"{comp_dir}/misc{self.backend.file_extension}"
                 comp_assignments.append({
                     "file_path": fallback_file,
                     "features": unassigned,

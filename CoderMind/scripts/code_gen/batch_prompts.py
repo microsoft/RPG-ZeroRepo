@@ -408,37 +408,53 @@ def _build_api_summary(repo_path: Path, source_files: List[str], max_chars: int 
     Returns:
         Formatted string of file → class/function signatures.
     """
-    import ast as _ast
+    # Phase 4: route through the Python language backend so this
+    # helper no longer imports ``ast`` directly. We still need the
+    # raw ``ast`` node for the per-arg name extraction (this format
+    # uses bare arg names without type annotations, distinct from
+    # ``backend.format_signature``'s annotated rendering). The raw
+    # node is preserved in ``unit.extra['ast_node']`` by PythonBackend.
+    import ast as _ast  # local import; only used for unparse(returns)
+    from decoder_lang import get_backend
 
+    backend = get_backend("python")
     summaries = []
     for filepath in sorted(source_files):
         full_path = repo_path / filepath
-        if not full_path.exists() or full_path.suffix != '.py':
+        if not full_path.exists() or not backend.is_source_file(filepath):
             continue
         try:
-            tree = _ast.parse(full_path.read_text(encoding='utf-8'))
-        except (SyntaxError, UnicodeDecodeError):
+            source = full_path.read_text(encoding='utf-8')
+        except (OSError, UnicodeDecodeError):
             continue
 
+        units = backend.list_code_units(source, filepath)
+        # Match the historical layout: walk top-level declarations
+        # only (parent is None) and, for classes, list their direct
+        # public methods. Format keeps bare arg names + return type
+        # annotation — distinct from ``backend.format_signature`` so
+        # this prompt's output diff stays byte-equivalent.
+        top_level = [u for u in units if u.parent is None]
         file_sigs = []
-        for node in tree.body:
-            if isinstance(node, _ast.ClassDef):
-                if node.name.startswith('_'):
-                    continue
+        for unit in top_level:
+            if not unit.name or unit.name.startswith('_'):
+                continue
+            if unit.unit_type == 'class':
                 methods = [
-                    n.name for n in node.body
-                    if isinstance(n, (_ast.FunctionDef, _ast.AsyncFunctionDef))
-                    and not n.name.startswith('_')
+                    u.name for u in units
+                    if u.unit_type == 'method' and u.parent == unit.name
+                    and not u.name.startswith('_')
                 ]
                 methods_str = ', '.join(methods) if methods else '(dataclass)'
-                file_sigs.append(f"  class {node.name}: {methods_str}")
-            elif isinstance(node, (_ast.FunctionDef, _ast.AsyncFunctionDef)):
-                if node.name.startswith('_'):
+                file_sigs.append(f"  class {unit.name}: {methods_str}")
+            elif unit.unit_type == 'function':
+                node = (unit.extra or {}).get('ast_node')
+                if node is None:
                     continue
                 args = [a.arg for a in node.args.args if a.arg != 'self']
                 ret = _ast.unparse(node.returns) if node.returns else ''
                 ret_str = f" -> {ret}" if ret else ""
-                file_sigs.append(f"  def {node.name}({', '.join(args)}){ret_str}")
+                file_sigs.append(f"  def {unit.name}({', '.join(args)}){ret_str}")
 
         if file_sigs:
             summaries.append(f"# {filepath}\n" + "\n".join(file_sigs))
