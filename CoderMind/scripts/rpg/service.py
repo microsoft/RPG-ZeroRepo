@@ -50,16 +50,38 @@ class RPGService:
     def load(cls, path: str | Path) -> "RPGService":
         """Load an RPG from a file and create a service instance.
 
-        If the RPG has a ``dep_graph_file`` field pointing to an existing
-        file, the dep_graph is automatically loaded and cross-maps rebuilt.
+        Read order (single-source-of-truth):
+
+        1. **Embedded** dep_graph — ``RPG.load_json`` already restored it
+           from ``data["dep_graph"]`` if present.  This is the new
+           default since the dep_graph rides inside ``rpg.json``.
+        2. **External** dep_graph — only consulted when no embedded copy
+           was found AND the legacy ``_dep_graph_file`` pointer is set
+           AND the file exists.  Emits a single INFO log so the
+           fall-through is visible during debugging.
+
+        The fall-through path keeps pre-embed-migration workspaces
+        readable.  New encodes never produce a standalone
+        ``dep_graph.json`` so this path naturally goes cold.
         """
+        import logging as _logging
+        _logger = _logging.getLogger(__name__)
+
         rpg = RPG.load_json(str(path))
         svc = cls(rpg)
         svc._rpg_dir = Path(path).parent
-        # Auto-load external dep_graph if configured
-        if rpg._dep_graph_file:
+
+        if rpg.dep_graph is not None:
+            # Embedded copy already attached by RPG.load_json — done.
+            pass
+        elif rpg._dep_graph_file:
             dgp = svc._rpg_dir / rpg._dep_graph_file
             if dgp.exists():
+                _logger.info(
+                    "Loading dep_graph from legacy external file %s; "
+                    "next save will embed it inside rpg.json.",
+                    dgp,
+                )
                 rpg.dep_graph = RPG.load_dep_graph(dgp)
                 rpg.rebuild_cross_maps()
         return svc
@@ -540,7 +562,7 @@ class RPGService:
         self,
         code_dir: str,
         workspace_root: str,
-        save_path: str | Path,
+        save_path: Optional[str | Path] = None,
         *,
         file_limit: Optional[int] = None,
         staged_only: bool = False,
@@ -564,9 +586,11 @@ class RPGService:
 
         After a successful run, advances ``meta.git`` to the current HEAD
         (unless ``CMIND_NO_GIT_META=1`` or the workspace isn't a git
-        repo).  The dep_graph is **always** persisted to ``save_path``;
-        the RPG file itself is saved by the caller (this method only
-        mutates ``self.rpg``).
+        repo).  When ``save_path`` is provided the dep_graph is also
+        persisted as a standalone JSON (legacy behaviour preserved for
+        callers that still want the sidecar); when ``save_path is None``
+        the dep_graph lives only in ``self.rpg.dep_graph`` and rides
+        inside ``rpg.json`` via the caller's ``svc.save(rpg_path)``.
 
         Args:
             code_dir: Absolute path to the directory that ``DependencyGraph``
@@ -574,7 +598,9 @@ class RPGService:
             workspace_root: Absolute path to the git working tree.  Used
                 both to read ``meta.git``'s sibling HEAD and to compute
                 the relative prefix on dep_graph paths.
-            save_path: Output path for ``dep_graph.json``.
+            save_path: Optional standalone output path for the dep_graph.
+                ``None`` is the new default for callers that rely on the
+                embedded dep_graph in ``rpg.json``.
             file_limit: Cap on changed-file count before falling back to
                 full.  Defaults to :attr:`DEFAULT_INCREMENTAL_FILE_LIMIT`.
             staged_only: If ``True``, restrict diff to ``git diff --cached``
@@ -596,7 +622,7 @@ class RPGService:
         )
 
         limit = file_limit if file_limit is not None else self.DEFAULT_INCREMENTAL_FILE_LIMIT
-        save_path = str(save_path)
+        save_path = str(save_path) if save_path is not None else None
 
         # ── Step 1: read current HEAD (silent-fail outside a git repo) ──
         current = read_head(workspace_root)
@@ -736,7 +762,7 @@ class RPGService:
         file_paths: List[str],
         code_dir: str,
         workspace_root: str,
-        save_path: str | Path,
+        save_path: Optional[str | Path] = None,
         *,
         renames: Optional[Dict[str, str]] = None,
     ) -> Dict:
@@ -753,36 +779,39 @@ class RPGService:
         Args:
             file_paths: Repo-relative ``.py`` paths to refresh.
             code_dir / workspace_root: As :meth:`refresh_dep_graph`.
-            save_path: Output path for ``dep_graph.json``.
+            save_path: Optional standalone output path for the dep_graph.
+                ``None`` (default) means the caller relies on the embedded
+                dep_graph in ``rpg.json`` via a subsequent ``svc.save``.
             renames: Optional ``{old: new}`` pairs (rare in codegen; codegen
                 doesn't typically rename files).
         """
+        save_path_str = str(save_path) if save_path is not None else None
         # Lazy bootstrap: codegen may call this on an RPG that doesn't
         # have a dep_graph yet (very first batch).  Fall back to full.
         if self.rpg.dep_graph is None:
             self.refresh_dep_graph(
                 code_dir=code_dir,
                 workspace_root=workspace_root,
-                save_path=str(save_path),
+                save_path=save_path_str,
             )
             return {
                 "mode": "full",
                 "reason": "no_existing_dep_graph",
                 "dep_nodes": len(self.rpg.dep_graph.G.nodes()),
                 "dep_edges": len(self.rpg.dep_graph.G.edges()),
-                "save_path": str(save_path),
+                "save_path": save_path_str,
             }
 
         stats = self._apply_incremental_dep_graph_update(
             changed_files=list(file_paths),
             renames=renames or {},
-            save_path=str(save_path),
+            save_path=save_path_str,
         )
         return {
             "mode": "incremental",
             "reason": "explicit_file_list",
             **stats,
-            "save_path": str(save_path),
+            "save_path": save_path_str,
         }
 
     def _apply_incremental_dep_graph_update(
@@ -790,7 +819,7 @@ class RPGService:
         *,
         changed_files: List[str],
         renames: Dict[str, str],
-        save_path: str,
+        save_path: Optional[str] = None,
     ) -> Dict:
         """Run ``DependencyGraph.update_files`` + rebuild RPG mappings + save.
 
@@ -827,15 +856,21 @@ class RPGService:
         self.rpg._dep_to_rpg_map = self.rpg._build_dep_to_rpg_map()
         self.rpg.rebuild_cross_maps()
 
-        save_path_resolved = _Path(save_path).resolve()
-        self.rpg.save_dep_graph(save_path_resolved)
-        try:
-            self.rpg._dep_graph_file = str(
-                save_path_resolved.relative_to(self._rpg_dir.resolve())
-            )
-        except ValueError:
-            # dep_graph.json lives outside the RPG dir — keep absolute path.
-            self.rpg._dep_graph_file = str(save_path_resolved)
+        # ``save_path`` is optional in the embedded-dep_graph world: the
+        # dep_graph rides inside rpg.json via ``RPG.to_dict``, so callers
+        # that don't need a standalone ``dep_graph.json`` pass ``None`` and
+        # rely on ``svc.save(rpg_path)`` afterwards.  Legacy callers that
+        # still pass a path keep their standalone artefact.
+        if save_path is not None:
+            save_path_resolved = _Path(save_path).resolve()
+            self.rpg.save_dep_graph(save_path_resolved)
+            try:
+                self.rpg._dep_graph_file = str(
+                    save_path_resolved.relative_to(self._rpg_dir.resolve())
+                )
+            except ValueError:
+                # dep_graph.json lives outside the RPG dir — keep absolute path.
+                self.rpg._dep_graph_file = str(save_path_resolved)
 
         return {
             "dep_nodes": len(self.rpg.dep_graph.G.nodes()),

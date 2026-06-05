@@ -114,9 +114,11 @@ def run_update_rpg(
         pre_commit = (rpg.git_meta or {}).get("head_commit")
 
         # === Step 1: LLM-driven feature graph refactor ===
-        # Now threaded with the dep_graph save path so the structural
-        # refresh inside process_diff actually persists dep_graph.json
-        # to disk (fixes the legacy ``_update_dep_graph_index`` bug).
+        # ``dep_graph_save_path=None``: the dep_graph rides inside
+        # ``rpg.json`` as the single source of truth (embedded by
+        # ``RPG.to_dict`` and persisted by the ``atomic_write_rpg`` below).
+        # The legacy standalone ``dep_graph.json`` is no longer produced;
+        # readers tolerate its absence and use the embedded copy.
         updated_rpg = RPGEvolution.process_diff(
             repo_name=repo_name,
             repo_info=repo_info,
@@ -126,7 +128,6 @@ def run_update_rpg(
             last_rpg=rpg,
             last_feature_tree=feature_tree,
             update_dep_graph=True,
-            dep_graph_save_path=dep_graph_path,
             max_exclude_votes=max_exclude_votes,
         )
 

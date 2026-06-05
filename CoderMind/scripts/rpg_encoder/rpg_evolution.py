@@ -384,10 +384,13 @@ class RPGEvolution:
                     dep_count, map_count, save_path,
                 )
             else:
-                logger.warning(
-                    "Dependency graph updated in-memory only (%d nodes, "
-                    "%d mappings) — caller did not provide save_path so "
-                    "dep_graph.json on disk may be stale.",
+                # The new default: dep_graph rides inside rpg.json (single
+                # source of truth).  No standalone dep_graph.json is
+                # written from this call; the caller's ``svc.save(rpg)``
+                # embeds the in-memory graph via ``RPG.to_dict``.
+                logger.info(
+                    "Dependency graph updated in-memory (%d nodes, "
+                    "%d mappings); caller embeds into rpg.json on save.",
                     dep_count, map_count,
                 )
         except Exception as e:

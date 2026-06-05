@@ -162,11 +162,15 @@ def test_task_files_for_dep_graph_filters_special_task_types(codegen_workspace):
 
 
 # ===========================================================================
-# 4b — _update_dep_graph_index persists dep_graph.json to disk
+# 4b — _update_dep_graph_index attaches in-memory dep_graph for embedded save
 # ===========================================================================
 
-def test_update_dep_graph_index_writes_dep_graph_json(tmp_path):
-    """Regression: the previous implementation called ``rpg.parse_dep_graph()`` which only mutated memory.  After this fix, supplying ``save_path`` must produce ``dep_graph.json`` on disk with the freshly built graph."""
+def test_update_dep_graph_index_populates_in_memory_dep_graph(tmp_path):
+    """After the dep_graph-single-source migration, ``_update_dep_graph_index``
+    no longer requires a standalone ``dep_graph.json`` write — the caller's
+    ``svc.save(rpg.json)`` embeds the in-memory graph via ``RPG.to_dict``.
+    The helper still mutates ``rpg.dep_graph`` so callers can serialise it.
+    """
     from rpg_encoder.rpg_evolution import RPGEvolution
     import logging
 
@@ -177,22 +181,26 @@ def test_update_dep_graph_index_writes_dep_graph_json(tmp_path):
     (repo / "y.py").write_text("from x import x\ndef y(): return x() * 2\n")
 
     rpg = RPG(repo_name="ws")
-    dep_graph_path = ws / "dep_graph.json"
 
     logger = logging.getLogger("test_4b")
-    RPGEvolution._update_dep_graph_index(
-        rpg, str(ws), logger, save_path=str(dep_graph_path),
+    # ``save_path`` omitted: new default — dep_graph rides inside rpg.json.
+    RPGEvolution._update_dep_graph_index(rpg, str(ws), logger)
+
+    assert rpg.dep_graph is not None, "in-memory dep_graph must be attached"
+    assert rpg.dep_graph.G.number_of_nodes() >= 2, (
+        "dep_graph must contain at least the two source files"
     )
-
-    assert dep_graph_path.is_file(), "dep_graph.json must be written"
-    data = json.loads(dep_graph_path.read_text())
-    # Sanity: the on-disk file must reflect what's in memory
-    assert "nodes" in data
-    assert len(data["nodes"]) == len(rpg.dep_graph.G.nodes)
+    # Round-trip through to_dict to prove embedding works.
+    serialised = rpg.to_dict()
+    assert "dep_graph" in serialised
+    assert serialised["dep_graph"]["nodes"]
 
 
-def test_update_dep_graph_index_save_path_outside_rpg_dir(tmp_path):
-    """Regression: when ``save_path`` lives outside the default ``RPGService._rpg_dir`` (which defaults to cwd), the relative-path computation used to raise ``ValueError`` and the dep_graph save silently aborted.  After the fix, ``_update_dep_graph_index`` anchors the service's ``_rpg_dir`` to the save_path's parent so the persisted reference becomes a clean relative ``dep_graph.json`` and the file actually lands on disk."""
+def test_update_dep_graph_index_legacy_save_path_still_writes_standalone(tmp_path):
+    """Backward-compat: callers that still pass ``save_path`` get the
+    standalone ``dep_graph.json`` written (legacy path preserved for
+    tooling that consumed the sidecar file directly).
+    """
     from rpg_encoder.rpg_evolution import RPGEvolution
     import logging
 
@@ -205,7 +213,7 @@ def test_update_dep_graph_index_save_path_outside_rpg_dir(tmp_path):
     # Place the dep_graph in a deep tmpdir nobody's cwd ever traverses
     dep_graph_path = tmp_path / "elsewhere" / "dep_graph.json"
 
-    logger = logging.getLogger("test_4b_outside")
+    logger = logging.getLogger("test_4b_legacy")
     RPGEvolution._update_dep_graph_index(
         rpg, str(ws), logger, save_path=str(dep_graph_path),
     )
@@ -215,12 +223,15 @@ def test_update_dep_graph_index_save_path_outside_rpg_dir(tmp_path):
     assert dep_graph_path.is_file()
     # ``_dep_graph_file`` is stored relative to the save_path's parent
     # (which _update_dep_graph_index sets as _rpg_dir), so callers that
-    # ``RPGService.load`` the RPG later can still find it.
+    # ``RPGService.load`` the RPG later can still find the legacy file.
     assert rpg._dep_graph_file == "dep_graph.json"
 
 
-def test_update_dep_graph_index_without_save_path_logs_warning(tmp_path, caplog):
-    """Legacy behaviour: when no save_path is provided the function still updates in-memory dep_graph but must warn so the user knows the standalone JSON is stale."""
+def test_update_dep_graph_index_without_save_path_logs_info(tmp_path, caplog):
+    """Default behaviour after the embed migration: no save_path means the
+    dep_graph is attached in memory and an INFO log records that it will
+    ride inside rpg.json on the caller's next save.
+    """
     from rpg_encoder.rpg_evolution import RPGEvolution
     import logging
 
@@ -230,21 +241,23 @@ def test_update_dep_graph_index_without_save_path_logs_warning(tmp_path, caplog)
     (repo / "z.py").write_text("z = 1\n")
 
     rpg = RPG(repo_name="ws")
-    logger = logging.getLogger("test_4b_warn")
-    logger.setLevel(logging.WARNING)
-    with caplog.at_level(logging.WARNING, logger=logger.name):
+    logger = logging.getLogger("test_4b_info")
+    logger.setLevel(logging.INFO)
+    with caplog.at_level(logging.INFO, logger=logger.name):
         RPGEvolution._update_dep_graph_index(rpg, str(ws), logger)
-    # Must surface the "may be stale" warning
+    # Must surface the embed-on-save INFO log
     assert any(
-        "may be stale" in record.getMessage() for record in caplog.records
-    ), "expected legacy-behaviour warning"
+        "embeds into rpg.json" in record.getMessage()
+        for record in caplog.records
+    ), "expected embed-on-save info log"
 
 
-def test_process_diff_threads_dep_graph_save_path(tmp_path):
-    """End-to-end check that ``process_diff`` propagates ``dep_graph_save_path`` through to ``_update_dep_graph_index``.
+def test_process_diff_embeds_dep_graph_into_rpg(tmp_path):
+    """End-to-end check that ``process_diff`` produces an rpg with an
+    embedded dep_graph that can be round-tripped via ``RPG.to_dict``.
 
     We stub the LLM-driven sub-processes (``_process_add_files`` etc.)
-    so the test stays fast and focuses on the dep_graph write.
+    so the test stays fast and focuses on the dep_graph attach.
     """
     from rpg_encoder.rpg_evolution import RPGEvolution
     import logging
@@ -260,7 +273,6 @@ def test_process_diff_threads_dep_graph_save_path(tmp_path):
     (cur / "k.py").write_text("k = 1\n")
 
     rpg = RPG(repo_name="ws")
-    dep_graph_path = tmp_path / "dep_graph.json"
     logger = logging.getLogger("test_process_diff")
 
     # Stub exclusion (it would call LLM otherwise)
@@ -268,7 +280,7 @@ def test_process_diff_threads_dep_graph_save_path(tmp_path):
         "rpg_encoder.rpg_encoding.RPGParser.exclude_irrelevant_files",
         return_value=[],
     ):
-        RPGEvolution.process_diff(
+        updated = RPGEvolution.process_diff(
             repo_name="ws",
             repo_info="",
             save_path="",
@@ -278,12 +290,15 @@ def test_process_diff_threads_dep_graph_save_path(tmp_path):
             last_feature_tree=[],
             logger=logger,
             update_dep_graph=True,
-            dep_graph_save_path=str(dep_graph_path),
+            # dep_graph_save_path omitted on purpose: new default.
         )
 
-    assert dep_graph_path.is_file(), (
-        "dep_graph.json must be written even when there are 'no changes'"
+    assert updated.dep_graph is not None, (
+        "process_diff must attach an in-memory dep_graph for downstream save"
     )
+    serialised = updated.to_dict()
+    assert "dep_graph" in serialised
+    assert serialised["dep_graph"]["nodes"]
 
 
 # ===========================================================================
@@ -330,7 +345,7 @@ def update_rpg_workspace(tmp_path):
 
 
 def test_run_update_rpg_advances_meta_git_and_runs_align(update_rpg_workspace, monkeypatch):
-    """Even on the "no changes" branch, ``run_update_rpg`` must: * write dep_graph.json (4b) * advance meta.git to the current HEAD (4c) * run enrich(align_only=True) (4c)."""
+    """Even on the "no changes" branch, ``run_update_rpg`` must: * embed dep_graph into rpg.json (4b) * advance meta.git to the current HEAD (4c) * run enrich(align_only=True) (4c)."""
     ws, repo, rpg_path, dep_graph_path = update_rpg_workspace
 
     # WORKSPACE_ROOT is resolved at import time inside common.paths.
@@ -371,10 +386,9 @@ def test_run_update_rpg_advances_meta_git_and_runs_align(update_rpg_workspace, m
     assert persisted["meta"]["git"]["head_commit"] == head
     assert persisted["meta"]["git"]["head_branch"] == "main"
 
-    # dep_graph.json exists and is non-empty
-    assert dep_graph_path.is_file()
-    dg = json.loads(dep_graph_path.read_text())
-    assert len(dg["nodes"]) > 0
+    # dep_graph is embedded in rpg.json (single source of truth)
+    assert "dep_graph" in persisted
+    assert persisted["dep_graph"]["nodes"]
 
 
 def test_run_update_rpg_dep_graph_path_default_matches_constant(monkeypatch, tmp_path):

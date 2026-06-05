@@ -263,6 +263,15 @@ BASE_CLASSES_FILE = DATA_DIR / "base_classes.json"
 
 RPG_FILE = DATA_DIR / "rpg.json"
 REPO_RPG_FILE = RPG_FILE  # Unified: both encoder and decoder use rpg.json
+# ``DEP_GRAPH_FILE``: legacy standalone dep_graph location.
+# As of the embed migration the dep_graph rides inside ``rpg.json``
+# (``RPG.to_dict(include_dep_graph=True)``).  New code no longer writes
+# this file; the constant stays so legacy workspaces with an existing
+# ``dep_graph.json`` continue to load via ``RPGService.load``'s compat
+# path, and so a few CLI flags (``--dep-graph`` in update_graphs.py /
+# rpg_visualize.py / rpg_edit/apply.py) still resolve a sensible
+# default.  Safe to remove once those CLIs are pruned in a future
+# breaking-change release.
 DEP_GRAPH_FILE = DATA_DIR / "dep_graph.json"
 REPO_INFO_FILE = DATA_DIR / "repo_info.json"
 

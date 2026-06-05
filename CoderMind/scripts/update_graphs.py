@@ -26,6 +26,7 @@ import os
 import sys
 import time
 from pathlib import Path
+from typing import Optional
 
 SCRIPTS_DIR = Path(__file__).resolve().parent
 if str(SCRIPTS_DIR) not in sys.path:
@@ -114,8 +115,23 @@ def _refresh_rpg_html(rpg_path: Path) -> dict:
     return result
 
 
-def update_dep_only(code_dir: str, workspace_root: str, dep_graph_path: Path) -> dict:
-    """Mode: dep — Only rebuild dep_graph.json from AST, no RPG changes."""
+def update_dep_only(code_dir: str, workspace_root: str, dep_graph_path: Path,
+                    rpg_path: Optional[Path] = None) -> dict:
+    """Mode: dep — Rebuild dep_graph from AST and persist into rpg.json.
+
+    In the embedded-dep_graph world the dep_graph lives inside
+    ``rpg.json`` (see ``RPG.to_dict(include_dep_graph=True)``).  This
+    mode therefore reads the current ``rpg.json``, swaps in the freshly
+    rebuilt dep_graph, and writes ``rpg.json`` back out.  When
+    ``rpg_path`` is ``None`` (or the file is missing) we fall back to
+    the legacy standalone ``dep_graph.json`` write so that environments
+    which haven't run the encoder yet still get a useful artefact —
+    this is the path the very-first pre-commit hook hits on a fresh
+    workspace before any RPG exists.
+
+    ``dep_graph_path`` is preserved as a parameter for CLI back-compat
+    but is now used only in the legacy fallback path.
+    """
     from rpg.dep_graph import DependencyGraph
 
     t0 = time.time()
@@ -123,19 +139,37 @@ def update_dep_only(code_dir: str, workspace_root: str, dep_graph_path: Path) ->
     dg.build()
     dg.parse()
 
-    # Save with metadata wrapper.  ``relpath`` returns ``"."`` when
-    # ``code_dir == workspace_root`` (workspace == repo, the common case);
-    # normalise to ``""`` so consumers can use a plain truthy check.
-    raw = dg.to_dict()
     _rel = os.path.relpath(code_dir, workspace_root)
-    raw["code_dir"] = "" if _rel == "." else _rel
+    code_dir_rel = "" if _rel == "." else _rel
+
+    # Preferred path: dep_graph rides inside rpg.json (single source of truth).
+    if rpg_path is not None and rpg_path.is_file():
+        from rpg.service import RPGService
+        svc = RPGService.load(str(rpg_path))
+        svc.rpg.dep_graph = dg
+        svc.rpg._dep_graph_code_dir = code_dir_rel
+        svc.rpg._dep_to_rpg_map = svc.rpg._build_dep_to_rpg_map()
+        svc.rpg.rebuild_cross_maps()
+        # Drop the legacy external pointer so RPGService.load doesn't
+        # override the embedded dep_graph on the next read.
+        svc.rpg._dep_graph_file = None
+        svc.save(str(rpg_path))
+
+        return {
+            "mode": "dep",
+            "dep_nodes": len(dg.G.nodes()),
+            "dep_edges": len(dg.G.edges()),
+            "rpg_path": str(rpg_path),
+            "duration": round(time.time() - t0, 3),
+        }
+
+    # Legacy fallback: write standalone dep_graph.json for environments
+    # without an rpg.json yet (rare in practice — the pre-commit hook
+    # exits early on workspaces that never ran the encoder).
+    raw = dg.to_dict()
+    raw["code_dir"] = code_dir_rel
     from datetime import datetime, timezone
     raw["generated_at"] = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S")
-
-    # Atomic write so a post-commit hook killed mid-write (Ctrl-C,
-    # OOM, lost shell) leaves the previous dep_graph.json intact
-    # instead of a half-truncated file the next ``cmind`` call would
-    # crash on.
     from common.rpg_io import atomic_write_rpg
     atomic_write_rpg(str(dep_graph_path), raw, ensure_ascii=False, indent=2)
 
@@ -150,13 +184,15 @@ def update_dep_only(code_dir: str, workspace_root: str, dep_graph_path: Path) ->
 
 def update_mapping(rpg_path: Path, code_dir: str, workspace_root: str,
                    dep_graph_path: Path) -> dict:
-    """Mode: mapping — Rebuild dep_graph + dep↔rpg mappings + save both."""
+    """Mode: mapping — Rebuild dep_graph + dep↔rpg mappings, persist into rpg.json."""
     from rpg.service import RPGService
 
     t0 = time.time()
     svc = RPGService.load(str(rpg_path))
-    svc.refresh_dep_graph(code_dir, workspace_root=workspace_root,
-                          save_path=str(dep_graph_path))
+    # ``save_path=None``: dep_graph rides inside rpg.json (no standalone file)
+    svc.refresh_dep_graph(code_dir, workspace_root=workspace_root)
+    # Drop any stale external pointer left by older runs.
+    svc.rpg._dep_graph_file = None
     svc.save(str(rpg_path))
 
     return {
@@ -167,32 +203,48 @@ def update_mapping(rpg_path: Path, code_dir: str, workspace_root: str,
         "feature_to_dep": len(svc.rpg._feature_to_dep_map),
         "rpg_nodes": len(svc.rpg._node_index),
         "rpg_edges": len(svc.rpg.edges),
-        "dep_graph_path": str(dep_graph_path),
         "rpg_path": str(rpg_path),
         "duration": round(time.time() - t0, 3),
     }
 
 
 def update_feature(rpg_path: Path, dep_graph_path: Path) -> dict:
-    """Mode: feature — Load existing dep_graph, rebuild mappings + edges only."""
+    """Mode: feature — Load existing dep_graph, rebuild mappings + edges only.
+
+    Reads dep_graph from rpg.json's embedded copy (the new contract); only
+    falls back to the standalone ``dep_graph.json`` for legacy workspaces
+    that haven't been re-encoded since the embed migration.
+    """
     from rpg.service import RPGService
     from rpg.models import RPG
 
     t0 = time.time()
     svc = RPGService.load(str(rpg_path))
 
-    if not dep_graph_path.exists():
-        return {"mode": "feature", "error": f"dep_graph.json not found: {dep_graph_path}"}
-
-    # Load dep_graph without re-scanning AST
-    dg = RPG.load_dep_graph(dep_graph_path)
-    svc.rpg.dep_graph = dg
+    # Prefer the embedded dep_graph that RPGService.load already
+    # attached.  Only touch the standalone file when the embedded copy
+    # is absent (legacy on-disk rpg.json from before the embed
+    # migration).
+    if svc.rpg.dep_graph is None:
+        if not dep_graph_path.exists():
+            return {
+                "mode": "feature",
+                "error": (
+                    f"rpg.json has no embedded dep_graph and no standalone "
+                    f"dep_graph.json found at {dep_graph_path}. "
+                    "Run `cmind script update_graphs.py sync` to rebuild it."
+                ),
+            }
+        # Legacy compat path
+        dg = RPG.load_dep_graph(dep_graph_path)
+        svc.rpg.dep_graph = dg
 
     # Rebuild mappings
     svc.rpg._dep_to_rpg_map = svc.rpg._build_dep_to_rpg_map()
     svc.rpg.rebuild_cross_maps()
 
     # Save RPG (edges will be merged from dep_graph via to_dict)
+    svc.rpg._dep_graph_file = None
     svc.save(str(rpg_path))
 
     return {
@@ -207,21 +259,22 @@ def update_feature(rpg_path: Path, dep_graph_path: Path) -> dict:
 
 def update_full(rpg_path: Path, code_dir: str, workspace_root: str,
                 dep_graph_path: Path) -> dict:
-    """Mode: full — AST scan + mappings + edges + save everything."""
+    """Mode: full — AST scan + mappings + edges, persist into rpg.json."""
     from rpg.service import RPGService
 
     t0 = time.time()
     svc = RPGService.load(str(rpg_path))
 
-    # Rebuild dep_graph from code
-    svc.refresh_dep_graph(code_dir, workspace_root=workspace_root,
-                          save_path=str(dep_graph_path))
+    # Rebuild dep_graph from code; ``save_path=None`` so dep_graph rides
+    # inside rpg.json only.
+    svc.refresh_dep_graph(code_dir, workspace_root=workspace_root)
 
     # Count dep_graph semantic edges that will merge into RPG edges
     dep_semantic_edges = [
         e for e in svc.rpg.get_dep_edges_for_rpg()
     ]
 
+    svc.rpg._dep_graph_file = None
     svc.save(str(rpg_path))
 
     return {
@@ -233,7 +286,6 @@ def update_full(rpg_path: Path, code_dir: str, workspace_root: str,
         "dep_semantic_edges_merged": len(dep_semantic_edges),
         "rpg_nodes": len(svc.rpg._node_index),
         "rpg_edges": len(svc.rpg.edges),
-        "dep_graph_path": str(dep_graph_path),
         "rpg_path": str(rpg_path),
         "duration": round(time.time() - t0, 3),
     }
@@ -248,9 +300,8 @@ def cmd_enrich(rpg_path: Path, code_dir: str, workspace_root: str,
     t0 = time.time()
     svc = RPGService.load(str(rpg_path))
 
-    # Rebuild dep_graph first for accuracy
-    svc.refresh_dep_graph(code_dir, workspace_root=workspace_root,
-                          save_path=str(dep_graph_path))
+    # Rebuild dep_graph first for accuracy (embedded only — single source).
+    svc.refresh_dep_graph(code_dir, workspace_root=workspace_root)
 
     # Run enrichment (skip_dep_rebuild since refresh_dep_graph already did it)
     enrich_result = svc.enrich_from_code(
@@ -262,13 +313,13 @@ def cmd_enrich(rpg_path: Path, code_dir: str, workspace_root: str,
     )
 
     if not dry_run:
+        svc.rpg._dep_graph_file = None
         svc.save(str(rpg_path))
 
     enrich_result.update({
         "mode": "enrich",
         "dry_run": dry_run,
         "rpg_path": str(rpg_path),
-        "dep_graph_path": str(dep_graph_path),
         "duration": round(time.time() - t0, 3),
     })
     return enrich_result
@@ -323,10 +374,11 @@ def cmd_sync(
 
     svc = RPGService.load(str(rpg_path))
 
+    # ``save_path=None``: dep_graph rides inside rpg.json (single source).
+    # The caller's ``svc.save(rpg_path)`` below embeds it.
     sync_result = svc.sync_from_commit_diff(
         code_dir=code_dir,
         workspace_root=workspace_root,
-        save_path=str(dep_graph_path),
         file_limit=file_limit,
         staged_only=staged_only,
         force_full=force_full,
@@ -339,6 +391,7 @@ def cmd_sync(
     if sync_result.get("mode") != "noop":
         enrich_result = svc.enrich_from_code(code_dir, skip_dep_rebuild=True)
 
+    svc.rpg._dep_graph_file = None
     svc.save(str(rpg_path))
 
     # Keep ``rpg.html`` aligned with the freshly-saved ``rpg.json``.
@@ -370,7 +423,6 @@ def cmd_sync(
         "filled": enrich_result.get("filled", 0),
         "groups_created": enrich_result.get("groups_created", 0),
         "rpg_nodes": len(svc.rpg._node_index),
-        "dep_graph_path": str(dep_graph_path),
         "rpg_path": str(rpg_path),
         "viz_path": viz_result.get("viz_path"),
         "viz_error": viz_result.get("viz_error"),
@@ -856,7 +908,13 @@ def main():
 
     # Dispatch
     if command == "dep":
-        result = update_dep_only(code_dir, workspace_root, args.dep_graph)
+        # ``rpg_path`` is preferred (embedded dep_graph); falls back to
+        # writing a standalone dep_graph.json when the workspace has no
+        # rpg.json yet (very first commit before /cmind.encode).
+        result = update_dep_only(
+            code_dir, workspace_root, args.dep_graph,
+            rpg_path=args.rpg,
+        )
     elif command == "mapping":
         result = update_mapping(args.rpg, code_dir, workspace_root, args.dep_graph)
     elif command == "feature":

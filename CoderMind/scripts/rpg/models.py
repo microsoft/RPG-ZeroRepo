@@ -2090,6 +2090,15 @@ class RPG:
     def save_dep_graph(self, path: str) -> None:
         """Serialize dep_graph to an independent JSON file.
 
+        .. deprecated::
+            The dep_graph is now embedded in ``rpg.json`` via
+            ``RPG.to_dict(include_dep_graph=True)`` (the default), and
+            ``RPGService.load`` prefers the embedded copy.  New code
+            should rely on ``svc.save(rpg_path)`` to persist both the
+            tree and the dep_graph in a single file.  This helper is
+            kept so legacy callers and debugging tools that want a
+            standalone ``dep_graph.json`` snapshot keep working.
+
         Wraps ``DependencyGraph.to_dict()`` with additional metadata
         (``code_dir``, ``generated_at``) to produce the schema defined
         in the encoder-decoder integration plan (§3.2).

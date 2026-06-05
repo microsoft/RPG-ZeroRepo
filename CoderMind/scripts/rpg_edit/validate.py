@@ -46,9 +46,12 @@ def main():
     has_dep_graph = svc.rpg.dep_graph is not None
     if not has_dep_graph and not args.dep_graph.exists():
         result = {"type": "error", "error_code": "dep_graph_not_found",
-                  "message": f"dep_graph.json not found: {args.dep_graph}. "
-                             "Run `cmind script update_graphs.py sync` "
-                             "to build it from the current code."}
+                  "message": (
+                      f"rpg.json has no embedded dep_graph and no legacy "
+                      f"standalone dep_graph.json at {args.dep_graph}. "
+                      "Run /cmind.encode to (re)build it; the embedded "
+                      "dep_graph rides inside rpg.json."
+                  )}
         print(json.dumps(result) if args.json else f"Error: {result['message']}")
         return 1
 

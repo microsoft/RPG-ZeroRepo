@@ -25,7 +25,7 @@ _script_dir = Path(__file__).resolve().parent.parent
 if str(_script_dir) not in sys.path:
     sys.path.insert(0, str(_script_dir))
 
-from common.paths import RPG_FILE, DEP_GRAPH_FILE, RPG_HTML_FILE, WORKSPACE_ROOT, ensure_cmind_dir  # noqa: E402
+from common.paths import RPG_FILE, RPG_HTML_FILE, WORKSPACE_ROOT, ensure_cmind_dir  # noqa: E402
 from common.rpg_io import atomic_write_rpg  # noqa: E402
 from common.trajectory import Trajectory  # noqa: E402
 
@@ -101,40 +101,16 @@ def run_encode(
         traj.start_step(step_dep.step_id)
 
         dep_graph_stats = {}
-        dep_graph_output = None
         try:
             rpg.parse_dep_graph(repo_dir)
             if rpg.dep_graph:
-                # Save dep_graph as a standalone file so that:
-                #   1. rpg.json stays small (feature tree + maps only)
-                #   2. git hooks can update dep_graph.json independently
-                #   3. file layout is consistent from first encode onward
-                dep_graph_output = str(DEP_GRAPH_FILE)
-                os.makedirs(os.path.dirname(dep_graph_output), exist_ok=True)
-                dg_dict = rpg.dep_graph.to_dict(
-                    dep_to_rpg_map=rpg._dep_to_rpg_map,
-                )
-                # Atomic write: a kill mid-write would otherwise leave
-                # the next ``cmind`` invocation with a truncated
-                # dep_graph.json that fails JSON parse.
-                atomic_write_rpg(
-                    dep_graph_output, dg_dict,
-                    indent=2, ensure_ascii=False,
-                )
-
-                # Store a relative reference from rpg.json's directory to
-                # dep_graph.json so the layout is portable.  Fall back to
-                # the absolute path when they live in different trees
-                # (e.g. user passed --output to a custom location).
-                rpg_dir = Path(output).resolve().parent
-                dep_graph_resolved = Path(dep_graph_output).resolve()
-                try:
-                    rpg._dep_graph_file = str(
-                        dep_graph_resolved.relative_to(rpg_dir)
-                    )
-                except ValueError:
-                    rpg._dep_graph_file = str(dep_graph_resolved)
-
+                # The dep_graph is embedded in rpg.json by ``rpg.to_dict()``
+                # (the default is ``include_dep_graph=True``), so we no
+                # longer write a standalone ``dep_graph.json``. Single
+                # source of truth eliminates the encoder-vs-hook drift
+                # that used to bite ``RPGService.load`` when the two files
+                # disagreed.  Legacy on-disk ``dep_graph.json`` files keep
+                # loading via ``RPGService.load``'s compat path.
                 dep_graph_stats = {
                     "dep_nodes": rpg.dep_graph.G.number_of_nodes(),
                     "dep_edges": rpg.dep_graph.G.number_of_edges(),

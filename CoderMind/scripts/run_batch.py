@@ -427,7 +427,6 @@ def _refresh_dep_graph_safe(
         from rpg.service import RPGService
 
         rpg_path = REPO_RPG_FILE
-        dep_graph_path = DEP_GRAPH_FILE
         if not rpg_path.exists():
             return
 
@@ -443,12 +442,14 @@ def _refresh_dep_graph_safe(
                 svc.save(str(rpg_path))
                 return
 
+            # ``save_path=None``: dep_graph rides inside rpg.json. The
+            # subsequent ``svc.save(rpg_path)`` embeds it.
             result = svc.sync_from_file_list(
                 file_paths=py_files,
                 code_dir=str(repo_path),
                 workspace_root=str(WORKSPACE_ROOT),
-                save_path=str(dep_graph_path),
             )
+            svc.rpg._dep_graph_file = None
             svc.save(str(rpg_path))
             logger.info(
                 "dep_graph refreshed (mode=%s reason=%s): %d nodes, %d dep→rpg mappings",
@@ -462,8 +463,8 @@ def _refresh_dep_graph_safe(
         svc.refresh_dep_graph(
             str(repo_path),
             workspace_root=str(WORKSPACE_ROOT),
-            save_path=str(dep_graph_path),
         )
+        svc.rpg._dep_graph_file = None
         svc.save(str(rpg_path))
         logger.info("dep_graph refreshed (full): %d nodes, %d dep→rpg mappings",
                     len(svc.rpg.dep_graph.G.nodes()),
