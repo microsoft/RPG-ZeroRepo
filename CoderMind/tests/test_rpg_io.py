@@ -108,6 +108,46 @@ class TestAtomicWrite:
         loaded = json.loads(target.read_text(encoding="utf-8"))
         assert loaded["name"] == "测试 \u2014 ✓"
 
+    def test_forwards_dump_kwargs(self, tmp_path: Path) -> None:
+        """``**dump_kwargs`` is forwarded to ``json.dump`` so callers
+        that previously needed ``default=`` etc. can migrate without
+        losing their custom serialiser hooks."""
+        target = tmp_path / "rpg.json"
+
+        class _NotSerialisable:
+            def to_dict(self):
+                return {"recovered": True}
+
+        # Without ``default=`` this would raise TypeError; passing the
+        # legacy lambda the encoder used proves the kwarg reaches json.dump.
+        rpg_io.atomic_write_rpg(
+            target,
+            {"obj": _NotSerialisable()},
+            default=lambda o: o.to_dict() if hasattr(o, "to_dict") else str(o),
+        )
+        assert json.loads(target.read_text()) == {"obj": {"recovered": True}}
+
+    def test_no_partial_file_on_serialise_failure(self, tmp_path: Path) -> None:
+        """A TypeError mid-``json.dump`` (no ``default=`` for an
+        unserialisable object) must leave the original file intact and
+        clean up the ``.tmp`` — the bug we kept hitting when the bench
+        killed cobra encode mid-write."""
+        target = tmp_path / "rpg.json"
+        target.write_text('{"existing": "intact"}')
+
+        class _Bad:
+            pass
+
+        with pytest.raises(TypeError):
+            rpg_io.atomic_write_rpg(target, {"obj": _Bad()})
+
+        # Original survives because os.replace never ran.
+        assert json.loads(target.read_text()) == {"existing": "intact"}
+        # The .tmp file must be cleaned up so a re-run doesn't see stale
+        # crud from the failed attempt.
+        tmp = target.with_suffix(".json.tmp")
+        assert not tmp.exists()
+
 
 # ---------------------------------------------------------------------------
 # safe_load_rpg — success path + propagation of FileNotFoundError

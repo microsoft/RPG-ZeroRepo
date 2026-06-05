@@ -26,6 +26,7 @@ if str(_script_dir) not in sys.path:
     sys.path.insert(0, str(_script_dir))
 
 from common.paths import RPG_FILE, DEP_GRAPH_FILE, RPG_HTML_FILE, WORKSPACE_ROOT, ensure_cmind_dir  # noqa: E402
+from common.rpg_io import atomic_write_rpg  # noqa: E402
 from common.trajectory import Trajectory  # noqa: E402
 
 
@@ -113,8 +114,13 @@ def run_encode(
                 dg_dict = rpg.dep_graph.to_dict(
                     dep_to_rpg_map=rpg._dep_to_rpg_map,
                 )
-                with open(dep_graph_output, "w", encoding="utf-8") as dgf:
-                    json.dump(dg_dict, dgf, indent=2, ensure_ascii=False)
+                # Atomic write: a kill mid-write would otherwise leave
+                # the next ``cmind`` invocation with a truncated
+                # dep_graph.json that fails JSON parse.
+                atomic_write_rpg(
+                    dep_graph_output, dg_dict,
+                    indent=2, ensure_ascii=False,
+                )
 
                 # Store a relative reference from rpg.json's directory to
                 # dep_graph.json so the layout is portable.  Fall back to
@@ -145,8 +151,12 @@ def run_encode(
 
         result_data = rpg.to_dict()
 
-        with open(output, "w", encoding="utf-8") as fh:
-            json.dump(result_data, fh, indent=2, ensure_ascii=False)
+        # Atomic write of the central pipeline artefact. A killed
+        # encode used to truncate rpg.json and brick downstream
+        # stages (skeleton / func_design / code_gen all read it);
+        # now the previous good rpg.json survives any interrupted
+        # write.
+        atomic_write_rpg(output, result_data, indent=2, ensure_ascii=False)
 
         output_size = os.path.getsize(output)
         traj.complete_step(step_save.step_id, {

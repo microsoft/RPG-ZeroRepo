@@ -31,6 +31,7 @@ from common.llm_types import (
     SystemMessage,
     UserMessage,
 )
+from common.rpg_io import atomic_write_rpg
 from common.utils import (
     exclude_files,
     normalize_path,
@@ -493,8 +494,13 @@ class RPGParser:
         )
 
         if save_path:
-            with open(save_path, "w") as f:
-                json.dump(final_result, f, indent=4, default=lambda o: o.to_dict() if hasattr(o, 'to_dict') else str(o))
+            # Atomic write so a kill mid-dump doesn't truncate the
+            # intermediate parsed-tree snapshot (resumed runs read it).
+            atomic_write_rpg(
+                save_path, final_result,
+                indent=4,
+                default=lambda o: o.to_dict() if hasattr(o, 'to_dict') else str(o),
+            )
 
         self.logger.info("Features parsed: files=%d", len(file2feature))
 
@@ -551,8 +557,13 @@ class RPGParser:
         }
 
         if save_path:
-            with open(save_path, "w") as f:
-                json.dump(final_result, f, indent=4, default=lambda o: o.to_dict() if hasattr(o, 'to_dict') else str(o))
+            # Atomic write of the final encoder result; see the same
+            # note on the parsed-tree snapshot above.
+            atomic_write_rpg(
+                save_path, final_result,
+                indent=4,
+                default=lambda o: o.to_dict() if hasattr(o, 'to_dict') else str(o),
+            )
 
         self.logger.info("RPG refactoring done.")
         self.logger.info("=== RPG parsing pipeline finished ===")

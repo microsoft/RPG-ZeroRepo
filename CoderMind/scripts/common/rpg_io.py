@@ -66,6 +66,7 @@ def atomic_write_rpg(
     *,
     indent: int = 2,
     ensure_ascii: bool = False,
+    **dump_kwargs: Any,
 ) -> None:
     """Serialise ``data`` to ``path`` atomically as JSON.
 
@@ -75,14 +76,22 @@ def atomic_write_rpg(
 
     The signature matches ``json.dump`` for indent / ensure_ascii so
     callers swapping ``open(path, "w") + json.dump`` for this helper
-    don't have to rethink their JSON formatting choices.
+    don't have to rethink their JSON formatting choices. Additional
+    ``**dump_kwargs`` are forwarded to ``json.dump`` (e.g. ``default=``
+    for non-serialisable encoder rounds), letting every legacy caller
+    migrate without losing custom serialiser hooks.
     """
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
     tmp = path.with_suffix(path.suffix + ".tmp")
     try:
         with open(tmp, "w", encoding="utf-8") as f:
-            json.dump(data, f, indent=indent, ensure_ascii=ensure_ascii)
+            json.dump(
+                data, f,
+                indent=indent,
+                ensure_ascii=ensure_ascii,
+                **dump_kwargs,
+            )
             f.write("\n")
             # fsync gives us strong durability guarantees: an os.replace
             # immediately after a crash could otherwise expose the

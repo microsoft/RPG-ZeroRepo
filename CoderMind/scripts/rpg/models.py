@@ -2093,15 +2093,20 @@ class RPG:
         Wraps ``DependencyGraph.to_dict()`` with additional metadata
         (``code_dir``, ``generated_at``) to produce the schema defined
         in the encoder-decoder integration plan (§3.2).
+
+        Writes are atomic: a crash during ``json.dump`` leaves the
+        existing ``dep_graph.json`` intact (instead of the truncated
+        half-file that the previous ``open('w') + json.dump`` pattern
+        produced when the encoder was killed mid-write).
         """
         if self.dep_graph is None:
             raise ValueError("No dep_graph attached; call set_dep_graph() first")
         from datetime import datetime, timezone
+        from common.rpg_io import atomic_write_rpg
         raw = self.dep_graph.to_dict(dep_to_rpg_map=self._dep_to_rpg_map)
         raw["code_dir"] = self._dep_graph_code_dir
         raw["generated_at"] = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S")
-        with open(str(path), "w", encoding="utf-8") as f:
-            json.dump(raw, f, ensure_ascii=False, indent=2)
+        atomic_write_rpg(str(path), raw, ensure_ascii=False, indent=2)
 
     @staticmethod
     def load_dep_graph(path: str) -> "DependencyGraph":
@@ -2811,9 +2816,18 @@ class RPG:
         return node
 
     def save_json(self, path: str, ensure_ascii: bool = False, indent: int = 2):
-        """Save to JSON file."""
-        with open(path, "w", encoding="utf-8") as f:
-            json.dump(self.to_dict(), f, ensure_ascii=ensure_ascii, indent=indent)
+        """Save to JSON file.
+
+        Routes through :func:`common.rpg_io.atomic_write_rpg` so a
+        crash mid-write leaves the previous ``rpg.json`` intact rather
+        than truncated. Loaders (``safe_load_rpg``) can then fall back
+        to the last known-good version from the inner-git snapshot.
+        """
+        from common.rpg_io import atomic_write_rpg
+        atomic_write_rpg(
+            str(path), self.to_dict(),
+            ensure_ascii=ensure_ascii, indent=indent,
+        )
 
     @classmethod
     def load_json(cls, path: str) -> "RPG":

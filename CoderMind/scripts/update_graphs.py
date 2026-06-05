@@ -132,8 +132,12 @@ def update_dep_only(code_dir: str, workspace_root: str, dep_graph_path: Path) ->
     from datetime import datetime, timezone
     raw["generated_at"] = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S")
 
-    with open(str(dep_graph_path), "w", encoding="utf-8") as f:
-        json.dump(raw, f, ensure_ascii=False, indent=2)
+    # Atomic write so a post-commit hook killed mid-write (Ctrl-C,
+    # OOM, lost shell) leaves the previous dep_graph.json intact
+    # instead of a half-truncated file the next ``cmind`` call would
+    # crash on.
+    from common.rpg_io import atomic_write_rpg
+    atomic_write_rpg(str(dep_graph_path), raw, ensure_ascii=False, indent=2)
 
     return {
         "mode": "dep",
