@@ -13,9 +13,8 @@ Format::
     METHOD     :  "rel/posix/path.py::Class::method"
 
 Disambiguation of kind (function vs class) is in ``NodeMetaData.type_name``,
-NOT in the path itself.  This avoids the historical duplication of
-``::class Foo`` / ``::function bar`` prefixes that drifted into three
-incompatible variants across the codebase.
+NOT in the path itself.  This keeps path strings canonical and avoids
+duplicating kind prefixes such as ``::class Foo`` / ``::function bar``.
 
 Dep-graph nodes use a related but distinct convention
 (``"foo.py:Class.method"`` with a single colon and dot separator); the

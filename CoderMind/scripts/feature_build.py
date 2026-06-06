@@ -320,9 +320,8 @@ def apply_changes(tree: Dict[str, Any], paths: List[str]) -> Dict[str, Any]:
             if leaf not in current[parent_key]:
                 current[parent_key].append(leaf)
         elif isinstance(current[parent_key], dict):
-            # If it's a dict (previously a branch node), we have a conflict
-            # This means some paths treat this as a leaf parent, others as a branch
-            # Keep it as a dict and add the leaf as a key with empty value
+            # This path segment is used both as a leaf parent and as a
+            # branch. Keep the branch shape and add the leaf key.
             if leaf not in current[parent_key]:
                 current[parent_key][leaf] = []
         else:

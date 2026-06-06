@@ -151,7 +151,7 @@ class RPGVersionControl:
         return next_version
 
     def rollback(self, version: int) -> RPG:
-        """Restore an RPG from a previously saved version.
+        """Restore an RPG from a saved version.
 
         The restored RPG is also written to the main
         ``<data_dir>/rpg.json`` file so downstream tools can read it.

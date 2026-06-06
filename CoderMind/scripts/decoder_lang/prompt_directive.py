@@ -1,22 +1,17 @@
 """Helpers for injecting a language-specific preamble into decoder prompts.
 
-Phase 5 ships only the wiring \u2014 a small ``language_directive`` builder
-that the prompt-rendering call sites can prepend to any system prompt
-when the target language is not Python. Bulk substitution of literal
-``"Python"`` / ``".py"`` / ``"pytest"`` strings across the prompt
-files is deferred to Phase 6 (real cobra/Go decoder run) so each
-edit is driven by an actual quality signal rather than a textual
-diff exercise.
+The ``language_directive`` builder lets prompt-rendering call sites
+prepend target-language guidance to a system prompt when the requested
+backend is not Python. Prompt templates can keep their normal body
+while receiving a compact language preamble at render time.
 
 Design:
 
 * When the resolved language is ``"python"`` the directive is the
-  empty string \u2014 prompts render byte-identically to the pre-Phase-5
-  output, so existing Python pipelines are zero-impact.
+    empty string, so existing Python prompt output is unchanged.
 * When the language differs, a short directive (display name,
   one-line style note, markdown fence reminder) is prepended so the
-  LLM at least *knows* the target language even before per-prompt
-  rewrites land.
+  LLM receives the target-language constraints before the task prompt.
 """
 from __future__ import annotations
 

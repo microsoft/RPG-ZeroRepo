@@ -24,9 +24,10 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 from rpg.code_unit import ParsedFile, CodeUnit
 
-# Phase 3 (decoder multi-language): all AST inspection routes through
-# the decoder language backend. Direct ``import ast`` above stays for
-# now (call sites migrate incrementally; final cleanup removes it).
+# AST inspection routes through the decoder language backend so
+# code-structure extraction can vary by target language. The direct
+# ``ast`` import supports Python-specific node inspection for docstrings
+# and annotation syntax below.
 from decoder_lang import get_backend
 
 # Import common LLMClient with trajectory support
@@ -242,14 +243,12 @@ class DependencyCollector:
             file_path: Path of the file containing this code
             base_class_files: Mapping of class names to their file paths
         """
-        # Phase 3: AST walk routes through PythonBackend.list_code_units.
-        # ``_extract_name_from_node`` and ``_extract_type_names`` still
-        # need raw ast nodes (Subscript / BinOp / Tuple) for type-name
-        # inspection; those are read from ``unit.extra['ast_node']``
-        # which the backend always populates for Python sources.
+        # Type-name extraction below needs raw Python AST nodes
+        # (Subscript / BinOp / Tuple). PythonBackend stores the raw
+        # node in ``unit.extra['ast_node']`` for each code unit.
         backend = get_backend("python")
         units = backend.list_code_units(code, file_path)
-        # Empty list covers the historical ``except SyntaxError: return`` path.
+        # Invalid interface code yields no dependency edges here.
         for unit in units:
             node = (unit.extra or {}).get("ast_node")
             if node is None:
@@ -264,11 +263,8 @@ class DependencyCollector:
                         parent_file = base_class_files.get(parent_name)
                         self.add_inheritance(child_class, parent_name, file_path, parent_file)
 
-            # Extract type references from function / method annotations.
-            # NOTE: original code matched only ``FunctionDef`` /
-            # ``AsyncFunctionDef`` and ignored class context, so we
-            # process both ``function`` and ``method`` unit types here
-            # to keep the dependency edges identical.
+            # Process both top-level functions and class methods so
+            # annotations inside classes contribute dependency edges.
             if unit.unit_type in ("function", "method"):
                 func_name = unit.name
                 for arg in getattr(node.args, "args", []):
@@ -763,11 +759,10 @@ class GlobalInterfaceRegistry:
     def _extract_signature_summary(code: str, unit_type: str, bare_name: str) -> str:
         """Extract a concise signature summary from interface code.
 
-        Phase 3: AST inspection routes through ``PythonBackend.list_code_units``
-        and ``format_signature`` (no direct ``ast.parse`` here). For
-        classes we still need ``node.bases`` to render the base-class
-        list — we read it off ``unit.extra['ast_node']`` (the raw
-        ``ClassDef`` the backend preserves for exactly this use case).
+        Declaration discovery routes through ``PythonBackend.list_code_units``
+        and ``format_signature``. Class summaries still need direct
+        base-class names, so they read the preserved ``ClassDef`` from
+        ``unit.extra['ast_node']``.
         """
         if not code:
             return bare_name
@@ -814,20 +809,13 @@ class GlobalInterfaceRegistry:
             return f"{bare_name}{bases_str} [{', '.join(methods[:5])}]"
         return f"{bare_name}{bases_str}"
 
-    # ``_format_func_signature`` was the historical formatter that took
-    # a raw ast node. Phase 3 routes signature formatting through
-    # ``PythonBackend.format_signature`` which accepts an ``LPCodeUnit``
-    # and reads the same fields. The free function is retained as a
-    # thin shim so any external import paths keep working; new code
-    # should call ``backend.format_signature`` directly.
     @staticmethod
     def _format_func_signature(node) -> str:
         """Format a function/method AST node into a concise signature string.
 
-        Phase 3 compatibility wrapper: builds a synthetic
-        :class:`LPCodeUnit` around ``node`` and delegates to
-        :meth:`PythonBackend.format_signature`. New callers should use
-        ``backend.format_signature(unit)`` directly.
+        Compatibility shim for callers that still pass raw AST nodes.
+        Prefer :meth:`PythonBackend.format_signature` when an
+        :class:`LPCodeUnit` is already available.
         """
         from lang_parser import LPCodeUnit  # local import to avoid top-level dep
 
@@ -871,13 +859,10 @@ def cross_validate_imports_vs_calls(
     warnings = []
     declared_set = set(declared_calls)
 
-    # Phase 3 (decoder multi-language): route AST parsing through the
-    # Python backend so this function no longer imports ``ast`` itself.
-    # ``list_imports`` returns one LPDependency per imported symbol,
-    # with ``extra["module"]`` holding the source module and
-    # ``extra["imported"]`` present only for ``from X import Y`` (the
-    # discriminator between ImportFrom and Import). On syntax error
-    # the backend returns ``[]`` — same as the old try/except branch.
+    # Import discovery routes through the Python backend. ``list_imports``
+    # returns one LPDependency per imported symbol; ``extra["module"]``
+    # holds the source module and ``extra["imported"]`` is present for
+    # ``from X import Y`` statements. Syntax errors yield an empty list.
     backend = get_backend("python")
     for dep in backend.list_imports(code, file_path):
         extra = dep.extra or {}
@@ -885,8 +870,7 @@ def cross_validate_imports_vs_calls(
 
         if "imported" in extra:
             # ``from <module> import <imported>`` — symbol is the
-            # imported name (alias.asname has no effect on the lookup
-            # key, matching the historical behaviour).
+            # imported name. Aliases do not affect registry lookup.
             symbol = extra.get("imported") or ""
             imported_from = module
             message_suffix = (
@@ -896,8 +880,7 @@ def cross_validate_imports_vs_calls(
             )
         else:
             # ``import <module>`` — symbol is the last dotted segment
-            # of the module path (mirrors the old
-            # ``alias.name.split(".")[-1]`` rule).
+            # of the module path used for registry lookup.
             full_name = module
             symbol = full_name.rsplit(".", 1)[-1] if "." in full_name else full_name
             imported_from = full_name
@@ -932,9 +915,7 @@ def extract_top_level_definitions(code: str) -> Tuple[List[str], List[str]]:
     """Extract top-level function and class names from code."""
     functions = []
     classes = []
-    # Phase 3: walk via the Python backend; filter to top-level units
-    # (parent is None) to match the original ``ast.iter_child_nodes``
-    # behaviour that only inspected direct children of the module.
+    # Only inspect direct module children (parent is None).
     for unit in get_backend("python").list_code_units(code):
         if unit.parent is not None:
             continue
@@ -948,10 +929,8 @@ def extract_top_level_definitions(code: str) -> Tuple[List[str], List[str]]:
 def check_has_docstring(code: str) -> Tuple[bool, str]:
     """Check if top-level functions/classes have docstrings."""
     errors = []
-    # Phase 3: walk via the Python backend. Docstring inspection still
-    # needs the raw ast node (``ast.get_docstring``), read from
-    # ``unit.extra['ast_node']``. Only inspect top-level definitions
-    # (parent is None) to preserve the original behaviour.
+    # Docstring inspection needs the raw AST node for
+    # ``ast.get_docstring``. Only inspect direct module children.
     for unit in get_backend("python").list_code_units(code):
         if unit.parent is not None:
             continue
@@ -2163,18 +2142,15 @@ class InterfaceOrchestrator:
             if not file_path or not code:
                 continue
             
-            # Parse code to extract class and type names.
-            # Phase 3: walk via the Python backend so this loop no
-            # longer uses stdlib ``ast`` directly. Backend returns an
-            # empty list on syntax error — matches the
-            # ``except SyntaxError: continue`` branch one-to-one.
+            # Parse code through the Python backend so declaration
+            # discovery is shared with other interface-analysis paths.
+            # Syntax errors yield an empty unit list.
             for unit in get_backend("python").list_code_units(code, file_path):
                 if unit.unit_type == "class":
                     mapping[unit.name] = file_path
                 elif unit.unit_type in ("function", "method"):
-                    # The historical walk used ``ast.walk`` which
-                    # surfaces nested function defs too; keep the same
-                    # behaviour by mapping every function-like name.
+                    # Map every function-like name so nested callable
+                    # declarations can still satisfy dependency lookups.
                     mapping[unit.name] = file_path
         
         # Process data structures (only those with file_path already assigned)
@@ -2186,9 +2162,9 @@ class InterfaceOrchestrator:
                 if not file_path or not code:
                     continue
                 
-                # Phase 3: route through PythonBackend so this loop no
-                # longer imports ``ast`` directly. Empty list mirrors
-                # the previous ``except SyntaxError: continue`` path.
+                # Parse through PythonBackend to share class discovery
+                # with interface dependency analysis. Syntax errors
+                # yield an empty unit list.
                 for unit in get_backend("python").list_code_units(code, file_path):
                     if unit.unit_type == "class":
                         mapping[unit.name] = file_path

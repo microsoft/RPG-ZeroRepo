@@ -427,8 +427,8 @@ def test_install_post_commit_hook_writes_script(tmp_path):
     # Must unset GIT_INDEX_FILE to avoid hook env var leaking into
     # background worktree operations.
     assert "GIT_INDEX_FILE" in content
-    # Detach via nohup (POSIX, portable to macOS).  setsid was used
-    # previously but is util-linux-only and silently absent on macOS.
+    # Detach via nohup, which is POSIX and portable to macOS;
+    # util-linux-specific process management is not available there.
     assert "nohup" in content
     assert "setsid" not in content
     # Atomic lock via mkdir (the only POSIX-atomic exclusive-create
@@ -456,7 +456,7 @@ def test_install_post_commit_hook_is_idempotent(tmp_path):
 
 
 def test_workspace_root_resolution_prefers_cwd_over_env(tmp_path, monkeypatch):
-    """Regression: hooks spawned by ``git`` always have cwd at the repo root.  If a parent process previously set ``CMIND_WORKSPACE`` to a different workspace (e.g. the developer's CoderMind dev env), the inherited env var must NOT override the hook's actual workspace."""
+    """Git hooks must prefer the repository cwd over inherited workspace env."""
     # Set up two distinct workspaces
     real_ws = tmp_path / "real-ws"
     (real_ws / ".cmind").mkdir(parents=True)

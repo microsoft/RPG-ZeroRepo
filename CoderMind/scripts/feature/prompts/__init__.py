@@ -1,10 +1,9 @@
 """LLM prompt templates for feature-related stages.
 
-This package collects prompt templates grouped by stage.  The historical
-single-file module ``feature/prompts.py`` is preserved as
-``feature.prompts.legacy`` and re-exported here so existing imports
-(``from feature.prompts import PROMPT_TEMPLATE_BUILD_FEATURE`` etc.)
-continue to work unchanged.
+This package collects prompt templates grouped by stage.  Compatibility
+prompts live in ``feature.prompts.legacy`` and are re-exported here so
+existing imports (``from feature.prompts import PROMPT_TEMPLATE_BUILD_FEATURE``
+etc.) continue to work unchanged.
 
 New stages add their prompts in dedicated submodules and re-export from
 here as needed.

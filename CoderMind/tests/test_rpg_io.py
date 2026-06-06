@@ -110,8 +110,7 @@ class TestAtomicWrite:
 
     def test_forwards_dump_kwargs(self, tmp_path: Path) -> None:
         """``**dump_kwargs`` is forwarded to ``json.dump`` so callers
-        that previously needed ``default=`` etc. can migrate without
-        losing their custom serialiser hooks."""
+        can pass custom serialiser hooks such as ``default=``."""
         target = tmp_path / "rpg.json"
 
         class _NotSerialisable:

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Phase 1 feature construction facade orchestrator."""
+"""Feature construction facade orchestrator."""
 
 from __future__ import annotations
 
@@ -224,7 +224,7 @@ def _print_probe_summary(states: list[StageState]) -> None:
     if first_pending:
         print(f"Next pending stage: {first_pending}")
     else:
-        print("All Phase 1 stages are up-to-date.")
+        print("All feature construction stages are up-to-date.")
     print()
     print(_format_table(states))
 
@@ -326,11 +326,11 @@ def _reset_output_if_needed(state: StageState) -> None:
 def _parse_args(argv: Optional[list[str]] = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         prog="feature_construct.py",
-        description="Run the Phase 1 feature construction pipeline with automatic resume.",
+        description="Run the feature construction pipeline with automatic resume.",
     )
     parser.add_argument("--check-only", action="store_true", help="Probe all stages and exit.")
     parser.add_argument("--json", action="store_true", help="With --check-only, emit JSON.")
-    parser.add_argument("--force", action="store_true", help="Rebuild all Phase 1 stages.")
+    parser.add_argument("--force", action="store_true", help="Rebuild all feature construction stages.")
     parser.add_argument("--dry-run", action="store_true", help="Print commands without executing them.")
     parser.add_argument("--verbose", action="store_true", help="Forward native verbose logging flags.")
     parser.add_argument("--no-trajectory", action="store_true", help="Disable trajectory recording where supported.")
@@ -413,7 +413,7 @@ def main(argv: Optional[list[str]] = None) -> int:
 
     runnable = [state for state in states if state.will_run]
     if not runnable:
-        print("All Phase 1 stages are already complete — nothing to do.")
+        print("All feature construction stages are already complete — nothing to do.")
         print("Use `--force` to rebuild from scratch.")
         print("Next: `/cmind.plan` to build the Repository Planning Graph (RPG).")
         return 0

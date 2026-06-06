@@ -1,4 +1,4 @@
-"""Unit tests for the Phase 1 feature construction orchestrator."""
+"""Unit tests for the feature construction orchestrator."""
 
 from __future__ import annotations
 

@@ -1,10 +1,10 @@
 """Production :class:`LanguageBackend` implementation for Go.
 
-Phase 2 ships the **skeleton-relevant subset** of the Go backend: the
-methods needed for ``FileDesigner`` to emit ``.go`` files and skip
-``__init__.py`` package markers. AST / test-runner / output-parser
-methods stay stubbed with :class:`NotImplementedError` until Phase 3
-(func_design) and Phase 4 (code_gen) land.
+This backend currently implements the skeleton-relevant subset needed
+for ``FileDesigner`` to emit ``.go`` files and skip ``__init__.py``
+package markers. Code-structure, test-runner, and output-parser
+methods raise :class:`NotImplementedError` until the decoder stages use
+Go-specific implementations for those behaviours.
 
 Reference for Go conventions consulted:
 * ``$GOROOT/src`` and Go's effective package guide — directories *are*
@@ -43,10 +43,10 @@ class GoBackend:
     """Skeleton-stage :class:`LanguageBackend` for Go.
 
     See :class:`decoder_lang.backend.LanguageBackend` for method
-    contracts. Phase 2 implements: file/test classification, the
-    no-op package marker, identifier rules, and prompt hints. AST and
-    test-runner methods raise :class:`NotImplementedError` to keep
-    Phase 2 from masking gaps that Phase 3 / 4 must fill.
+    contracts. Implemented methods cover file/test classification, the
+    no-op package marker, identifier rules, and prompt hints. Code
+    analysis and test-runner methods raise :class:`NotImplementedError`
+    so unsupported paths fail explicitly.
     """
 
     name = "go"
@@ -96,50 +96,47 @@ class GoBackend:
         return cleaned
 
     # ------------------------------------------------------------------
-    # 2. Code structure — Phase 3 will route through lang_parser.go
+    # 2. Code structure — not implemented for Go yet
     # ------------------------------------------------------------------
 
     def has_placeholder(self, code: str, path: str = "<string>") -> bool:
         raise NotImplementedError(
-            "GoBackend.has_placeholder is not used until Phase 3; "
-            "Phase 2 only wires the skeleton stage.",
+            "GoBackend.has_placeholder is not implemented; "
+            "the current Go backend supports skeleton-stage behaviour only.",
         )
 
     def syntax_check(self, code: str, path: str = "<string>") -> tuple[bool, str | None]:
         raise NotImplementedError(
-            "GoBackend.syntax_check is not used until Phase 3.",
+            "GoBackend.syntax_check is not implemented.",
         )
 
     def list_code_units(self, code: str, path: str = "<string>") -> list:
         raise NotImplementedError(
-            "GoBackend.list_code_units will be implemented when "
-            "func_design starts driving non-Python code (Phase 4+).",
+            "GoBackend.list_code_units is not implemented.",
         )
 
     def format_signature(self, unit) -> str:  # type: ignore[override]
         raise NotImplementedError(
-            "GoBackend.format_signature will be implemented when "
-            "func_design starts driving non-Python code (Phase 4+).",
+            "GoBackend.format_signature is not implemented.",
         )
 
     def list_imports(self, code: str, path: str = "<string>") -> list:
         raise NotImplementedError(
-            "GoBackend.list_imports will be implemented when "
-            "func_design starts driving non-Python code (Phase 4+).",
+            "GoBackend.list_imports is not implemented.",
         )
 
     # ------------------------------------------------------------------
-    # 3. Build / test environment — Phase 4 will wire ``go test``
+    # 3. Build / test environment — not implemented for Go yet
     # ------------------------------------------------------------------
 
     def detect_env(self, repo_root: Path) -> EnvHandle | None:
         raise NotImplementedError(
-            "GoBackend.detect_env is not used until Phase 4.",
+            "GoBackend.detect_env is not implemented.",
         )
 
     def ensure_env(self, repo_root: Path) -> EnvHandle:
         raise NotImplementedError(
-            "GoBackend.ensure_env is not used until Phase 4.",
+            "GoBackend.ensure_env is not implemented.",
         )
 
     def test_command(
@@ -148,7 +145,7 @@ class GoBackend:
         selectors: list[str] | None = None,
     ) -> list[str]:
         raise NotImplementedError(
-            "GoBackend.test_command is not used until Phase 4.",
+            "GoBackend.test_command is not implemented.",
         )
 
     def install_deps_command(
@@ -157,12 +154,12 @@ class GoBackend:
         deps: list[str],
     ) -> list[str] | None:
         raise NotImplementedError(
-            "GoBackend.install_deps_command is not used until Phase 4.",
+            "GoBackend.install_deps_command is not implemented.",
         )
 
     def parse_test_output(self, raw: str, exit_code: int) -> TestRunResult:
         raise NotImplementedError(
-            "GoBackend.parse_test_output is not used until Phase 4.",
+            "GoBackend.parse_test_output is not implemented.",
         )
 
     # ------------------------------------------------------------------

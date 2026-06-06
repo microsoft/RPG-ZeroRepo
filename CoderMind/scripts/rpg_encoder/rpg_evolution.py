@@ -53,8 +53,8 @@ def _filter_non_test_py_files(path: str) -> bool:
     """Return True if *path* is a parseable, non-test source file.
 
     Used as a filter predicate when walking the repository directory.
-    The name keeps the historical ``py`` suffix for API stability, but the
-    predicate now accepts any language supported by ``lang_parser``.
+    The function keeps its public name for API stability, but the
+    predicate accepts any language supported by ``lang_parser``.
     """
     if not is_supported_source(path):
         return False
@@ -332,14 +332,10 @@ class RPGEvolution:
     ) -> None:
         """Update the dependency graph and rebuild RPG node index.
 
-        Routes through :class:`rpg.service.RPGService` so the dep_graph
-        is **persisted to disk** (``save_path``) and stays in sync with
-        ``self.rpg.dep_graph``.  The previous implementation called
-        :meth:`RPG.parse_dep_graph` directly, which only mutated the
-        in-memory ``rpg.dep_graph`` — leaving ``dep_graph.json`` stale
-        whenever the encoder wrote ``rpg.json`` separately afterwards.
-        That drift caused MCP-server / ``update_graphs.py status`` reads
-        to return inconsistent data after ``/cmind.update_rpg``.
+        Routes through :class:`rpg.service.RPGService` so the in-memory
+        dep_graph, dep-to-RPG mappings, and cross maps are refreshed
+        together. When ``save_path`` is provided, a standalone dep_graph
+        snapshot is also written for compatibility tooling.
 
         Args:
             rpg: The RPG to attach the rebuilt dep_graph to.

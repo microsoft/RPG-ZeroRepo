@@ -1,15 +1,14 @@
 #!/usr/bin/env python3
 """Task selection helpers for the codegen batch orchestrator.
 
-This module hosts the two task-picker helpers that were originally
-defined in the now-deleted top-level ``prepare_batch.py``:
+This module hosts the two task-picker helpers used by
+``scripts.run_batch``:
 
 * :func:`get_next_pending_task_id` — pick the next single task to run,
   with git-based auto-recovery and integration-test deferral.
 * :func:`get_next_merged_tasks` — pick a same-file group of pending
   implementation tasks for "file-merge" mode batches.
 
-Both are consumed by ``scripts.run_batch``'s Module 5 orchestrator.
 They share three private helpers — ``_git_grep_pattern``,
 ``_git_has_gen_code_commit``, ``_has_failed_impl_dependencies`` — kept
 local to this module since they have no callers elsewhere.

@@ -1,14 +1,9 @@
 """LLM prompt templates for the ``feature_spec`` stage.
 
-The Phase-1 ``feature_spec`` stage converts raw requirements (either a free-
-form user description or a set of ``docs/*.md`` files) into a single,
-strictly-validated ``feature_spec.json``.
-
-These prompts replace the historical 1008-line
-``templates/commands/feature_spec.md`` slash-command document.  The
-intermediate Markdown artefacts (``evidence/*.md``, ``feature_spec.md``,
-``features/FT-*.md``) are *no longer generated*; the LLM emits the final
-JSON directly, validated against ``feature.schemas.spec.FeatureSpecOutput``.
+The ``feature_spec`` stage converts raw requirements (either a free-form
+user description or a set of ``docs/*.md`` files) into a single,
+strictly-validated ``feature_spec.json``. The LLM emits the final JSON
+directly, validated against ``feature.schemas.spec.FeatureSpecOutput``.
 
 Schema knowledge — field meanings, ID conventions, MIU principle, etc. —
 lives both here (in the prompt body) and in the Pydantic ``Field``

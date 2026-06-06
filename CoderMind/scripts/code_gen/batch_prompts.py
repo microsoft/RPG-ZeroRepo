@@ -408,12 +408,10 @@ def _build_api_summary(repo_path: Path, source_files: List[str], max_chars: int 
     Returns:
         Formatted string of file → class/function signatures.
     """
-    # Phase 4: route through the Python language backend so this
-    # helper no longer imports ``ast`` directly. We still need the
-    # raw ``ast`` node for the per-arg name extraction (this format
-    # uses bare arg names without type annotations, distinct from
-    # ``backend.format_signature``'s annotated rendering). The raw
-    # node is preserved in ``unit.extra['ast_node']`` by PythonBackend.
+    # Declaration discovery routes through the Python backend. This
+    # formatter still reads raw AST nodes for per-argument names because
+    # the prompt format uses bare argument names rather than the
+    # annotated rendering from ``backend.format_signature``.
     import ast as _ast  # local import; only used for unparse(returns)
     from decoder_lang import get_backend
 
@@ -429,11 +427,9 @@ def _build_api_summary(repo_path: Path, source_files: List[str], max_chars: int 
             continue
 
         units = backend.list_code_units(source, filepath)
-        # Match the historical layout: walk top-level declarations
-        # only (parent is None) and, for classes, list their direct
-        # public methods. Format keeps bare arg names + return type
-        # annotation — distinct from ``backend.format_signature`` so
-        # this prompt's output diff stays byte-equivalent.
+        # Walk top-level declarations only (parent is None) and, for
+        # classes, list direct public methods. The prompt format keeps
+        # bare argument names plus return annotations.
         top_level = [u for u in units if u.parent is None]
         file_sigs = []
         for unit in top_level:

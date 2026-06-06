@@ -1,15 +1,15 @@
-"""Tests for Phase 2 of decoder multi-language: skeleton stage.
+"""Tests for backend-aware skeleton behaviour.
 
 Covers:
 
 * :class:`decoder_lang.GoBackend` registration + skeleton-relevant methods.
-* :func:`skeleton.file_designer.validate_directory_structure` honours
+* :func:`skeleton.file_designer.validate_directory_structure` honors
   the supplied backend's identifier rules; behaviour is unchanged when
-  ``backend=None`` (legacy callers).
+    ``backend=None`` (Python default).
 * :meth:`skeleton_models.RepoSkeleton.add_init_files` is a no-op for
   backends whose :meth:`package_marker_filename` returns ``None``
-  (Go / Rust / TypeScript), and bit-equivalent to the pre-Phase-2
-  Python path otherwise.
+    (Go / Rust / TypeScript), and equivalent to the Python default
+    path otherwise.
 * :class:`FileDesigner.backend` is the registered backend for the
   resolved language (Go instance for a Go RPG, Python instance for a
   Python RPG).
@@ -131,7 +131,7 @@ class ValidateDirectoryStructureTests(unittest.TestCase):
         self.validate = validate_directory_structure
 
     def test_python_default_unchanged(self) -> None:
-        # No backend → historical behaviour: hyphens are rejected.
+        # No backend → Python identifier rules: hyphens are rejected.
         ok, msg = self.validate(
             {"comp": "src/my-pkg/utils"}, ["comp"],
         )
@@ -181,7 +181,7 @@ class AddInitFilesTests(unittest.TestCase):
         return RepoSkeleton({"src/foo.py": ""})
 
     def test_default_behaviour_unchanged_no_backend(self) -> None:
-        # backend=None preserves pre-Phase-2 Python __init__.py emission.
+        # backend=None uses Python __init__.py emission.
         skel = self._make_skeleton()
         added = skel.add_init_files()
         self.assertEqual(added, 1)
@@ -213,9 +213,7 @@ class AddInitFilesTests(unittest.TestCase):
 
 class FileDesignerBackendInstanceTests(unittest.TestCase):
     """``FileDesigner.backend`` is the right instance for the language
-    resolved from the RPG. Already covered structurally in Phase 1
-    tests; Phase 2 adds the Go-specific assertion now that GoBackend
-    exists."""
+    resolved from the RPG, including the registered Go backend."""
 
     def _make_designer(self, root_language):
         from skeleton.file_designer import FileDesigner  # noqa

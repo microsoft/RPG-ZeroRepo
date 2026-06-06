@@ -213,13 +213,11 @@ def _gitignore_has_cmind_block(existing: str) -> bool:
 # Agent Detection & Persistent Instructions
 # ============================================================================
 #
-# Removed: the
-# previously-generated `repo/.claude/rules/cmind-codegen.md` and
-# `repo/.github/instructions/cmind-codegen.instructions.md` files were
-# auto-loaded by Claude Code / Copilot for **every** session, contaminating
-# unrelated commands (rpg_edit, encode, plain Q&A) with codegen-only
-# instructions.  The recovery-after-/compact concern is already handled by
-# `templates/commands/code_gen.md` itself, which the user re-invokes via
+# Do not write persistent codegen instructions into the user's repository.
+# Claude Code / Copilot auto-load those files for every session, which would
+# contaminate unrelated commands (rpg_edit, encode, plain Q&A) with
+# codegen-only instructions.  The recovery-after-/compact concern is handled
+# by `templates/commands/code_gen.md` itself, which the user re-invokes via
 # `/cmind.code_gen`.
 #
 # `cmind update` cleans up any stale `cmind-codegen.*` files left in older

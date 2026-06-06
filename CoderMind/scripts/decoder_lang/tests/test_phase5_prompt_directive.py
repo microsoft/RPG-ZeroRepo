@@ -1,9 +1,7 @@
-"""Tests for Phase 5 of decoder multi-language: language-directive
-preamble for LLM prompts.
+"""Tests for language-directive preambles in LLM prompts.
 
 Critical regression invariant: when the target language is Python
-the directive is the empty string and prompts render byte-identically
-to the pre-Phase-5 output.
+the directive is the empty string and prompt text is unchanged.
 """
 from __future__ import annotations
 

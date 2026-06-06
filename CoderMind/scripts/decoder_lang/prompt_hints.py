@@ -1,10 +1,9 @@
 """Prompt-hint dataclass used by :meth:`LanguageBackend.prompt_hints`.
 
 Holds the strings the decoder injects into LLM prompts so a single
-prompt template can render correctly for any target language. Phase 5
-moves prompt files away from literal ``"Python"`` / ``\\`\\`\\`python`` /
-``pytest`` strings to ``{display_name}`` / ``{markdown_fence}`` /
-``{test_framework_name}`` placeholders driven by this struct.
+prompt template can render correctly for any target language. Prompt
+renderers use these fields for display names, markdown fences, file
+extensions, test framework names, and language-specific style guidance.
 
 Kept deliberately small: only fields a prompt template can reference
 verbatim. Anything that needs computation (e.g. signature extraction)

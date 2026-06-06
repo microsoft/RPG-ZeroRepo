@@ -1,11 +1,9 @@
-"""Phase-1 ``feature_spec`` stage — direct JSON generation.
+"""Generate ``feature_spec.json`` directly from raw requirements.
 
 Reads raw requirements (inline text or ``docs/*.md`` files), drives an LLM
 via :class:`LLMClient`, and writes a validated ``feature_spec.json`` ready
 for downstream stages (``feature_build`` etc.) to consume.
 
-This module replaces the historical Markdown-intermediary pipeline
-(``feature_spec.md`` slash command + ``feature_spec_to_json.py`` parser).
 The LLM emits the final JSON directly, validated against
 :class:`feature.schemas.spec.FeatureSpecOutput`.
 

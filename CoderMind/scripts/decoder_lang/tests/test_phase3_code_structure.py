@@ -1,10 +1,8 @@
-"""Tests for Phase 3 of decoder multi-language: code-structure
-methods added to ``PythonBackend`` (``list_code_units``,
-``format_signature``, ``list_imports``, ``find_main_block_lineno``).
+"""Tests for PythonBackend code-structure helpers.
 
-Each test cross-checks against the stdlib ``ast`` behaviour the
-caller in ``func_design/`` currently relies on, so the upcoming
-mechanical refactor in Phase 3b can ride on top with confidence.
+The suite covers ``list_code_units``, ``format_signature``,
+``list_imports``, and ``find_main_block_lineno``. Assertions focus on
+the shapes consumed by ``func_design`` and code-generation prompts.
 """
 from __future__ import annotations
 
@@ -135,8 +133,7 @@ class ListCodeUnitsTests(unittest.TestCase):
 
 
 class FormatSignatureTests(unittest.TestCase):
-    """Signature formatting matches the historical
-    ``GlobalInterfaceRegistry._format_func_signature`` output."""
+    """Signature formatting matches interface-registry expectations."""
 
     def setUp(self) -> None:
         self.backend: PythonBackend = get_backend("python")  # type: ignore
@@ -156,8 +153,7 @@ class FormatSignatureTests(unittest.TestCase):
         )
 
     def test_method_skips_self(self) -> None:
-        # ``self`` is excluded from rendered params (per historical
-        # _format_func_signature behaviour).
+        # ``self`` is excluded from rendered params.
         self.assertEqual(
             self.backend.format_signature(self.by_name["__init__"]),
             "__init__(path: str) -> None",
@@ -247,7 +243,7 @@ class FindMainBlockLinenoTests(unittest.TestCase):
 
 
 class GoBackendStubsTests(unittest.TestCase):
-    """Phase 3 new methods on GoBackend still raise until Phase 4."""
+    """Unsupported Go backend code-structure helpers raise explicitly."""
 
     def test_list_code_units_stub(self) -> None:
         with self.assertRaises(NotImplementedError):

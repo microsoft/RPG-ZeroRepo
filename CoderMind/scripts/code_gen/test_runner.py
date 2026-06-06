@@ -797,14 +797,10 @@ def scan_missing_imports(repo_root: Path) -> List[str]:
                 if child.is_dir() and not child.name.startswith('.'):
                     project_modules.add(child.name)
 
-    # Collect all external imports from source files. Phase 4
-    # (decoder multi-language): route through ``backend.list_imports``
-    # so this scanner no longer parses ``ast`` itself. The returned
-    # ``LPDependency.extra["module"]`` (for both Import and
-    # ImportFrom) carries the dotted module name we need; we slice
-    # the top-level segment to match the historical
-    # ``alias.name.split('.')[0]`` / ``node.module.split('.')[0]``
-    # behaviour byte-for-byte.
+    # Collect all external imports from source files through the
+    # backend import scanner. ``LPDependency.extra["module"]`` carries
+    # the dotted module name for both ``import`` and ``from`` statements;
+    # use the top-level segment for dependency installation.
     from decoder_lang import get_backend
     backend = get_backend("python")
 
@@ -823,9 +819,8 @@ def scan_missing_imports(repo_root: Path) -> List[str]:
                 extra = dep.extra or {}
                 module = extra.get("module") or ""
                 if not module or module.startswith("."):
-                    # Skip relative ``from . import x`` (historical
-                    # code checked ``node.level == 0`` for the same
-                    # filter).
+                    # Skip relative imports; they refer to project-local
+                    # modules rather than installable third-party packages.
                     continue
                 mod_name = module.split(".")[0]
                 if mod_name in _STDLIB_TOP_LEVEL or mod_name in project_modules:

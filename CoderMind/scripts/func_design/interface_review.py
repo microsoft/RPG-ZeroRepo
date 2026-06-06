@@ -23,9 +23,9 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from common import LLMClient
 
-# Phase 3 (decoder multi-language): AST inspection routes through the
-# Python backend's ``find_main_block_lineno`` helper so this module
-# no longer needs ``import ast`` itself.
+# AST inspection routes through the Python backend's
+# ``find_main_block_lineno`` helper so entry-point splicing shares the
+# same parser abstraction as the rest of interface design.
 from decoder_lang import get_backend
 
 from .interface_agent import (
@@ -438,13 +438,9 @@ def _insert_unit_into_file_code(file_code: str, stub: str) -> str:
     if not file_code.strip():
         return stub
 
-    # Phase 3 (decoder multi-language): route AST inspection through
-    # the Python backend's ``find_main_block_lineno`` hook so this
-    # module no longer imports ``ast`` directly. Backends without a
-    # ``__name__ == "__main__"`` analogue (Go, Rust, …) won't expose
-    # the method; for non-Python projects the splice falls through to
-    # the "append at end" branch — the same behaviour the historical
-    # code took whenever the AST scan didn't find a main guard.
+    # Use the backend hook when the language has an explicit main-block
+    # concept. Backends without such a hook fall through to the append
+    # branch, which keeps the splice safe for non-Python projects.
     backend = get_backend("python")
     find_main = getattr(backend, "find_main_block_lineno", None)
     main_lineno = find_main(file_code) if find_main is not None else None

@@ -31,16 +31,11 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 from common import LLMClient
 from common.utils import get_project_background_context
 
-# Phase 1 (decoder multi-language): store the backend resolved from the
-# project's target language so Phase 2 can switch ``.py`` literals
-# and ``__init__.py`` logic to ``backend.file_extension`` /
-# ``backend.package_marker_filename``. In Phase 1 the backend is
-# captured but not yet consulted; behaviour is identical to before.
-# Phase 5 adds ``with_language_directive`` to prepend a per-language
-# preamble onto skeleton-stage LLM prompts. For Python projects the
-# directive is empty (zero-impact); for Go / Rust / etc. it nudges
-# the LLM toward idiomatic conventions before the bulk per-prompt
-# rewrites land (deferred to Phase 6).
+# Skeleton design resolves a language backend from the project target
+# language so file extensions, package markers, and prompt directives
+# live with the rest of per-language decoder behaviour. Python projects
+# receive an empty prompt directive; non-Python projects get a compact
+# language preamble before skeleton prompts are rendered.
 from decoder_lang import (
     get_backend,
     resolve_decoder_language,
@@ -65,9 +60,7 @@ def validate_directory_structure(
         backend: Optional :class:`decoder_lang.LanguageBackend`. When
             supplied, each path segment is validated against the
             backend's :meth:`is_valid_module_identifier`. When
-            ``None``, the pre-Phase-2 Python rule
-            (``str.isidentifier``) is used so legacy callers behave
-            identically.
+            ``None``, path segments must be valid Python identifiers.
 
     Returns:
         (is_valid, error_message)
@@ -86,10 +79,8 @@ def validate_directory_structure(
     if extra:
         errors.append(f"Unrecognized components in assignments: {sorted(extra)}")
 
-    # Identifier validation. When no backend is given we keep the
-    # historical Python rule verbatim so any external caller passing
-    # only ``dir_assignments + required_components`` sees identical
-    # error messages.
+    # Identifier validation falls back to Python rules when no backend
+    # is supplied.
     if backend is None:
         def _is_valid_segment(seg: str) -> bool:
             return bool(seg) and seg.isidentifier()
@@ -208,10 +199,9 @@ class FileDesigner:
             target_language: Optional explicit target language
                 (e.g. ``"python"``, ``"go"``). When ``None`` the
                 effective language is resolved from RPG root meta with
-                fallback to ``"python"``. Phase 2 will switch file
-                extension and package marker logic to consult
-                ``self.backend``; in Phase 1 the value is captured
-                but not yet used to alter behaviour.
+                fallback to ``"python"``. The resolved backend provides
+                file-extension, package-marker, and prompt-directive
+                behaviour for skeleton generation.
         """
         self.rpg = rpg
         self.llm_client = llm_client or LLMClient(trajectory=trajectory, step_id=step_id)
@@ -222,12 +212,10 @@ class FileDesigner:
 
         self.logger = logging.getLogger(__name__)
 
-        # Phase 1: resolve target language with three-tier fallback
-        # (explicit kwarg → RPG root meta.language → "python"). The
-        # backend instance is stored on ``self.backend`` for Phase 2
-        # call-site migrations; nothing in Phase 1 dispatches on it.
-        # Build a minimal RPG-shaped dict (just the root meta) so the
-        # resolver doesn't trigger a full RPG.to_dict() serialisation.
+        # Resolve target language with three-tier fallback (explicit
+        # kwarg → RPG root meta.language → "python"). Build a minimal
+        # RPG-shaped dict (just the root meta) so the resolver doesn't
+        # trigger a full RPG.to_dict() serialisation.
         rpg_meta_lang = None
         repo_node = getattr(self.rpg, "repo_node", None)
         if repo_node is not None and getattr(repo_node, "meta", None) is not None:

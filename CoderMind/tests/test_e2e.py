@@ -598,12 +598,12 @@ class TestE2EFullPipeline:
         """Complete lifecycle test: encode, search, update, save, load."""
         rpg = encoded_rpg
 
-        # Phase 1: Encode is already done (encoded_rpg fixture)
+        # Encode step is already done by the encoded_rpg fixture.
         assert rpg.repo_name == "sample_repo"
         areas_initial = rpg.get_functional_areas()
         node_count_initial = len(rpg.nodes)
 
-        # Phase 2: Search the encoded RPG
+        # Search the encoded RPG.
         from rpg_agent.ops.search_by_feature import (
             exact_match_search_feature,
         )
@@ -611,7 +611,7 @@ class TestE2EFullPipeline:
         results = exact_match_search_feature(rpg, "validate_email")
         assert len(results) > 0
 
-        # Phase 3: Update the RPG with new code
+        # Update the RPG with new code.
         new_code = textwrap.dedent("""\
             import logging
 
@@ -635,11 +635,11 @@ class TestE2EFullPipeline:
         audit_node = rpg.find_node_by_path("src/audit.py::AuditLogger")
         assert audit_node is not None
 
-        # Phase 4: Search again (should find new nodes)
+        # Search again; the generated node should be discoverable.
         results = exact_match_search_feature(rpg, "AuditLogger")
         assert len(results) > 0
 
-        # Phase 5: Save the RPG
+        # Save the RPG.
         save_result = WorkflowIntegration.save_rpg(
             rpg=rpg,
             cmind_dir=cmind_dir,
@@ -648,7 +648,7 @@ class TestE2EFullPipeline:
         )
         assert os.path.isfile(save_result["rpg_path"])
 
-        # Phase 6: Load and verify
+        # Load and verify.
         loaded = WorkflowIntegration.load_rpg(cmind_dir)
         assert loaded is not None
         assert loaded.repo_name == "sample_repo"
@@ -657,7 +657,7 @@ class TestE2EFullPipeline:
         audit_loaded = loaded.find_node_by_path("src/audit.py::AuditLogger")
         assert audit_loaded is not None
 
-        # Phase 7: prepare_for_codegen on the loaded RPG
+        # Prepare code-generation context from the loaded RPG.
         context = WorkflowIntegration.prepare_for_codegen(rpg=loaded)
         assert context["repo_name"] == "sample_repo"
         assert "existing_interfaces" in context

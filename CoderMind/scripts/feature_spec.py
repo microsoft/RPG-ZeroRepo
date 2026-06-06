@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Phase-1 ``feature_spec`` stage — CLI wrapper.
+"""CLI wrapper for the ``feature_spec`` stage.
 
 This is the entry point invoked by ``cmind script feature_spec.py`` and
 by the ``feature_construct`` orchestrator.  All real work happens in

@@ -192,8 +192,8 @@ def _prepare_batch_context(
 ) -> Tuple[BatchExecutionState, Optional[Dict[str, Any]]]:
     """Build BatchExecutionState and dependency context for a task.
 
-    This mirrors the historical ``prepare_batch`` logic but returns data structures
-    instead of printing JSON.
+    Returns structured state rather than printing JSON, so the batch
+    runner can reuse the prepared dependency context directly.
 
     Returns:
         (batch_state, dependency_context)

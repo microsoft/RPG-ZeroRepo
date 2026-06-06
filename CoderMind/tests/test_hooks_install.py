@@ -77,8 +77,8 @@ def test_install_claude_hooks_is_idempotent_across_python_upgrades(project, monk
     (not a duplicate per invocation).
     """
     cmind_cli._install_claude_hooks(project)
-    # Simulate any environment change that previously affected hook content;
-    # the new hook body is interpreter-independent so this should be a no-op.
+    # Simulate an environment change; the hook body is
+    # interpreter-independent so this should be a no-op.
     monkeypatch.setattr(cmind_cli.sys, "executable", "/opt/new-python/bin/python")
     cmind_cli._install_claude_hooks(project)
     data = json.loads((project / ".claude" / "settings.json").read_text())
@@ -510,8 +510,7 @@ def test_setup_gitignore_greenfield_writes_full_template(tmp_path):
     # Python conventions (matches github/gitignore/Python.gitignore verbatim)
     assert "__pycache__/" in content
     assert ".venv" in content  # upstream uses ``.venv`` (no trailing slash)
-    # Sections that ONLY exist in the full GitHub template (regression
-    # guard for the slimmed-down version we used previously).
+    # Sections that only exist in the full GitHub template.
     assert "PyInstaller" in content
     assert "Jupyter Notebook" in content
     assert ".ipynb_checkpoints" in content

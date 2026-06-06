@@ -319,21 +319,21 @@ class FuncDesigner:
             "success": True
         }
         
-        # Phase 1: Data Flow
+        # Data-flow design step.
         data_flow_result = self.run_data_flow_phase()
         results["data_flow_phase"] = data_flow_result
         
         if not data_flow_result.get("success", False):
             self.logger.warning("Data flow phase had issues, continuing...")
         
-        # Phase 2: Base Classes
+        # Base-class design step.
         base_class_result = self.run_base_class_phase()
         results["base_classes_phase"] = base_class_result
         
         if not base_class_result.get("success", False):
             self.logger.warning("Base class phase had issues, continuing...")
         
-        # Phase 3: Interfaces
+        # Interface design step.
         interface_result = self.run_interface_phase()
         results["interfaces_phase"] = interface_result
         

@@ -141,11 +141,9 @@ def _format_dependency_context(ctx: Optional[Dict[str, Any]]) -> str:
             subs = bc.get("subclasses", {})
             if not code:
                 continue
-            # Extract class name and method names from code. Phase 4
-            # (decoder multi-language): route the walk through the
-            # Python backend so this loop no longer needs ``import
-            # ast`` directly. Empty unit list covers the historical
-            # ``except SyntaxError`` branch identically.
+            # Extract class and method names through the Python backend.
+            # Syntax errors yield an empty unit list, so malformed base
+            # class snippets simply contribute no class summary here.
             from decoder_lang import get_backend as _get_backend
             backend = _get_backend("python")
             classes = [

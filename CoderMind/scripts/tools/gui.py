@@ -209,7 +209,7 @@ def cmd_stop_display(display: str = DEFAULT_DISPLAY):
 def cmd_launch(command: str, display: str = DEFAULT_DISPLAY,
                wait: float = LAUNCH_WAIT):
     """Launch a GUI application on the virtual display."""
-    # Kill any previously launched app to avoid multiple instances
+    # Close the tracked app process before launching a replacement.
     prev_pid = _load_app_pid()
     if prev_pid is not None:
         print(f"  Closing previous app (pid {prev_pid}) before re-launch")

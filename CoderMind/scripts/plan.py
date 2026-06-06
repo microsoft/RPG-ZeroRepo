@@ -433,7 +433,7 @@ def main(argv: Optional[list[str]] = None) -> int:
     _install_sigint_handler()
     invoker = _resolve_invoker()
 
-    # --- Phase 1: probe ----------------------------------------------------
+    # --- Step: probe ------------------------------------------------------
     states = probe(invoker)
     decide(states, force=args.force)
 
@@ -444,7 +444,7 @@ def main(argv: Optional[list[str]] = None) -> int:
             _print_probe_summary(states)
         return 0
 
-    # --- Phase 1b: prerequisite check --------------------------------------
+    # --- Step: prerequisite check -----------------------------------------
     # If the very first stage cannot even start (its input is missing or
     # invalid), abort cleanly so the user gets a helpful pointer instead
     # of a confusing failure from the build script itself.  ``--dry-run``
@@ -463,14 +463,14 @@ def main(argv: Optional[list[str]] = None) -> int:
         )
         return 2
 
-    # --- Phase 2: short-circuit when nothing to do -------------------------
+    # --- Step: short-circuit when nothing to do ---------------------------
     runnable = [s for s in states if s.will_run]
     if not runnable:
         print("All 5 planning stages are already complete — nothing to do.")
         print("Use `cmind script plan.py --force` to rebuild from scratch.")
         return 0
 
-    # --- Phase 3: announce plan -------------------------------------------
+    # --- Step: announce plan ----------------------------------------------
     print(f"Planning pipeline: {len(runnable)} of {len(states)} stages to run.")
     print(_format_table(states))
     print()
@@ -484,7 +484,7 @@ def main(argv: Optional[list[str]] = None) -> int:
             print("DRY-RUN ▸", " ".join(_script_argv(invoker, post)))
         return 0
 
-    # --- Phase 4: execute --------------------------------------------------
+    # --- Step: execute ----------------------------------------------------
     started = time.monotonic()
     for s in states:
         if not s.will_run:
@@ -532,7 +532,7 @@ def main(argv: Optional[list[str]] = None) -> int:
         elapsed = time.monotonic() - stage_started
         print(f"✓  {s.stage.name:<14} done in {elapsed:.1f}s")
 
-    # --- Phase 5: post-pipeline helpers -----------------------------------
+    # --- Step: post-pipeline helpers --------------------------------------
     print()
     print("Running post-pipeline helpers ...")
     for post in POST_STEPS:

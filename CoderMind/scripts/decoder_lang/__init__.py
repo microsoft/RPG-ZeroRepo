@@ -5,12 +5,10 @@ that lets the decoder pipeline (skeleton / func_design / code_gen)
 treat the target programming language as a parameter rather than
 a hard-coded ``.py`` / ``ast`` / ``pytest`` assumption.
 
-Phase 0 (current): the abstraction exists but the decoder still routes
-exclusively through :class:`PythonBackend`, whose behaviour matches the
-pre-existing Python-only logic byte-for-byte. Later phases add
-``GoBackend`` etc. and migrate decoder call sites to look up the
-backend via :func:`get_backend` based on the project's target language
-(resolved from RPG ``meta.language``).
+The registry currently ships a full :class:`PythonBackend` plus a
+Go backend with the skeleton-stage subset implemented. Decoder stages
+resolve the backend from explicit feature-spec language, RPG metadata,
+or source-file dominant language.
 
 Public API (see :mod:`decoder_lang.backend` for full signatures):
 
@@ -43,9 +41,9 @@ from .test_result import EnvHandle, TestFailure, TestRunResult
 
 # Side-effect: register backends on package import so the registry is
 # populated even when callers only ``import decoder_lang``. Python is
-# the decoder's default; Go is the first non-Python backend (Phase 2
-# ships the skeleton-stage subset; AST and test-runner methods raise
-# NotImplementedError until Phase 3/4).
+# the decoder's default; Go provides the skeleton-stage subset and
+# raises ``NotImplementedError`` for unsupported code-analysis and
+# test-runner operations.
 register_backend(PythonBackend)
 register_backend(GoBackend)
 

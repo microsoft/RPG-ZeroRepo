@@ -652,8 +652,8 @@ def _collect_children(children: list, depth: int = 1, max_depth: int = 3) -> Lis
 def _load_gui_script_reuse_context(repo_path: Path) -> str:
     """Load reusable GUI interaction scripts for review prompt context.
 
-    Scripts are stored under ``repo/.cmind/tmp/gui_test_scripts`` and are
-    intended to capture stable, previously-validated interaction flows.
+    Scripts are stored under ``repo/.cmind/tmp/gui_test_scripts`` and
+    capture stable interaction flows that the review prompt can reuse.
     """
     scripts_dir = repo_path / ".cmind" / "tmp" / "gui_test_scripts"
     if not scripts_dir.is_dir():

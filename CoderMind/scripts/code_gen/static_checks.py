@@ -10,13 +10,10 @@ import logging
 from pathlib import Path
 from typing import List
 
-# Phase 0 (decoder multi-language): route the per-language source-file
-# check through the new abstraction layer. The PythonBackend's
-# ``is_source_file`` returns the same value as the historical
-# ``suffix == ".py"`` predicate (verified in
-# ``tests/test_python_backend.py``), so this swap is behaviour-
-# preserving. Phase 4 will migrate the rest of this module (the AST
-# walks) to ``backend.list_classes`` / ``backend.has_placeholder``.
+# Source-file classification routes through the language backend so
+# extension rules live with the rest of per-language decoder behaviour.
+# Body inspection below still uses Python AST nodes because these
+# completeness checks look for Python-specific stub patterns.
 from decoder_lang import get_backend
 
 logger = logging.getLogger(__name__)
@@ -39,9 +36,7 @@ def static_completeness_check(files: List[str], repo_path: Path) -> List[str]:
         List of human-readable issue strings (empty = all clean).
     """
     issues: List[str] = []
-    # Single backend lookup per call; today this is always Python.
-    # Phase 1 will pass ``target_language`` from the caller instead of
-    # hard-coding "python" here.
+    # Single backend lookup keeps source-file classification centralized.
     backend = get_backend("python")
 
     for filepath in files:

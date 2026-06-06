@@ -375,34 +375,27 @@ class RepoSkeleton:
     ) -> int:
         """Add package-marker files to all directories in the skeleton.
 
-        Historical behaviour (Python only): walks every directory and
-        emits ``__init__.py`` under directories that contain Python
-        sources or live under conventional package roots.
-
-        Phase 2 (decoder multi-language): when ``backend`` is supplied,
-        the file name, content, and the per-directory "has source"
-        predicate are all sourced from the backend. Backends whose
-        :meth:`package_marker_filename` returns ``None`` (Go, Rust,
-        TypeScript, …) make this method a no-op — directories without
-        marker files are the language convention.
+        When ``backend`` is supplied, the file name, content, and
+        per-directory "has source" predicate are sourced from the
+        backend. Backends whose :meth:`package_marker_filename` returns
+        ``None`` (Go, Rust, TypeScript, …) make this method a no-op
+        because directories without marker files are the language
+        convention.
 
         Args:
             skip_root: Whether to skip adding the marker to the root.
             docstring_template: Optional template (``{name}`` /
                 ``{path}``). Used only when the backend's
                 :meth:`package_marker_content` returns None (i.e. the
-                caller wants the historical default body).
+                caller wants the built-in marker body).
             backend: Optional :class:`decoder_lang.LanguageBackend`.
-                When ``None``, behaves exactly as the pre-Phase-2 Python
-                path so legacy callers keep working bit-identically.
+                When ``None``, Python package-marker rules are used.
 
         Returns:
             Number of marker files added (0 for languages that don't
             use a marker file).
         """
-        # When no backend is supplied, use the historical Python
-        # constants verbatim so this code path is byte-equivalent to
-        # the pre-Phase-2 implementation.
+        # When no backend is supplied, use Python package-marker rules.
         if backend is None:
             marker_filename: Optional[str] = "__init__.py"
             source_extension: str = ".py"
@@ -444,10 +437,9 @@ class RepoSkeleton:
                     has_source_content = True
                     break
 
-            # Also add if the directory is under a common package
-            # path. The list is unchanged from pre-Phase-2 to preserve
-            # behaviour for the Python path; non-Python backends opt
-            # out earlier via ``marker_filename is None``.
+            # Also add if the directory is under a common Python package
+            # path. Non-Python backends opt out earlier via
+            # ``marker_filename is None``.
             is_python_pkg_path = any(
                 dir_node.path.startswith(prefix)
                 for prefix in ['src/', 'lib/', 'pkg/', 'packages/']
@@ -477,7 +469,7 @@ class RepoSkeleton:
                     path=dir_node.path,
                 )
             else:
-                # Default minimal docstring (pre-Phase-2 behaviour).
+                # Default minimal marker docstring.
                 code = f'"""Package: {dir_node.name}"""\n'
 
             # Create marker file node

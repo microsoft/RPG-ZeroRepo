@@ -1,10 +1,9 @@
-"""Tests for :mod:`decoder_lang` Phase 0 — backend registry +
-:class:`PythonBackend` behaviour-preservation contract.
+"""Tests for the decoder backend registry and Python backend contract.
 
-These tests focus on the invariants the trial wiring in
-``code_gen.static_checks`` relies on. Anything stubbed with
-``NotImplementedError`` is asserted to raise (so Phase 4 can flip the
-implementations on with confidence).
+These tests focus on invariants relied on by code paths that already
+route through :mod:`decoder_lang`. Unsupported methods are asserted to
+raise ``NotImplementedError`` so accidental partial implementations are
+visible.
 """
 from __future__ import annotations
 
@@ -202,8 +201,7 @@ class CodeStructureTests(unittest.TestCase):
 
 
 class StubbedMethodsTests(unittest.TestCase):
-    """Methods deferred to Phase 4 must raise ``NotImplementedError``
-    rather than silently returning bad data."""
+    """Unsupported methods must raise instead of returning bad data."""
 
     def setUp(self) -> None:
         self.backend = get_backend("python")
@@ -255,7 +253,7 @@ class PromptHintsTests(unittest.TestCase):
 
 
 class ResolveTargetLanguageTests(unittest.TestCase):
-    """Three-tier fallback chain documented in plan §Phase 1."""
+    """Three-tier target-language fallback chain."""
 
     def test_tier_1_reads_root_meta_language(self) -> None:
         rpg = {"root": {"meta": {"language": "go"}}}

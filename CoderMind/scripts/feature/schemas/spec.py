@@ -1,8 +1,7 @@
 """Pydantic schemas for ``feature_spec.json``.
 
-The schema mirrors the historical ``feature_spec.json`` shape produced by
-``feature_spec_to_json.py`` so that downstream stages (``feature_build``,
-``build_skeleton``, …) can consume it without modification.
+The schema preserves the ``feature_spec.json`` contract consumed by
+downstream stages (``feature_build``, ``build_skeleton``, …).
 
 Reference sample::
 
@@ -217,8 +216,8 @@ FeatureNode.model_rebuild()
 class FeatureSpecOutput(BaseModel):
     """Top-level model representing the full ``feature_spec.json``.
 
-    Field order intentionally mirrors the historical sample to maximise
-    diff-friendliness when comparing old vs new outputs.
+    Field order intentionally follows the reference sample to maximise
+    diff-friendliness across generated outputs.
     """
 
     meta: Meta
@@ -239,14 +238,9 @@ class FeatureSpecOutput(BaseModel):
             "repository."
         ),
     )
-    # Multi-language decoder support (Phase 1).
-    # Optional + default None so:
-    # * existing ``feature_spec.json`` files load unchanged,
-    # * the LLM is not yet required to emit the field (Phase 5 will
-    #   introduce a prompt directive),
-    # * downstream decoder stages call
-    #   ``decoder_lang.resolve_decoder_language`` to determine the
-    #   effective language with the documented three-tier fallback.
+    # Optional target-language hint for decoder stages. Older specs
+    # without the field still load cleanly; downstream code resolves
+    # the effective language through ``decoder_lang.resolve_decoder_language``.
     target_language: str | None = Field(
         default=None,
         description=(

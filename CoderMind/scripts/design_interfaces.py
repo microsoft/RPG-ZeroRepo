@@ -791,7 +791,7 @@ class InterfaceDesigner:
         )
         
         # =====================================================================
-        # Phase 1.5: Post-process invocation edges (normalise + resolve)
+        # Post-process invocation edges (normalise + resolve)
         # =====================================================================
         global_registry = result.get("_global_registry")
         if global_registry:
@@ -808,7 +808,7 @@ class InterfaceDesigner:
         self.logger.info(f"Collected dependencies: {dep_summary}")
         
         # =====================================================================
-        # Phase 2: Global Interface Review (entry points + wiring + auto-fix)
+        # Global Interface Review (entry points + wiring + auto-fix)
         # =====================================================================
         global_registry = result.pop("_global_registry", None)
         import_warnings = result.pop("_import_warnings", [])
@@ -858,7 +858,7 @@ class InterfaceDesigner:
             print_review_summary(review_result)
 
             # =================================================================
-            # Phase 3: Create InterfacesStore and prune orphans
+            # Create InterfacesStore and prune orphans
             # =================================================================
             # Create unified store from current result
             store = InterfacesStore.from_legacy_format(
@@ -870,7 +870,7 @@ class InterfaceDesigner:
             )
 
             # =================================================================
-            # Phase 3b: Review and prune orphan units
+            # Review and prune orphan units
             # =================================================================
             # First, find orphan units
             orphan_keys = store.find_orphan_units()
@@ -933,7 +933,7 @@ class InterfaceDesigner:
                     result["global_review"]["retained_orphans_count"] = len(orphan_review_result.keys_to_retain)
 
             # =================================================================
-            # Phase 4: Update result from store and update RPG
+            # Update result from store and update RPG
             # =================================================================
             # Update result with store's current state (reflects pruning)
             store_export = store.to_interfaces_json()

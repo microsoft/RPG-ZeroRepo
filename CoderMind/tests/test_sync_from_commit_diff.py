@@ -527,11 +527,9 @@ def test_cli_sync_force_full(synced_repo):
 def test_cli_sync_missing_rpg_returns_actionable_error(tmp_path):
     """``sync`` must early-return with a /cmind.encode hint when rpg.json is absent.
 
-    Regression guard: previously ``RPGService.load`` raised
-    ``FileNotFoundError`` which the post-commit hook silently swallowed
-    via ``|| true``.  We now want a structured error visible in the
-    hook log so the user can tell *why* the background updater did
-    nothing.
+    Regression guard: missing RPG files should produce a structured
+    error visible in the hook log so the user can tell why the
+    background updater did nothing.
     """
     script = _project_root / "scripts" / "update_graphs.py"
     missing = tmp_path / "does_not_exist.json"

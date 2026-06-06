@@ -12,14 +12,11 @@ A backend bundles all language-specific behaviour the decoder needs:
 * prompt fill values.
 
 The interface is a runtime-checkable :class:`Protocol`; backends may
-either subclass it or just match the structural shape. In practice
-:class:`PythonBackend` is a plain class implementing every method;
-new languages will follow the same convention so static type-checking
-and ``isinstance`` both work.
-
-Phase 0 ships this file together with :class:`PythonBackend` only;
-Phase 1+ adds the other six languages already supported by
-:mod:`lang_parser`.
+either subclass it or just match the structural shape. Implementations
+are plain classes that satisfy the protocol so static type-checking and
+``isinstance`` both work. Backends can implement a useful subset while
+raising :class:`NotImplementedError` for operations a decoder stage does
+not call for that language.
 """
 from __future__ import annotations
 
@@ -238,9 +235,9 @@ def get_backend(language: str | None) -> LanguageBackend:
     """Look up a backend by language name.
 
     Falls back to :class:`PythonBackend` with a single WARNING log
-    when ``language`` is None or unrecognised. The Phase 0 decoder
-    pipeline always passes ``"python"`` (or None on legacy artefacts)
-    so the warning path will not fire in normal use.
+    when ``language`` is unrecognised. ``None`` maps to the default
+    backend without warning because older artefacts may not carry an
+    explicit language field.
     """
     if language is None:
         return _REGISTRY[_DEFAULT_BACKEND_NAME]
@@ -269,11 +266,10 @@ def resolve_target_language(
     rpg_obj: Any,
     valid_files: Iterable[str] | None = None,
 ) -> str:
-    """Determine the project's target language using a three-tier
-    fallback chain (see ``plans/decoder_multilang.md`` §Phase 1).
+    """Determine the project's target language using a three-tier chain.
 
     1. ``rpg_obj["root"]["meta"]["language"]`` (written by encoder on
-       :mod:`rpg_encoder.rpg_encoding` since the multi-language work).
+       :mod:`rpg_encoder.rpg_encoding`).
     2. ``lang_parser.dominant_language(valid_files)`` when the field is
        missing (older RPG artefacts) and ``valid_files`` is supplied.
     3. ``"python"`` as a last-resort default, with a WARNING log so
@@ -326,8 +322,8 @@ def resolve_decoder_language(
 
     Extends :func:`resolve_target_language` with a higher-priority
     tier 0: an explicit ``target_language`` field on the loaded
-    ``feature_spec.json`` (introduced in Phase 1). Falls through to
-    the same RPG-then-default chain when the field is absent.
+    ``feature_spec.json``. Falls through to the same RPG-then-default
+    chain when the field is absent.
 
     Tier order:
 

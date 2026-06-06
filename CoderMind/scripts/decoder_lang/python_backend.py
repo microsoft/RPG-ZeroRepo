@@ -1,17 +1,13 @@
 """Production :class:`LanguageBackend` implementation for Python.
 
-This is the **behaviour-preserving** Python backend used by the
-existing CoderMind decoder pipeline. Phase 0 lifts only the small,
-self-contained checks needed by the trial wiring in
-:mod:`code_gen.static_checks`; the heavier pieces (signature
-extraction, pytest runner, output parser) remain in their current
-home and will migrate in later phases per the
-``CoderMind/plans/decoder_multilang.md`` roadmap.
+This is the production Python backend used by the CoderMind decoder
+pipeline. It centralizes Python-specific file layout, syntax probes,
+code-unit discovery, signature formatting, import extraction, and
+prompt hints behind the shared :class:`LanguageBackend` protocol.
 
-Methods that haven't migrated yet raise :class:`NotImplementedError`
-with an explicit pointer at the phase that will fill them in. This
-is intentional: any decoder code that calls them today will fail
-loudly during Phase 0 instead of silently producing wrong results.
+Methods that are not wired into the decoder yet raise
+:class:`NotImplementedError` so unsupported calls fail loudly instead
+of silently producing incomplete language behaviour.
 """
 from __future__ import annotations
 
@@ -36,10 +32,8 @@ import re
 _PY_IDENT_INVALID = re.compile(r"[^A-Za-z0-9_]")
 
 
-# Placeholder markers the original ``static_completeness_check``
-# scans for in returned string literals. Kept here as the single
-# source of truth so the future Phase 4 migration of
-# ``static_checks.py`` can drop the local list and import from here.
+# Placeholder markers shared by static completeness checks and backend
+# placeholder detection.
 _PLACEHOLDER_MARKERS: tuple[str, ...] = (
     "TODO",
     "PLACEHOLDER",
@@ -119,9 +113,9 @@ class PythonBackend:
     def has_placeholder(self, code: str, path: str = "<string>") -> bool:
         """Detect ``return "TODO..."`` style placeholder returns.
 
-        Mirrors the placeholder-only check inside the pre-existing
-        ``static_completeness_check`` (the stub-body detection stays
-        in ``static_checks.py`` for now and migrates in Phase 4).
+        Mirrors the placeholder-only check used by
+        ``static_completeness_check``. Stub-body detection remains in
+        ``static_checks.py`` because it needs statement-level context.
         Returns False on syntax errors so an unparseable file isn't
         misreported as containing a placeholder.
         """
@@ -156,13 +150,11 @@ class PythonBackend:
         path: str = "<string>",
     ) -> list[Any]:
         """Walk the full AST and return every class / function / method
-        declaration as :class:`LPCodeUnit`. Matches the historical
-        ``ast.walk(tree); isinstance(..., (ClassDef, FunctionDef,
-        AsyncFunctionDef))`` pattern used across ``func_design/`` so
-        callers see exactly the same set of declarations they did
-        pre-Phase-3.
+        declaration as :class:`LPCodeUnit`. The result includes nested
+        declarations because ``func_design`` consumers expect a flat
+        view of every code unit in the source.
 
-        The original raw ``ast`` node is preserved in
+        The raw ``ast`` node is preserved in
         ``unit.extra["ast_node"]`` so callers that need fine-grained
         AST inspection (e.g. signature formatting, decorator lookup)
         can read it without re-parsing.
@@ -219,7 +211,7 @@ class PythonBackend:
         signature. Falls back to ``unit.name`` for non-function units
         or when the AST node is unavailable.
 
-        Behaviour preserves the formatting from the pre-Phase-3 helper
+        Behaviour preserves the formatting from
         :func:`func_design.interface_agent.GlobalInterfaceRegistry._format_func_signature`
         — same param truncation (``> 4`` → ``..., ...``), same return-
         annotation rendering.
@@ -349,26 +341,23 @@ class PythonBackend:
             return ""
 
     # ------------------------------------------------------------------
-    # 3. Build / test environment — Phase 4 migrates the bodies
+    # 3. Build / test environment — not wired into the decoder yet
     # ------------------------------------------------------------------
 
     def detect_env(self, repo_root: Path) -> EnvHandle | None:
-        """Phase 4 will lift ``get_dev_python(repo_path)`` logic
-        (currently in ``code_gen/test_runner.py`` and
-        ``code_gen/global_review.py``) into this method."""
+        """Return an existing Python test environment when supported."""
         raise NotImplementedError(
-            "PythonBackend.detect_env is not used until Phase 4; "
+            "PythonBackend.detect_env is not wired into the decoder; "
             "callers should keep using code_gen.test_runner.get_dev_python "
-            "until that migration lands.",
+            "for now.",
         )
 
     def ensure_env(self, repo_root: Path) -> EnvHandle:
         """Always available on a host that's already running Python
         (the decoder itself), so this never raises
-        :class:`ToolchainUnavailable`. Implementation deferred to
-        Phase 4 alongside :meth:`detect_env`."""
+        :class:`ToolchainUnavailable` once implemented."""
         raise NotImplementedError(
-            "PythonBackend.ensure_env is not used until Phase 4.",
+            "PythonBackend.ensure_env is not wired into the decoder.",
         )
 
     def test_command(
@@ -376,12 +365,11 @@ class PythonBackend:
         env: EnvHandle,
         selectors: list[str] | None = None,
     ) -> list[str]:
-        """Phase 4 will lift ``build_batch_pytest_cmd`` from
-        ``code_gen/batch_prompts.py`` here."""
+        """Return the command used to run Python tests when supported."""
         raise NotImplementedError(
-            "PythonBackend.test_command is not used until Phase 4; "
+            "PythonBackend.test_command is not wired into the decoder; "
             "callers should keep using code_gen.batch_prompts."
-            "build_batch_pytest_cmd until that migration lands.",
+            "build_batch_pytest_cmd for now.",
         )
 
     def install_deps_command(
@@ -389,24 +377,21 @@ class PythonBackend:
         env: EnvHandle,
         deps: list[str],
     ) -> list[str] | None:
-        """Phase 4 wiring point. Until then, callers continue to use
-        whatever pip-invocation helper they already use."""
+        """Return a dependency-install command when supported."""
         raise NotImplementedError(
-            "PythonBackend.install_deps_command is not used until Phase 4.",
+            "PythonBackend.install_deps_command is not wired into the decoder.",
         )
 
     # ------------------------------------------------------------------
-    # 4. Test-output parsing — Phase 4 migrates ``test_output_parser``
+    # 4. Test-output parsing — not wired into the decoder yet
     # ------------------------------------------------------------------
 
     def parse_test_output(self, raw: str, exit_code: int) -> TestRunResult:
-        """Phase 4 will lift ``code_gen.test_output_parser.analyze_test_output``
-        into this method (the parser body is already pytest-specific;
-        moving it here just changes the import path)."""
+        """Parse native Python test output when backend-driven tests run."""
         raise NotImplementedError(
-            "PythonBackend.parse_test_output is not used until Phase 4; "
+            "PythonBackend.parse_test_output is not wired into the decoder; "
             "callers should keep using code_gen.test_output_parser."
-            "analyze_test_output until that migration lands.",
+            "analyze_test_output for now.",
         )
 
     # ------------------------------------------------------------------

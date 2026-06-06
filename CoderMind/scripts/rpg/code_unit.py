@@ -349,8 +349,8 @@ class CodeUnit:
 class ParsedFile:
     """Parses a source file and extracts CodeUnits.
 
-    For Python files, uses the built-in ``ast`` module (unchanged historical
-    path). For other supported source languages (Go, TypeScript/JavaScript,
+    For Python files, uses the built-in ``ast`` module. For other
+    supported source languages (Go, TypeScript/JavaScript,
     C/C++, Rust, ...), delegates to ``lang_parser`` and adapts the result
     into the same ``CodeUnit`` shape so downstream consumers don't need to
     branch on language.

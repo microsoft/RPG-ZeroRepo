@@ -331,8 +331,7 @@ class TestMeta:
         )
         second = _storage.read_meta(workspace)
         assert second is not None
-        # init_version should track the *current* call now, not the
-        # previously-recorded one.
+        # init_version should track the current call.
         assert second["cmind_cli_version_at_init"] == "0.2.0"
         assert second["cmind_cli_version_last_seen"] == "0.2.0"
 

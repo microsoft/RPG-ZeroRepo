@@ -1,13 +1,12 @@
-"""Tests for Phase 1 of decoder multi-language: ``target_language``
-propagation through ``FeatureSpecOutput`` and ``FileDesigner``.
+"""Tests for target-language propagation through decoder entry points.
 
 Focus:
 * :func:`decoder_lang.resolve_decoder_language` priority chain.
-* ``FeatureSpecOutput.target_language`` is optional + defaults to
-  None, so old artefacts load unchanged.
+* ``FeatureSpecOutput.target_language`` is optional and defaults to
+    None, so specs without the field load unchanged.
 * ``FileDesigner`` accepts and stores the language; the resolved
   backend is the registered :class:`PythonBackend` singleton in the
-  current (Python-only) decoder pipeline.
+    decoder pipeline.
 """
 from __future__ import annotations
 
@@ -145,8 +144,8 @@ class FeatureSpecOutputSchemaTests(unittest.TestCase):
 class FileDesignerWiringTests(unittest.TestCase):
     """``FileDesigner.__init__`` resolves language + stores backend.
 
-    Only checks the new __init__ logic; the rest of the designer
-    pipeline is untouched in Phase 1.
+    Only checks constructor language resolution; the rest of the
+    designer pipeline is covered by skeleton-stage tests.
     """
 
     def _make_rpg(self, root_language: str | None = None):
@@ -178,10 +177,8 @@ class FileDesignerWiringTests(unittest.TestCase):
         )
 
     def test_uses_explicit_target_language_kwarg(self) -> None:
-        # The kwarg wins over RPG meta. After Phase 2 ships GoBackend
-        # the registry resolves "go" to the real backend; this test
-        # documents that wiring works end-to-end (kwarg → resolved
-        # language → registered backend).
+        # The kwarg wins over RPG meta and resolves to the registered
+        # Go backend.
         from decoder_lang import GoBackend  # local import to avoid
         rpg = self._make_rpg(root_language="python")
         designer = self._make_designer(rpg=rpg, target_language="go")

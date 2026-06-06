@@ -1,10 +1,8 @@
 """Parser-agnostic test-execution result types.
 
-The decoder used to talk to pytest directly through
-:func:`code_gen.test_runner.run_pytest`. Phase 4 generalises this to
-``run_tests(backend, env, ...)`` returning :class:`TestRunResult`, and
-each backend supplies its own parser that maps native test-tool
-output (pytest / ``go test`` / ``cargo test`` / ...) into this shape.
+Backend-driven test execution returns :class:`TestRunResult` so
+decoder stages can reason about pytest, ``go test``, ``cargo test``,
+and other native test tools through one result shape.
 
 Defined here (not in :mod:`code_gen`) so backends can return the type
 without an import cycle through the decoder package.
