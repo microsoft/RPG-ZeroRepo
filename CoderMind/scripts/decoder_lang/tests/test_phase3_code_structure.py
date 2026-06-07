@@ -88,9 +88,8 @@ class ListCodeUnitsTests(unittest.TestCase):
         self.assertEqual(by_name["__init__"].unit_type, "method")
         self.assertEqual(by_name["parse"].unit_type, "method")
         self.assertEqual(by_name["parse_async"].unit_type, "method")
-        # Nested function is NOT a method (its parent is a function,
-        # not a class) — matches the original ast.walk + isinstance
-        # logic where ``outer`` and ``inner`` are both "function".
+        # Nested function is NOT a method: its parent is a function,
+        # not a class. Both ``outer`` and ``inner`` are functions.
         self.assertEqual(by_name["outer"].unit_type, "function")
         self.assertEqual(by_name["inner"].unit_type, "function")
 
@@ -160,9 +159,8 @@ class FormatSignatureTests(unittest.TestCase):
         )
 
     def test_method_with_keyword_only(self) -> None:
-        # Note: the original helper only walks node.args.args (no
-        # kwonly handling); ``strict`` is kwonly so it does NOT appear.
-        # PythonBackend preserves this exact behaviour for parity.
+        # Keyword-only args are omitted from the rendered prompt
+        # signature, so ``strict`` does not appear.
         sig = self.backend.format_signature(self.by_name["parse"])
         self.assertIn("data: bytes", sig)
         self.assertNotIn("strict", sig)
@@ -242,20 +240,65 @@ class FindMainBlockLinenoTests(unittest.TestCase):
         self.assertFalse(hasattr(get_backend("go"), "find_main_block_lineno"))
 
 
-class GoBackendStubsTests(unittest.TestCase):
-    """Unsupported Go backend code-structure helpers raise explicitly."""
+class GoBackendCodeStructureTests(unittest.TestCase):
+    """Go backend code-structure helpers delegate to ``lang_parser``."""
 
-    def test_list_code_units_stub(self) -> None:
-        with self.assertRaises(NotImplementedError):
-            get_backend("go").list_code_units("package main")
+    SAMPLE_GO = """\
+package server
 
-    def test_format_signature_stub(self) -> None:
-        with self.assertRaises(NotImplementedError):
-            get_backend("go").format_signature(None)
+import (
+    "fmt"
+    nethttp "net/http"
+)
 
-    def test_list_imports_stub(self) -> None:
-        with self.assertRaises(NotImplementedError):
-            get_backend("go").list_imports("package main")
+type Server struct {
+    Name string
+}
+
+func NewServer(name string) *Server {
+    return &Server{Name: name}
+}
+
+func (s *Server) Handle() {
+    fmt.Println(s.Name)
+}
+"""
+
+    def setUp(self) -> None:
+        self.backend: GoBackend = get_backend("go")  # type: ignore
+
+    def test_list_code_units(self) -> None:
+        units = self.backend.list_code_units(self.SAMPLE_GO, "server.go")
+        by_name = {unit.name: unit for unit in units}
+        self.assertEqual(by_name["Server"].unit_type, "struct")
+        self.assertEqual(by_name["NewServer"].unit_type, "function")
+        self.assertEqual(by_name["Handle"].unit_type, "method")
+        self.assertEqual(by_name["Handle"].parent, "Server")
+
+    def test_list_code_units_empty_on_syntax_error(self) -> None:
+        self.assertEqual(self.backend.list_code_units("func broken(\n", "bad.go"), [])
+
+    def test_format_signature(self) -> None:
+        units = self.backend.list_code_units(self.SAMPLE_GO, "server.go")
+        by_name = {unit.name: unit for unit in units}
+        self.assertEqual(
+            self.backend.format_signature(by_name["NewServer"]),
+            "func NewServer(name string) *Server",
+        )
+        self.assertEqual(
+            self.backend.format_signature(by_name["Handle"]),
+            "func (s *Server) Handle()",
+        )
+        self.assertEqual(self.backend.format_signature(by_name["Server"]), "Server")
+        self.assertEqual(self.backend.format_signature(None), "")
+
+    def test_list_imports(self) -> None:
+        imports = self.backend.list_imports(self.SAMPLE_GO, "server.go")
+        self.assertEqual([dep.dst for dep in imports], ["fmt", "net/http"])
+        self.assertEqual(imports[1].extra.get("alias"), "nethttp")
+
+    def test_list_imports_empty_on_syntax_error(self) -> None:
+        self.assertEqual(self.backend.list_imports("func broken(\n", "bad.go"), [])
 
 
 if __name__ == "__main__":

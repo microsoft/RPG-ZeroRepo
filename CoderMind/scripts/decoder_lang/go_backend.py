@@ -1,25 +1,15 @@
-"""Production :class:`LanguageBackend` implementation for Go.
-
-This backend currently implements the skeleton-relevant subset needed
-for ``FileDesigner`` to emit ``.go`` files and skip ``__init__.py``
-package markers. Code-structure, test-runner, and output-parser
-methods raise :class:`NotImplementedError` until the decoder stages use
-Go-specific implementations for those behaviours.
-
-Reference for Go conventions consulted:
-* ``$GOROOT/src`` and Go's effective package guide — directories *are*
-  packages, no marker file required.
-* ``go test`` convention — sibling ``*_test.go`` files; no separate
-  ``tests/`` tree by default.
-"""
+"""Production :class:`LanguageBackend` implementation for Go."""
 from __future__ import annotations
 
 import logging
 import re
+import shutil
 from pathlib import Path
+from typing import Any
 
+from .backend import ToolchainUnavailable
 from .prompt_hints import PromptHints
-from .test_result import EnvHandle, TestRunResult
+from .test_result import EnvHandle, TestFailure, TestRunResult
 
 logger = logging.getLogger(__name__)
 
@@ -28,6 +18,16 @@ logger = logging.getLogger(__name__)
 # conventions, Go's *package* names must be valid identifiers).
 _GO_IDENT_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 _GO_IDENT_INVALID = re.compile(r"[^A-Za-z0-9_]")
+_PLACEHOLDER_RE = re.compile(
+    r"(?is)\b(?:return|panic\s*\()\s*(?:\"[^\"]*|`[^`]*|'[^']*)"
+    r"(?:TODO|PLACEHOLDER|NOT IMPLEMENTED)"
+)
+_LINE_COMMENT_RE = re.compile(r"//.*?$", re.MULTILINE)
+_BLOCK_COMMENT_RE = re.compile(r"/\*.*?\*/", re.DOTALL)
+_GO_TEST_RUN_RE = re.compile(r"^===\s+RUN\s+(\S+)")
+_GO_TEST_EVENT_RE = re.compile(r"^---\s+(PASS|FAIL|SKIP):\s+(\S+)(?:\s+\(([^)]*)\))?")
+_GO_TEST_PACKAGE_RE = re.compile(r"^(ok|FAIL)\s+\S+\s+([0-9.]+)s\b")
+_GO_TEST_FILE_LINE_RE = re.compile(r"^\s*([^\s:]+_test\.go):(\d+):\s*(.*)$")
 
 # A short list of Go reserved words. Used only for identifier
 # validation; not a parser. Source: Go language spec §"Keywords".
@@ -40,14 +40,7 @@ _GO_KEYWORDS = frozenset({
 
 
 class GoBackend:
-    """Skeleton-stage :class:`LanguageBackend` for Go.
-
-    See :class:`decoder_lang.backend.LanguageBackend` for method
-    contracts. Implemented methods cover file/test classification, the
-    no-op package marker, identifier rules, and prompt hints. Code
-    analysis and test-runner methods raise :class:`NotImplementedError`
-    so unsupported paths fail explicitly.
-    """
+    """:class:`LanguageBackend` for Go source."""
 
     name = "go"
     display_name = "Go"
@@ -96,70 +89,187 @@ class GoBackend:
         return cleaned
 
     # ------------------------------------------------------------------
-    # 2. Code structure — not implemented for Go yet
+    # 2. Code structure
     # ------------------------------------------------------------------
 
     def has_placeholder(self, code: str, path: str = "<string>") -> bool:
-        raise NotImplementedError(
-            "GoBackend.has_placeholder is not implemented; "
-            "the current Go backend supports skeleton-stage behaviour only.",
-        )
+        ok, _ = self.syntax_check(code, path)
+        if not ok:
+            return False
+        stripped = _BLOCK_COMMENT_RE.sub("", _LINE_COMMENT_RE.sub("", code))
+        return bool(_PLACEHOLDER_RE.search(stripped))
 
     def syntax_check(self, code: str, path: str = "<string>") -> tuple[bool, str | None]:
-        raise NotImplementedError(
-            "GoBackend.syntax_check is not implemented.",
-        )
+        parser = self._parser()
+        return parser.validate_syntax(self._parse_path(path), code)
 
-    def list_code_units(self, code: str, path: str = "<string>") -> list:
-        raise NotImplementedError(
-            "GoBackend.list_code_units is not implemented.",
-        )
+    def list_code_units(self, code: str, path: str = "<string>") -> list[Any]:
+        result = self._parse(code, path)
+        if result is None or result.syntax_error:
+            return []
+        return [
+            unit for unit in result.units
+            if unit.unit_type in {"struct", "interface", "function", "method"}
+        ]
 
-    def format_signature(self, unit) -> str:  # type: ignore[override]
-        raise NotImplementedError(
-            "GoBackend.format_signature is not implemented.",
-        )
+    def format_signature(self, unit: Any) -> str:
+        if unit is None:
+            return ""
+        name = getattr(unit, "name", None) or ""
+        if getattr(unit, "unit_type", None) not in {"function", "method"}:
+            return name
+        code = (getattr(unit, "code", "") or "").strip()
+        if not code:
+            return name
+        signature_lines: list[str] = []
+        for line in code.splitlines():
+            stripped = line.strip()
+            if not stripped:
+                continue
+            if "{" in stripped:
+                stripped = stripped.split("{", 1)[0].rstrip()
+                if stripped:
+                    signature_lines.append(stripped)
+                break
+            signature_lines.append(stripped)
+            if getattr(unit, "unit_type", None) in {"struct", "interface"}:
+                break
+            if stripped.endswith(")") or stripped.endswith(") error"):
+                break
+        if not signature_lines:
+            return name
+        return " ".join(signature_lines)
 
-    def list_imports(self, code: str, path: str = "<string>") -> list:
-        raise NotImplementedError(
-            "GoBackend.list_imports is not implemented.",
-        )
+    def list_imports(self, code: str, path: str = "<string>") -> list[Any]:
+        result = self._parse(code, path)
+        if result is None or result.syntax_error:
+            return []
+        return [dep for dep in result.dependencies if dep.relation == "imports"]
 
     # ------------------------------------------------------------------
-    # 3. Build / test environment — not implemented for Go yet
+    # 3. Build / test environment
     # ------------------------------------------------------------------
 
     def detect_env(self, repo_root: Path) -> EnvHandle | None:
-        raise NotImplementedError(
-            "GoBackend.detect_env is not implemented.",
+        go_exe = shutil.which("go")
+        if not go_exe:
+            return None
+        root = repo_root.resolve()
+        module_file = root / "go.mod"
+        return EnvHandle(
+            project_root=root,
+            runtime_executable=go_exe,
+            extra={
+                "module_file": str(module_file) if module_file.exists() else None,
+                "module": self._read_module_name(module_file),
+            },
         )
 
     def ensure_env(self, repo_root: Path) -> EnvHandle:
-        raise NotImplementedError(
-            "GoBackend.ensure_env is not implemented.",
-        )
+        env = self.detect_env(repo_root)
+        if env is None:
+            raise ToolchainUnavailable("Go toolchain is not available on PATH")
+        module_file = env.project_root / "go.mod"
+        if not module_file.exists():
+            module_name = self._default_module_name(env.project_root)
+            module_file.write_text(
+                f"module {module_name}\n\ngo 1.22\n",
+                encoding="utf-8",
+            )
+            return EnvHandle(
+                project_root=env.project_root,
+                runtime_executable=env.runtime_executable,
+                extra={"module_file": str(module_file), "module": module_name},
+            )
+        return env
 
     def test_command(
         self,
         env: EnvHandle,
         selectors: list[str] | None = None,
     ) -> list[str]:
-        raise NotImplementedError(
-            "GoBackend.test_command is not implemented.",
-        )
+        go_exe = env.runtime_executable or "go"
+        cmd = [go_exe, "test"]
+        if selectors:
+            cmd.extend(["-run", "|".join(selectors)])
+        cmd.append("./...")
+        return cmd
 
     def install_deps_command(
         self,
         env: EnvHandle,
         deps: list[str],
     ) -> list[str] | None:
-        raise NotImplementedError(
-            "GoBackend.install_deps_command is not implemented.",
-        )
+        if not deps:
+            return None
+        go_exe = env.runtime_executable or "go"
+        return [go_exe, "get", *deps]
 
     def parse_test_output(self, raw: str, exit_code: int) -> TestRunResult:
-        raise NotImplementedError(
-            "GoBackend.parse_test_output is not implemented.",
+        passed_count = 0
+        failed_count = 0
+        skipped_count = 0
+        duration_sec = 0.0
+        failures: list[TestFailure] = []
+        current_test: str | None = None
+        output_by_test: dict[str, list[str]] = {}
+
+        for line in raw.splitlines():
+            started = _GO_TEST_RUN_RE.match(line)
+            if started:
+                current_test = started.group(1)
+                output_by_test.setdefault(current_test, [])
+                continue
+
+            event = _GO_TEST_EVENT_RE.match(line)
+            if event:
+                kind, test_name, duration_text = event.groups()
+                if kind == "PASS":
+                    passed_count += 1
+                elif kind == "SKIP":
+                    skipped_count += 1
+                elif kind == "FAIL":
+                    failed_count += 1
+                    long_message = "\n".join(output_by_test.get(test_name, [])).strip()
+                    file_path, line_number, message = self._failure_location(long_message)
+                    short_message = message or f"{test_name} failed"
+                    failures.append(TestFailure(
+                        test_id=test_name,
+                        short_message=short_message,
+                        long_message=long_message,
+                        file_path=file_path,
+                        line=line_number,
+                    ))
+                duration_sec += self._parse_duration(duration_text)
+                current_test = None
+                continue
+
+            package = _GO_TEST_PACKAGE_RE.match(line)
+            if package:
+                duration_sec = max(duration_sec, self._parse_duration(package.group(2)))
+                continue
+
+            if current_test:
+                output_by_test.setdefault(current_test, []).append(line)
+
+        if exit_code == 0:
+            status = "passed"
+        elif failed_count:
+            status = "failed"
+        else:
+            status = "errored"
+
+        return TestRunResult(
+            status=status,
+            exit_code=exit_code,
+            passed_count=passed_count,
+            failed_count=failed_count,
+            error_count=0 if status != "errored" else 1,
+            skipped_count=skipped_count,
+            duration_sec=duration_sec,
+            failures=failures,
+            raw_output=raw,
+            extra={"tool": "go test"},
         )
 
     # ------------------------------------------------------------------
@@ -200,6 +310,62 @@ class GoBackend:
         )
         GoBackend._PROMPT_HINTS_SINGLETON = hints
         return hints
+
+    @staticmethod
+    def _parser() -> Any:
+        from lang_parser import get_parser  # type: ignore
+
+        return get_parser("go")
+
+    @staticmethod
+    def _parse_path(path: str) -> str:
+        if path == "<string>" or not path.endswith(".go"):
+            return "main.go"
+        return path
+
+    def _parse(self, code: str, path: str):
+        parser = self._parser()
+        try:
+            return parser.parse_file(self._parse_path(path), code)
+        except Exception:
+            logger.exception("Failed to parse Go source: %s", path)
+            return None
+
+    @staticmethod
+    def _parse_duration(duration_text: str | None) -> float:
+        if not duration_text:
+            return 0.0
+        text = duration_text.rstrip("s")
+        try:
+            return float(text)
+        except ValueError:
+            return 0.0
+
+    @staticmethod
+    def _read_module_name(module_file: Path) -> str | None:
+        try:
+            for line in module_file.read_text(encoding="utf-8").splitlines():
+                stripped = line.strip()
+                if stripped.startswith("module "):
+                    return stripped.split(None, 1)[1]
+        except OSError:
+            return None
+        return None
+
+    @staticmethod
+    def _default_module_name(repo_root: Path) -> str:
+        raw_name = repo_root.name.lower()
+        module_leaf = re.sub(r"[^a-z0-9._/-]+", "-", raw_name).strip("-./")
+        return f"codermind.local/{module_leaf or 'module'}"
+
+    @staticmethod
+    def _failure_location(text: str) -> tuple[str | None, int | None, str | None]:
+        for line in text.splitlines():
+            match = _GO_TEST_FILE_LINE_RE.match(line)
+            if match:
+                file_path, line_number, message = match.groups()
+                return file_path, int(line_number), message or None
+        return None, None, None
 
 
 __all__ = ["GoBackend"]

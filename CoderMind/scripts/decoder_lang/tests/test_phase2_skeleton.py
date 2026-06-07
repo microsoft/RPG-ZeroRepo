@@ -2,9 +2,9 @@
 
 Covers:
 
-* :class:`decoder_lang.GoBackend` registration + skeleton-relevant methods.
+* :class:`decoder_lang.GoBackend` registration + backend methods.
 * :func:`skeleton.file_designer.validate_directory_structure` honors
-  the supplied backend's identifier rules; behaviour is unchanged when
+    the supplied backend's identifier rules; Python defaults apply when
     ``backend=None`` (Python default).
 * :meth:`skeleton_models.RepoSkeleton.add_init_files` is a no-op for
   backends whose :meth:`package_marker_filename` returns ``None``
@@ -18,8 +18,9 @@ from __future__ import annotations
 
 import sys
 import unittest
+from tempfile import TemporaryDirectory
 from pathlib import Path
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 
 # Make ``scripts/`` importable for direct invocation.
 _SCRIPTS_DIR = Path(__file__).resolve().parents[2]
@@ -29,9 +30,11 @@ if str(_SCRIPTS_DIR) not in sys.path:
 from decoder_lang import (  # noqa: E402
     GoBackend,
     PythonBackend,
+    ToolchainUnavailable,
     get_backend,
     list_backends,
 )
+from decoder_lang.test_result import EnvHandle  # noqa: E402
 
 
 class GoBackendRegistrationTests(unittest.TestCase):
@@ -48,7 +51,7 @@ class GoBackendRegistrationTests(unittest.TestCase):
 
 
 class GoBackendBehaviourTests(unittest.TestCase):
-    """The skeleton-relevant subset of GoBackend behaves correctly."""
+    """GoBackend behaviour exposed through the decoder backend contract."""
 
     def setUp(self) -> None:
         self.backend = get_backend("go")
@@ -97,20 +100,79 @@ class GoBackendBehaviourTests(unittest.TestCase):
         s = self.backend.sanitize_module_identifier("a-b-c")
         self.assertEqual(self.backend.sanitize_module_identifier(s), s)
 
-    # --- stubbed methods raise ---------------------------------------
+    # --- code structure ----------------------------------------------
 
-    def test_ast_methods_stub(self) -> None:
-        with self.assertRaises(NotImplementedError):
-            self.backend.has_placeholder("package main")
-        with self.assertRaises(NotImplementedError):
-            self.backend.syntax_check("package main")
+    def test_syntax_check(self) -> None:
+        ok, error = self.backend.syntax_check("package main\nfunc Run() {}\n")
+        self.assertTrue(ok, error)
+        ok, error = self.backend.syntax_check("func Run() {}\n")
+        self.assertFalse(ok)
+        self.assertIn("package", error or "")
 
-    def test_test_methods_stub(self) -> None:
-        from decoder_lang.test_result import EnvHandle
-        with self.assertRaises(NotImplementedError):
-            self.backend.test_command(EnvHandle(project_root=Path(".")))
-        with self.assertRaises(NotImplementedError):
-            self.backend.detect_env(Path("."))
+    def test_has_placeholder(self) -> None:
+        code = 'package main\nfunc Run() string { return "TODO: implement" }\n'
+        self.assertTrue(self.backend.has_placeholder(code))
+        self.assertFalse(
+            self.backend.has_placeholder('package main\nfunc Run() string { return "ok" }\n')
+        )
+
+    # --- test environment --------------------------------------------
+
+    def test_detect_env_none_when_go_missing(self) -> None:
+        with patch("decoder_lang.go_backend.shutil.which", return_value=None):
+            self.assertIsNone(self.backend.detect_env(Path(".")))
+
+    def test_ensure_env_raises_when_go_missing(self) -> None:
+        with patch("decoder_lang.go_backend.shutil.which", return_value=None):
+            with self.assertRaises(ToolchainUnavailable):
+                self.backend.ensure_env(Path("."))
+
+    def test_ensure_env_creates_go_mod_when_toolchain_exists(self) -> None:
+        with TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            with patch("decoder_lang.go_backend.shutil.which", return_value="/usr/bin/go"):
+                env = self.backend.ensure_env(root)
+            self.assertEqual(env.runtime_executable, "/usr/bin/go")
+            self.assertEqual(env.extra.get("module"), f"codermind.local/{root.name.lower()}")
+            self.assertTrue((root / "go.mod").exists())
+            self.assertIn("module codermind.local", (root / "go.mod").read_text())
+
+    def test_test_command(self) -> None:
+        cmd = self.backend.test_command(
+            EnvHandle(project_root=Path("."), runtime_executable="/usr/bin/go"),
+            selectors=["TestRun", "TestStop"],
+        )
+        self.assertEqual(cmd, ["/usr/bin/go", "test", "-run", "TestRun|TestStop", "./..."])
+
+    def test_install_deps_command(self) -> None:
+        env = EnvHandle(project_root=Path("."), runtime_executable="/usr/bin/go")
+        self.assertIsNone(self.backend.install_deps_command(env, []))
+        self.assertEqual(
+            self.backend.install_deps_command(env, ["github.com/acme/lib"]),
+            ["/usr/bin/go", "get", "github.com/acme/lib"],
+        )
+
+    def test_parse_test_output(self) -> None:
+        raw = "\n".join([
+            "=== RUN   TestRun",
+            "--- PASS: TestRun (0.01s)",
+            "=== RUN   TestBroken",
+            "    service_test.go:12: expected true",
+            "--- FAIL: TestBroken (0.02s)",
+            "FAIL\texample.com/demo\t0.03s",
+        ])
+        result = self.backend.parse_test_output(raw, 1)
+        self.assertEqual(result.status, "failed")
+        self.assertEqual(result.passed_count, 1)
+        self.assertEqual(result.failed_count, 1)
+        self.assertEqual(result.failures[0].test_id, "TestBroken")
+        self.assertEqual(result.failures[0].file_path, "service_test.go")
+        self.assertEqual(result.failures[0].line, 12)
+
+    def test_parse_test_output_without_test_failure_is_error(self) -> None:
+        result = self.backend.parse_test_output("FAIL\texample.com/demo\n", 1)
+        self.assertEqual(result.status, "errored")
+        self.assertEqual(result.error_count, 1)
 
     # --- prompt hints ------------------------------------------------
 
@@ -130,7 +192,7 @@ class ValidateDirectoryStructureTests(unittest.TestCase):
         from skeleton.file_designer import validate_directory_structure  # noqa
         self.validate = validate_directory_structure
 
-    def test_python_default_unchanged(self) -> None:
+    def test_python_default_identifier_rules(self) -> None:
         # No backend → Python identifier rules: hyphens are rejected.
         ok, msg = self.validate(
             {"comp": "src/my-pkg/utils"}, ["comp"],
@@ -180,7 +242,7 @@ class AddInitFilesTests(unittest.TestCase):
         # ``add_init_files`` has at least one candidate directory.
         return RepoSkeleton({"src/foo.py": ""})
 
-    def test_default_behaviour_unchanged_no_backend(self) -> None:
+    def test_python_marker_added_without_backend(self) -> None:
         # backend=None uses Python __init__.py emission.
         skel = self._make_skeleton()
         added = skel.add_init_files()
@@ -188,8 +250,8 @@ class AddInitFilesTests(unittest.TestCase):
         self.assertIn("src/__init__.py", skel.path_to_node)
 
     def test_python_backend_matches_no_backend(self) -> None:
-        # Passing PythonBackend explicitly produces the same result as
-        # not passing one. (Documents the back-compat invariant.)
+        # Passing PythonBackend explicitly produces the same package
+        # markers as default backend resolution.
         skel_a = self._make_skeleton()
         a = skel_a.add_init_files()
 
