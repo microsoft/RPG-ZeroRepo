@@ -338,7 +338,7 @@ class TestSemanticParsingToRPGEncoding:
         # feature value as the node name, not the key after "function ")
         new_nodes = [
             n for n in rpg.nodes.values()
-            if n.meta and n.meta.path == "src/user_manager.py:new_utility"
+            if n.meta and n.meta.path == "src/user_manager.py::new_utility"
         ]
         assert len(new_nodes) == 1
         # The name is taken from the feature list

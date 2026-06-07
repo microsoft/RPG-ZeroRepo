@@ -590,21 +590,21 @@ class TestRPGEvolutionUpdateDepGraph:
     def test_update_dep_graph_index_no_crash(self, simple_rpg):
         logger = logging.getLogger("test_dep")
 
-        # Mock dep_graph to avoid needing a real repo
-        with patch.object(RPG, "parse_dep_graph") as mock_parse:
-            mock_dg = MagicMock()
-            mock_dg.G.nodes.return_value = ["n1", "n2"]
-            mock_parse.return_value = mock_dg
-            simple_rpg.dep_graph = mock_dg
-            simple_rpg._dep_to_rpg_map = {"n1": ["a"]}
-
+        with patch("rpg.service.RPGService.refresh_dep_graph") as mock_refresh:
             RPGEvolution._update_dep_graph_index(simple_rpg, "/tmp/fake", logger)
-            mock_parse.assert_called_once()
+            mock_refresh.assert_called_once_with(
+                code_dir="/tmp/fake",
+                workspace_root="/tmp/fake",
+                save_path=None,
+            )
 
     def test_update_dep_graph_handles_error(self, simple_rpg):
         logger = logging.getLogger("test_dep_err")
 
-        with patch.object(RPG, "parse_dep_graph", side_effect=RuntimeError("fail")):
+        with patch(
+            "rpg.service.RPGService.refresh_dep_graph",
+            side_effect=RuntimeError("fail"),
+        ):
             # Should not raise
             RPGEvolution._update_dep_graph_index(simple_rpg, "/tmp/fake", logger)
 

@@ -34,6 +34,7 @@ from common.utils import (
     normalize_path,
     is_test_file,
     get_node_range_robust,
+    extract_source_by_lines,
 )
 
 logger = logging.getLogger(__name__)
@@ -1002,6 +1003,7 @@ class DependencyGraph:
                         ast=node,
                         start_line=start,
                         end_line=end,
+                        code=extract_source_by_lines(source_code, start, end),
                         signature=self._extract_signature(node, is_method=False),
                     )
             elif isinstance(node, ast.ClassDef):
@@ -1017,6 +1019,7 @@ class DependencyGraph:
                         ast=node,
                         start_line=start,
                         end_line=end,
+                        code=extract_source_by_lines(source_code, start, end),
                     )
                     # Methods inside the class
                     for body_node in node.body:
@@ -1032,6 +1035,7 @@ class DependencyGraph:
                                     ast=body_node,
                                     start_line=s2,
                                     end_line=e2,
+                                    code=extract_source_by_lines(source_code, s2, e2),
                                     signature=self._extract_signature(body_node, is_method=True),
                                 )
             # Recurse into nested control flow
@@ -1069,6 +1073,7 @@ class DependencyGraph:
                     ast=node,
                     start_line=start,
                     end_line=end,
+                    code=extract_source_by_lines(source_code, start, end),
                     signature=self._extract_signature(node, is_method=False),
                 )
 
@@ -1085,6 +1090,7 @@ class DependencyGraph:
                     ast=node,
                     start_line=start,
                     end_line=end,
+                    code=extract_source_by_lines(source_code, start, end),
                 )
 
                 for body in node.body:
@@ -1101,6 +1107,7 @@ class DependencyGraph:
                             ast=body,
                             start_line=start2,
                             end_line=end2,
+                            code=extract_source_by_lines(source_code, start2, end2),
                             signature=self._extract_signature(body, is_method=True),
                         )
 

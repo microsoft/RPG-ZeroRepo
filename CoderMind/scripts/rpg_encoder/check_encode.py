@@ -23,7 +23,33 @@ _script_dir = Path(__file__).resolve().parent.parent
 if str(_script_dir) not in sys.path:
     sys.path.insert(0, str(_script_dir))
 
-from common.paths import RPG_FILE  # noqa: E402
+from common.paths import RPG_FILE, WORKSPACE_ROOT  # noqa: E402
+
+
+def _cwd_workspace_rpg_path() -> Path:
+    """Return the workspace-local RPG path nearest to the current cwd."""
+    cwd = Path.cwd().resolve()
+    for candidate in [cwd, *cwd.parents]:
+        cmind_dir = candidate / ".cmind"
+        if cmind_dir.is_dir():
+            return cmind_dir / "data" / "rpg.json"
+    return cwd / ".cmind" / "data" / "rpg.json"
+
+
+def _rpg_path_candidates() -> list[Path]:
+    """Return RPG paths to probe, ordered by preferred storage layout."""
+    cwd = Path.cwd().resolve()
+    workspace_root = Path(WORKSPACE_ROOT).resolve()
+    workspace_local = _cwd_workspace_rpg_path()
+    candidates: list[Path] = []
+    try:
+        in_import_workspace = cwd.is_relative_to(workspace_root)
+    except ValueError:
+        in_import_workspace = False
+    if in_import_workspace:
+        candidates.append(Path(RPG_FILE))
+    candidates.append(workspace_local)
+    return candidates
 
 
 def load_json(path: Path) -> Dict[str, Any] | None:
@@ -87,7 +113,8 @@ def get_rpg_stats(data: Dict[str, Any]) -> Dict[str, Any]:
 
 def check_encode() -> Dict[str, Any]:
     """Check encode state and return a result dict."""
-    rpg_path = Path(RPG_FILE)
+    candidates = _rpg_path_candidates()
+    rpg_path = next((path for path in candidates if path.exists()), candidates[0])
 
     # Case 1: RPG file does not exist → init
     if not rpg_path.exists():

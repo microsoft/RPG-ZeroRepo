@@ -321,7 +321,7 @@ def test_run_initial_encode_success_writes_log(tmp_path):
         stdout_text='{"status": "success"}\n',
     )
     assert cmind_cli._run_initial_encode(tmp_path) is True
-    log = tmp_path / ".cmind" / "logs" / "encode.log"
+    log = cmind_cli._storage.workspace_logs_dir(tmp_path) / "encode.log"
     assert log.is_file()
     contents = log.read_text()
     assert "Generating repo info" in contents
@@ -337,6 +337,6 @@ def test_run_initial_encode_failure_returns_false(tmp_path):
         stdout_text='{"status": "failed", "error": "boom"}\n',
     )
     assert cmind_cli._run_initial_encode(tmp_path) is False
-    log = tmp_path / ".cmind" / "logs" / "encode.log"
+    log = cmind_cli._storage.workspace_logs_dir(tmp_path) / "encode.log"
     assert log.is_file()
     assert "boom" in log.read_text()

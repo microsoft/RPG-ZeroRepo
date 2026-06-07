@@ -347,7 +347,7 @@ class TestTemplates:
         with open(update_md, "r", encoding="utf-8") as f:
             content = f.read()
         assert "check_encode.py" in content
-        assert "run_update_rpg.py" in content
+        assert "update_graphs.py update-rpg" in content
 
 
 # ============================================================================

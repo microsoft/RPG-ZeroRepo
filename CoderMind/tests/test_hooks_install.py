@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Tests for CoderMind hook installation (Claude SessionStart, Copilot folderOpen task, and git pre-commit) and the ``update_graphs.py status`` subcommand the hooks invoke.
+"""Tests for CoderMind hook installation and status loading.
 
 Verifies:
   - ``_install_claude_hooks`` writes a SessionStart hook that calls
@@ -7,8 +7,9 @@ Verifies:
   - ``_install_copilot_hooks`` writes a VS Code task with
     ``runOptions.runOn = "folderOpen"``, is idempotent, and preserves
     pre-existing user tasks.
-  - ``_install_hooks`` dispatches the right AI-specific installer and
-    also wires up the git pre-commit hook when a ``.git`` dir exists.
+    - ``_install_hooks`` dispatches the right AI-specific installer,
+        installs git post-commit/post-merge dispatchers, and removes
+        CoderMind-owned pre-commit blocks when a ``.git`` dir exists.
   - ``update_graphs.py status`` returns RPG/dep-graph stats + an
     agent-facing MCP-tools reminder, on both populated and empty
     workspaces.
@@ -97,10 +98,8 @@ def test_install_claude_hooks_is_idempotent_across_python_upgrades(project, monk
 def test_install_claude_hooks_shell_escapes_special_chars(project, monkeypatch):
     """Interpreter / workspace paths must not appear in the hook command.
 
-    Previously the hook embedded ``sys.executable`` and the workspace
-    script path, requiring ``shlex.quote`` to survive spaces.  The new
-    hook body invokes the global ``cmind`` CLI directly, so paths with
-    special characters can't end up inside the command string.
+    The hook body invokes the global ``cmind`` CLI directly, so paths
+    with special characters cannot end up inside the command string.
     """
     monkeypatch.setattr(
         cmind_cli.sys, "executable", "/path with space/python"
@@ -193,7 +192,6 @@ def test_install_copilot_hooks_preserves_user_tasks(project):
 # ---------------------------------------------------------------------------
 
 def test_install_hooks_dispatches_to_copilot(project, monkeypatch):
-    # Pretend the project is a git repo so the pre-commit installer fires.
     (project / ".git" / "hooks").mkdir(parents=True)
 
     cmind_cli._install_hooks(project, "copilot", tracker=None)
@@ -201,13 +199,14 @@ def test_install_hooks_dispatches_to_copilot(project, monkeypatch):
     # Copilot tasks.json present, Claude settings.json absent.
     assert (project / ".vscode" / "tasks.json").is_file()
     assert not (project / ".claude" / "settings.json").exists()
-    # Pre-commit hook installed.
-    pre = (project / ".git" / "hooks" / "pre-commit").read_text()
-    assert "CoderMind: incremental RPG sync on commit" in pre
-    assert "update_graphs.py" in pre and "sync" in pre
-    # Hook must pass ``--staged-only`` so it doesn't pull working-tree
-    # changes that the user hasn't ``git add``'d.
-    assert "--staged-only" in pre
+    hooks_dir = project / ".git" / "hooks"
+    post_commit = (hooks_dir / "post-commit").read_text()
+    post_merge = (hooks_dir / "post-merge").read_text()
+    assert "CoderMind: post-commit dispatcher" in post_commit
+    assert "cmind hook post-commit" in post_commit
+    assert "CoderMind: post-merge dispatcher" in post_merge
+    assert "cmind hook post-merge" in post_merge
+    assert not (hooks_dir / "pre-commit").exists()
 
 
 def test_install_hooks_dispatches_to_claude(project):
@@ -217,17 +216,18 @@ def test_install_hooks_dispatches_to_claude(project):
 
     assert (project / ".claude" / "settings.json").is_file()
     assert not (project / ".vscode" / "tasks.json").exists()
-    assert (project / ".git" / "hooks" / "pre-commit").is_file()
+    hooks_dir = project / ".git" / "hooks"
+    assert (hooks_dir / "post-commit").is_file()
+    assert (hooks_dir / "post-merge").is_file()
+    assert not (hooks_dir / "pre-commit").exists()
 
 
 def test_update_command_invokes_install_hooks():
     """Regression tripwire: ``cmind update`` must call ``_install_hooks``.
 
-    Previously ``update`` re-downloaded templates / refreshed gitignore
-    / regenerated MCP config but silently *skipped* hook installation.
-    Result: users running ``cmind update`` after upgrading the CLI
-    never received hook fixes \u2014 ``.git/hooks/*`` stayed frozen at
-    whatever version was active during the original ``cmind init``.
+    Hook installation belongs in the update flow alongside template,
+    gitignore, and MCP config refreshes, so existing workspaces receive
+    hook dispatcher fixes when users run ``cmind update``.
 
     This is a static-source assertion rather than an end-to-end test
     because ``update`` does network I/O (template download) that is
@@ -249,16 +249,11 @@ def test_update_command_invokes_install_hooks():
 
 
 # ---------------------------------------------------------------------------
-# Sentinel-block upgrade migration  (regression for P0-4)
+# Sentinel-block upgrade migration
 # ---------------------------------------------------------------------------
 #
-# Prior to the sentinel-block design, ``_install_hook_snippet`` returned
-# early as soon as any known marker (current or legacy) appeared in the
-# hook file.  Combined with marker renames between releases, this meant
-# every upgrade was a silent no-op: users kept whatever they were first
-# installed with, and never picked up new behavior.  The tests below
-# pin the upgrade semantics: a fresh install must REPLACE any prior
-# CoderMind-owned content rather than refusing to write or stacking copies.
+# The installer must replace CoderMind-owned content by sentinel range or
+# compatibility marker, while preserving user-authored shell lines.
 
 
 def _hooks_dir(project):
@@ -267,8 +262,8 @@ def _hooks_dir(project):
     return hd
 
 
-def test_pre_commit_v1_legacy_is_replaced_on_upgrade(project):
-    """v1 pre-commit shipped a 2-line full-sync snippet; the current installer must remove it and write the new sentinel-wrapped block."""
+def test_pre_commit_v1_legacy_is_removed_on_upgrade(project):
+    """A CoderMind-owned pre-commit snippet is removed during hook setup."""
     hd = _hooks_dir(project)
     (hd / "pre-commit").write_text(
         "#!/bin/sh\n"
@@ -276,21 +271,12 @@ def test_pre_commit_v1_legacy_is_replaced_on_upgrade(project):
         "/old/python /old/update_graphs.py sync 2>/dev/null || true\n"
     )
 
-    assert cmind_cli._install_git_pre_commit_hook(project) is True
-    text = (hd / "pre-commit").read_text()
-
-    # Old marker + old command line are gone.
-    assert "# CoderMind: full RPG sync on commit" not in text
-    assert "/old/python" not in text
-    # New sentinel-wrapped block is present exactly once.
-    assert text.count("# CMIND-BEGIN pre-commit") == 1
-    assert text.count("# CMIND-END pre-commit") == 1
-    assert "# CoderMind: incremental RPG sync on commit" in text
-    assert "--staged-only" in text
+    assert cmind_cli._uninstall_git_pre_commit_hook(project) is True
+    assert not (hd / "pre-commit").exists()
 
 
 def test_post_commit_v1_legacy_is_replaced_on_upgrade(project):
-    """v1 post-commit shipped a 2-line sync-only snippet under the ``advance meta.git after commit`` marker.  Must be replaced by the current 2-phase (sync + background update-rpg) sentinel block."""
+    """A sync-only post-commit snippet upgrades to the dispatcher block."""
     hd = _hooks_dir(project)
     (hd / "post-commit").write_text(
         "#!/bin/sh\n"
@@ -304,16 +290,13 @@ def test_post_commit_v1_legacy_is_replaced_on_upgrade(project):
     assert "# CoderMind: advance meta.git after commit" not in text
     assert "/old/python" not in text
     assert text.count("# CMIND-BEGIN post-commit") == 1
-    assert "update-rpg" in text   # phase 2 is now present
+    assert text.count("# CMIND-END post-commit") == 1
+    assert "CoderMind: post-commit dispatcher" in text
+    assert "cmind hook post-commit" in text
 
 
 def test_post_commit_v3_legacy_is_replaced_on_upgrade(project):
-    """v3 (release 0576393) shipped a 5-line setsid+lock snippet WITHOUT sentinels.  The new installer must recognise its marker and line count and replace the whole block in place.
-
-    This is the case that motivated the sentinel-block refactor: under
-    the old marker-substring dedupe, the v3 marker matching itself made
-    every subsequent install a no-op.
-    """
+    """A multi-line post-commit snippet upgrades to the dispatcher block."""
     hd = _hooks_dir(project)
     old_body = (
         "#!/bin/sh\n"
@@ -330,55 +313,48 @@ def test_post_commit_v3_legacy_is_replaced_on_upgrade(project):
     assert cmind_cli._install_git_post_commit_hook(project) is True
     text = (hd / "post-commit").read_text()
 
-    # Old paths are gone — proves the v3 block was actually stripped.
     assert "/old/python" not in text
     assert "/old/.lock" not in text
-    # New sentinel block is present exactly once (no duplicate piling).
     assert text.count("# CMIND-BEGIN post-commit") == 1
     assert text.count("# CMIND-END post-commit") == 1
-    # Current marker survives inside the new block.
-    assert text.count(
-        "# CoderMind: advance meta.git + background feature graph update"
-    ) == 1
+    assert text.count("# CoderMind: post-commit dispatcher") == 1
+    assert "cmind hook post-commit" in text
 
 
 def test_install_is_idempotent_under_sentinels(project):
-    """Repeated installs must not stack sentinel blocks or duplicate content — the second install replaces the first verbatim."""
+    """Repeated dispatcher installs must not stack sentinel blocks."""
     hd = _hooks_dir(project)
-    cmind_cli._install_git_pre_commit_hook(project)
-    first = (hd / "pre-commit").read_text()
-    cmind_cli._install_git_pre_commit_hook(project)
-    cmind_cli._install_git_pre_commit_hook(project)
-    third = (hd / "pre-commit").read_text()
+    cmind_cli._install_git_post_commit_hook(project)
+    first = (hd / "post-commit").read_text()
+    cmind_cli._install_git_post_commit_hook(project)
+    cmind_cli._install_git_post_commit_hook(project)
+    third = (hd / "post-commit").read_text()
 
     assert first == third
-    assert third.count("# CMIND-BEGIN pre-commit") == 1
-    assert third.count("# CMIND-END pre-commit") == 1
+    assert third.count("# CMIND-BEGIN post-commit") == 1
+    assert third.count("# CMIND-END post-commit") == 1
 
 
 def test_sentinel_block_is_atomically_replaceable(project):
-    """If a future release changes the body inside the block, the sentinel-pair range is replaced wholesale.  Simulated here by hand-writing an "old" block (different body content) and asserting that the install replaces it."""
+    """The sentinel-pair range is replaced wholesale on install."""
     hd = _hooks_dir(project)
-    (hd / "pre-commit").write_text(
+    (hd / "post-commit").write_text(
         "#!/bin/sh\n"
         "\n"
-        "# CMIND-BEGIN pre-commit\n"
-        "# CoderMind: incremental RPG sync on commit\n"
+        "# CMIND-BEGIN post-commit\n"
+        "# CoderMind: post-commit dispatcher\n"
         "/some/older/path/python /some/older/script.py sync --legacy-flag\n"
-        "# CMIND-END pre-commit\n"
+        "# CMIND-END post-commit\n"
     )
 
-    assert cmind_cli._install_git_pre_commit_hook(project) is True
-    text = (hd / "pre-commit").read_text()
+    assert cmind_cli._install_git_post_commit_hook(project) is True
+    text = (hd / "post-commit").read_text()
 
-    # Old body content gone.
     assert "/some/older/path/python" not in text
     assert "--legacy-flag" not in text
-    # Exactly one sentinel pair.
-    assert text.count("# CMIND-BEGIN pre-commit") == 1
-    assert text.count("# CMIND-END pre-commit") == 1
-    # New body present.
-    assert "--staged-only" in text
+    assert text.count("# CMIND-BEGIN post-commit") == 1
+    assert text.count("# CMIND-END post-commit") == 1
+    assert "cmind hook post-commit" in text
 
 
 def test_user_authored_content_outside_block_is_preserved(project):
@@ -394,13 +370,14 @@ def test_user_authored_content_outside_block_is_preserved(project):
         "echo 'user-postlude: still going' >&2\n"
     )
 
-    assert cmind_cli._install_git_pre_commit_hook(project) is True
+    assert cmind_cli._uninstall_git_pre_commit_hook(project) is True
     text = (hd / "pre-commit").read_text()
 
     assert "user-prelude" in text
     assert "user-postlude" in text
-    # And the CoderMind content was actually upgraded (old python path gone).
     assert "/old/python" not in text
+    assert "# CMIND-BEGIN pre-commit" not in text
+    assert "# CMIND-END pre-commit" not in text
 
 
 # ---------------------------------------------------------------------------
@@ -515,7 +492,8 @@ def test_setup_gitignore_greenfield_writes_full_template(tmp_path):
     assert "Jupyter Notebook" in content
     assert ".ipynb_checkpoints" in content
     # CoderMind common (runtime + machine-specific)
-    assert ".cmind/" in content
+    assert ".cmind/*" in content
+    assert "!.cmind/config.toml" in content
     assert ".vscode/mcp.json" in content
     assert ".vscode/tasks.json" in content
     assert ".mcp.json" in content
@@ -542,7 +520,7 @@ def test_setup_gitignore_existing_git_no_ignore_writes_cmind_only(tmp_path):
     cmind_cli._setup_gitignore(tmp_path, "copilot")
     content = (tmp_path / ".gitignore").read_text()
     # CoderMind rules present
-    assert ".cmind/" in content
+    assert ".cmind/*" in content
     assert ".github/agents/" in content
     # Python conventions NOT imposed on existing repo
     assert "__pycache__/" not in content
@@ -561,7 +539,7 @@ def test_setup_gitignore_existing_gitignore_preserves_user_entries(tmp_path):
     assert "node_modules/" in content
     assert "*.tmp" in content
     # CoderMind rules appended
-    assert ".cmind/" in content
+    assert ".cmind/*" in content
     assert ".github/agents/" in content
 
 
@@ -574,24 +552,20 @@ def test_setup_gitignore_is_idempotent(tmp_path):
     assert first == second  # second call is a no-op
     # No duplicate CoderMind header
     assert second.count(cmind_cli._GITIGNORE_CMIND_HEADER) == 1
-    # No duplicate .cmind/ directory entry.  Count actual lines (after
-    # stripping) because the appended block also contains
-    # `!.cmind/config.toml` which holds .cmind/ as a substring.
+    # No duplicate runtime-directory glob entry.
     lines = [l.strip() for l in second.splitlines()]
-    assert lines.count(".cmind/") == 1
+    assert lines.count(".cmind/*") == 1
 
 
 def test_setup_gitignore_partial_existing_rules_only_appends_missing(tmp_path):
     """If user already has SOME CoderMind rules, only missing ones get appended."""
-    # User has manually added .cmind/ but nothing else
-    (tmp_path / ".gitignore").write_text(".cmind/\n")
+    # User has manually added the runtime-directory glob but nothing else.
+    (tmp_path / ".gitignore").write_text(".cmind/*\n")
     cmind_cli._setup_gitignore(tmp_path, "copilot")
     content = (tmp_path / ".gitignore").read_text()
-    # .cmind/ directory entry must NOT be duplicated.  Compare exact
-    # lines (after stripping) because the appended block also contains
-    # `!.cmind/config.toml` which holds .cmind/ as a substring.
+    # The runtime-directory glob must not be duplicated.
     lines = [l.strip() for l in content.splitlines()]
-    assert lines.count(".cmind/") == 1
+    assert lines.count(".cmind/*") == 1
     # The new managed config.toml un-ignore line is present
     assert "!.cmind/config.toml" in lines
     # Missing rules are now present

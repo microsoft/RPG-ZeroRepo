@@ -13,9 +13,8 @@ C. ``sync_from_commit_diff`` refreshes ``meta.git.head_branch`` /
    ``head_timestamp`` even in **noop** mode (covers ``git checkout
    other_branch_at_same_sha`` and ``git branch -m`` cases).
 
-D. ``_install_git_post_merge_hook`` installs an RPG sync hook in
-   ``post-merge`` so ``git pull`` / ``git merge`` keeps the graph
-   aligned with teammate-incoming code.
+D. Git hook setup installs post-commit/post-merge dispatcher hooks and
+    removes CoderMind-owned pre-commit blocks.
 """
 
 from __future__ import annotations
@@ -135,27 +134,28 @@ def test_resolve_git_hooks_dir_empty_core_hooks_path_falls_back(tmp_path):
     assert resolved == repo / ".git" / "hooks"
 
 
-def test_install_pre_commit_hook_via_core_hooks_path(tmp_path):
-    """End-to-end: when ``core.hooksPath`` is set, the installer must write into THAT directory, not ``.git/hooks``.  This is the case where teams use husky / pre-commit / lefthook."""
+def test_uninstall_pre_commit_hook_via_core_hooks_path(tmp_path):
+    """``core.hooksPath`` directs pre-commit cleanup to the active hooks dir."""
     repo = tmp_path / "repo"
     repo.mkdir()
     _sh(repo, "init", "-q", "-b", "main")
     custom_hooks = repo / ".husky"
     custom_hooks.mkdir()
     _sh(repo, "config", "core.hooksPath", str(custom_hooks))
+    (custom_hooks / "pre-commit").write_text(
+        "#!/bin/sh\n"
+        "# CoderMind: full RPG sync on commit\n"
+        "cmind script update_graphs.py sync --staged-only\n"
+    )
 
-    assert cmind_cli._install_git_pre_commit_hook(repo) is True
+    assert cmind_cli._uninstall_git_pre_commit_hook(repo) is True
 
-    # Hook landed in the custom dir, NOT in .git/hooks.
-    assert (custom_hooks / "pre-commit").is_file()
+    assert not (custom_hooks / "pre-commit").exists()
     assert not (repo / ".git" / "hooks" / "pre-commit").exists()
-    text = (custom_hooks / "pre-commit").read_text()
-    assert "CMIND-BEGIN pre-commit" in text
-    assert "--staged-only" in text
 
 
-def test_install_pre_commit_hook_in_worktree(tmp_path):
-    """End-to-end: ``_install_git_pre_commit_hook`` must succeed for a worktree-style ``.git`` file (regression for the original bug where the installer did ``if not .git.is_dir(): return False``)."""
+def test_uninstall_pre_commit_hook_in_worktree(tmp_path):
+    """Pre-commit cleanup works through a worktree-style ``.git`` file."""
     main = tmp_path / "main"
     main.mkdir()
     _sh(main, "init", "-q", "-b", "main")
@@ -166,12 +166,15 @@ def test_install_pre_commit_hook_in_worktree(tmp_path):
     _sh(main, "commit", "-q", "-m", "init")
     wt = tmp_path / "wt"
     _sh(main, "worktree", "add", "--detach", str(wt))
-
-    assert cmind_cli._install_git_pre_commit_hook(wt) is True
-    # Hook landed in the shared hooks dir (main repo) not the worktree
     pre_commit = main / ".git" / "hooks" / "pre-commit"
-    assert pre_commit.is_file()
-    assert "CoderMind: incremental RPG sync on commit" in pre_commit.read_text()
+    pre_commit.write_text(
+        "#!/bin/sh\n"
+        "# CoderMind: incremental RPG sync on commit\n"
+        "cmind script update_graphs.py sync --staged-only\n"
+    )
+
+    assert cmind_cli._uninstall_git_pre_commit_hook(wt) is True
+    assert not pre_commit.exists()
 
 
 # ===========================================================================
@@ -348,12 +351,9 @@ def test_install_post_merge_hook_writes_script(tmp_path):
     post_merge = repo / ".git" / "hooks" / "post-merge"
     assert post_merge.is_file()
     content = post_merge.read_text()
-    assert "CoderMind: incremental RPG sync after merge / pull" in content
-    assert "update_graphs.py" in content and " sync " in content
-    # post-merge fires AFTER files are in the working tree, no staging
-    # area exists at that point — so the hook must NOT use --staged-only.
+    assert "CoderMind: post-merge dispatcher" in content
+    assert "cmind hook post-merge" in content
     assert "--staged-only" not in content
-    # Hook must be executable
     import stat
     assert post_merge.stat().st_mode & stat.S_IXUSR
 
@@ -366,8 +366,7 @@ def test_install_post_merge_hook_is_idempotent(tmp_path):
     cmind_cli._install_git_post_merge_hook(repo)
     cmind_cli._install_git_post_merge_hook(repo)
     post_merge = (repo / ".git" / "hooks" / "post-merge").read_text()
-    # Marker appears exactly once
-    assert post_merge.count("CoderMind: incremental RPG sync after merge / pull") == 1
+    assert post_merge.count("CoderMind: post-merge dispatcher") == 1
 
 
 def test_install_post_merge_hook_preserves_existing_user_hook(tmp_path):
@@ -383,11 +382,12 @@ def test_install_post_merge_hook_preserves_existing_user_hook(tmp_path):
     cmind_cli._install_git_post_merge_hook(repo)
     content = user_hook.read_text()
     assert "echo 'user custom hook'" in content
-    assert "CoderMind: incremental RPG sync after merge / pull" in content
+    assert "CoderMind: post-merge dispatcher" in content
+    assert "cmind hook post-merge" in content
 
 
-def test_install_hooks_installs_both_pre_commit_and_post_merge(tmp_path):
-    """End-to-end: ``_install_hooks`` should produce all three hooks."""
+def test_install_hooks_installs_post_hooks_and_removes_pre_commit(tmp_path):
+    """End-to-end: ``_install_hooks`` writes post hooks and no pre-commit."""
     project = tmp_path / "proj"
     project.mkdir()
     (project / ".cmind" / "scripts").mkdir(parents=True)
@@ -400,19 +400,15 @@ def test_install_hooks_installs_both_pre_commit_and_post_merge(tmp_path):
     pre_commit = project / ".git" / "hooks" / "pre-commit"
     post_commit = project / ".git" / "hooks" / "post-commit"
     post_merge = project / ".git" / "hooks" / "post-merge"
-    assert pre_commit.is_file()
+    assert not pre_commit.exists()
     assert post_commit.is_file()
     assert post_merge.is_file()
-    # pre-commit uses --staged-only (only the index counts before commit
-    # is recorded).  post-commit and post-merge do NOT — HEAD has moved
-    # by the time they fire, and there's no index to filter on anyway.
-    assert "--staged-only" in pre_commit.read_text()
     assert "--staged-only" not in post_commit.read_text()
     assert "--staged-only" not in post_merge.read_text()
 
 
 def test_install_post_commit_hook_writes_script(tmp_path):
-    """``post-commit`` exists to advance meta.git AFTER the new commit has been recorded (pre-commit fires too early — HEAD is still the previous commit, so meta.git would land 1 commit behind)."""
+    """``post-commit`` delegates to the Python hook dispatcher."""
     repo = tmp_path / "repo"
     repo.mkdir()
     _sh(repo, "init", "-q")
@@ -421,24 +417,16 @@ def test_install_post_commit_hook_writes_script(tmp_path):
     post_commit = repo / ".git" / "hooks" / "post-commit"
     assert post_commit.is_file()
     content = post_commit.read_text()
-    assert "CoderMind: advance meta.git + background feature graph update" in content
-    assert "update_graphs.py" in content and " sync " in content
-    assert "update-rpg" in content
-    # Must unset GIT_INDEX_FILE to avoid hook env var leaking into
-    # background worktree operations.
-    assert "GIT_INDEX_FILE" in content
-    # Detach via nohup, which is POSIX and portable to macOS;
-    # util-linux-specific process management is not available there.
-    assert "nohup" in content
+    assert "CoderMind: post-commit dispatcher" in content
+    assert "cmind hook post-commit" in content
+    assert "update_graphs.py" not in content
+    assert "update-rpg" not in content
+    assert "GIT_INDEX_FILE" not in content
+    assert "nohup" not in content
     assert "setsid" not in content
-    # Atomic lock via mkdir (the only POSIX-atomic exclusive-create
-    # primitive available from shell).
-    assert "mkdir " in content
-    assert "rmdir " in content
-    # Stale-lock recovery for orphaned worker runs (>60min old).
-    assert "-mmin +60" in content
-    # Like post-merge, no --staged-only because the commit is already
-    # recorded and there's no useful index scope to filter.
+    assert "mkdir " not in content
+    assert "rmdir " not in content
+    assert "-mmin +60" not in content
     assert "--staged-only" not in content
     import stat
     assert post_commit.stat().st_mode & stat.S_IXUSR
@@ -452,7 +440,7 @@ def test_install_post_commit_hook_is_idempotent(tmp_path):
     cmind_cli._install_git_post_commit_hook(repo)
     cmind_cli._install_git_post_commit_hook(repo)
     text = (repo / ".git" / "hooks" / "post-commit").read_text()
-    assert text.count("CoderMind: advance meta.git + background feature graph update") == 1
+    assert text.count("CoderMind: post-commit dispatcher") == 1
 
 
 def test_workspace_root_resolution_prefers_cwd_over_env(tmp_path, monkeypatch):

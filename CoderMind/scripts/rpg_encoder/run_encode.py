@@ -161,13 +161,21 @@ def run_encode(
             logger.warning("Failed to generate visualization: %s", viz_exc)
             traj.fail_step(step_viz.step_id, str(viz_exc))
 
-        # Collect stats — use result_data (serialized) edge count since
+        serialized_edges = result_data.get("edges", [])
+        edge_count = len(serialized_edges) if isinstance(serialized_edges, list) else 0
+        if edge_count == 0:
+            try:
+                edge_count = len(rpg.edges)
+            except Exception:
+                edge_count = 0
+
+        # Collect stats — prefer result_data (serialized) edge count since
         # to_dict() merges dep-graph semantic edges that aren't in self.edges.
         stats = {
             "repo_name": repo_name,
             "output_path": output,
             "node_count": len(rpg.nodes),
-            "edge_count": len(result_data.get("edges", [])),
+            "edge_count": edge_count,
         }
         if viz_output:
             stats["viz_path"] = viz_output

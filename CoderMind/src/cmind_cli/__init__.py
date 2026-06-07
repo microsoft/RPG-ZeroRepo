@@ -1793,6 +1793,8 @@ _ENCODE_RE_EXCLUDE_VOTE = re.compile(r"LLM vote #(\d+)")
 _ENCODE_RE_TOTAL_FILES = re.compile(r"Total valid Python files to parse:\s*(\d+)")
 _ENCODE_RE_CLASS_BATCHES = re.compile(r"\[GLOBAL\] kind=class,\s*groups=\d+,\s*batches=(\d+)")
 _ENCODE_RE_FUNC_BATCHES = re.compile(r"\[GLOBAL\] kind=function,\s*groups=\d+,\s*batches=(\d+)")
+_ENCODE_RE_CLASS_PROCESS = re.compile(r"\[GLOBAL\] process_class_batch:")
+_ENCODE_RE_FUNC_PROCESS = re.compile(r"\[GLOBAL\] process_func_batch:")
 _ENCODE_RE_CLASS_FINISHED = re.compile(r"\[GLOBAL\] finished class batch with \d+ units")
 _ENCODE_RE_FUNC_FINISHED = re.compile(r"\[GLOBAL\] finished function batch with \d+ units")
 _ENCODE_RE_FILE_REMAP = re.compile(r"\[GLOBAL\] file=")
@@ -1859,23 +1861,33 @@ def _parse_encoder_line(line: str, state: Dict[str, Any]) -> None:
         state["kind"] = "function"
         state["phase"] = "Parsing function batches"
         return
-    if "process_class_batch:" in line:
+    if _ENCODE_RE_CLASS_PROCESS.search(line):
+        state["class_done"] += 1
+        if state.get("class_total"):
+            state["class_done"] = min(state["class_done"], state["class_total"])
+        state["_class_counted_on_process"] = True
         state["kind"] = "class"
         state["phase"] = "Parsing class batches"
         return
     if _ENCODE_RE_CLASS_FINISHED.search(line):
-        state["class_done"] += 1
+        if not state.get("_class_counted_on_process"):
+            state["class_done"] += 1
         if state.get("class_total"):
             state["class_done"] = min(state["class_done"], state["class_total"])
         state["kind"] = "class"
         state["phase"] = "Parsing class batches"
         return
-    if "process_func_batch:" in line:
+    if _ENCODE_RE_FUNC_PROCESS.search(line):
+        state["func_done"] += 1
+        if state.get("func_total"):
+            state["func_done"] = min(state["func_done"], state["func_total"])
+        state["_func_counted_on_process"] = True
         state["kind"] = "function"
         state["phase"] = "Parsing function batches"
         return
     if _ENCODE_RE_FUNC_FINISHED.search(line):
-        state["func_done"] += 1
+        if not state.get("_func_counted_on_process"):
+            state["func_done"] += 1
         if state.get("func_total"):
             state["func_done"] = min(state["func_done"], state["func_total"])
         state["kind"] = "function"
@@ -2239,7 +2251,8 @@ def _maybe_offer_initial_encode(
         # Fallback for environments where storage resolution fails;
         # err on the side of running the encoder rather than skipping it.
         rpg_file = project_path / ".cmind" / "data" / "rpg.json"
-    if rpg_file.exists():
+    legacy_rpg_file = project_path / ".cmind" / "data" / "rpg.json"
+    if rpg_file.exists() or legacy_rpg_file.exists():
         return
 
     if encode_choice is False:
@@ -2339,11 +2352,10 @@ def _install_claude_hooks(project_path: Path) -> None:
         session_start = []
 
     def _is_cmind_entry(entry: object) -> bool:
-        """Detect a previously-installed CoderMind SessionStart entry.
+        """Detect an existing CoderMind SessionStart entry.
 
-        Matches both the current (shlex-quoted) and earlier
-        (json.dumps-quoted) command shapes, plus any custom CoderMind
-        entry the user may have added that still calls update_graphs.py.
+        Matches the supported command shapes plus any custom CoderMind
+        entry the user may have added that still calls ``update_graphs.py``.
         """
         if not isinstance(entry, dict):
             return False
@@ -2478,13 +2490,11 @@ def _resolve_git_hooks_dir(project_path: Path) -> Optional[Path]:
     return None
 
 
-# Each entry describes one shape of legacy (pre-sentinel) CoderMind snippet
-# that may exist in a user's hook file from an older release.  The first
-# element is a substring of the snippet's first line (a marker comment);
-# the second is the *total* number of consecutive lines that snippet
-# occupies starting at the marker line.  These are removed before the
-# new sentinel block is written so users upgrading don't end up with the
-# old snippet running alongside the new one.
+# Each entry describes a CoderMind-owned hook snippet shape that can be
+# recognized without sentinels. The first element is a substring of the
+# snippet's marker comment; the second is the total number of consecutive
+# lines occupied by that snippet. These are removed before the sentinel
+# block is written so users do not end up with duplicate CoderMind logic.
 LegacyBlock = Tuple[str, int]
 
 
@@ -2497,7 +2507,7 @@ def _strip_hook_block(
 
     Two cleanup passes:
 
-    1. Strip the new-style sentinel block::
+    1. Strip the sentinel block::
 
            # CMIND-BEGIN <block_name>
            ...
@@ -2506,11 +2516,11 @@ def _strip_hook_block(
        Range-based, so multi-line bodies of any shape are atomically
        removed in one shot.
 
-    2. Strip each ``(marker_substring, line_count)`` legacy snippet
-       (the pre-sentinel format used through release v0.0.99-dev.72).
-       The marker line plus ``line_count - 1`` lines following it are
-       dropped.  Multiple legacy shapes are removed in a single pass
-       so the order of entries in ``legacy_blocks`` doesn't matter.
+        2. Strip each compatibility snippet described by
+             ``(marker_substring, line_count)``. The marker line plus
+             ``line_count - 1`` lines following it are dropped. Multiple
+             shapes are removed in a single pass so the order of entries in
+             ``legacy_blocks`` doesn't matter.
 
     Lines outside both passes are preserved verbatim so user-authored
     hook content (and shebangs) survive untouched.
@@ -2534,7 +2544,7 @@ def _strip_hook_block(
             continue
         after_sentinels.append(line)
 
-    # Pass 2: strip legacy snippets by (marker, line_count).
+    # Pass 2: strip compatibility snippets by (marker, line_count).
     if not legacy_blocks:
         return "\n".join(after_sentinels)
 
@@ -2597,11 +2607,9 @@ def _install_hook_snippet(
 
     The block is **atomically replaceable**: subsequent ``cmind init`` /
     ``cmind update`` runs find the existing sentinels and replace the
-    whole block, so behavior upgrades land cleanly without piling new
-    snippets on top of old ones.  ``legacy_blocks`` is used **once** to
-    migrate pre-sentinel installs (released through v0.0.99-dev.72) onto
-    this scheme; once a user has been migrated their hook contains the
-    sentinels and the legacy patterns are no-ops.
+    whole block, so behavior upgrades land cleanly without duplicate
+    snippets. ``legacy_blocks`` recognizes CoderMind-owned hook bodies
+    that do not have sentinels yet.
 
     Creates the hook file with a ``#!/bin/sh`` shebang if absent;
     preserves any user-authored shebang otherwise.  Always returns
@@ -2633,14 +2641,10 @@ def _install_hook_snippet(
 
 
 def _uninstall_git_pre_commit_hook(project_path: Path) -> bool:
-    """Remove any previously-installed CoderMind ``pre-commit`` block.
+    """Remove any CoderMind-owned ``pre-commit`` block.
 
-    Pre-commit was retired in favour of ``post-commit`` only: the
-    pre-commit sync ran ``--staged-only`` and was immediately followed
-    by the full post-commit sync, so its output had a ~1 sec lifetime
-    and added latency to every ``git commit`` for no observable benefit.
-    Existing workspaces upgraded via ``cmind init`` / ``cmind update``
-    have their pre-commit block stripped here; user-authored hook
+    The active git hook contract uses ``post-commit`` and ``post-merge``.
+    CoderMind-owned pre-commit blocks are stripped here; user-authored hook
     content (and other tools' blocks such as husky / pre-commit /
     lefthook) is preserved untouched.
 
@@ -2692,7 +2696,7 @@ def _install_git_post_merge_hook(project_path: Path) -> bool:
     if hooks_dir is None:
         return False
 
-    # Level-1 hook: stub delegates to ``cmind hook post-merge``.
+    # Dispatcher stub delegates to ``cmind hook post-merge``.
     marker = "# CoderMind: post-merge dispatcher"
     body = (
         f"{marker}\n"
@@ -2711,30 +2715,29 @@ def _install_git_post_merge_hook(project_path: Path) -> bool:
 
 
 def _install_git_post_commit_hook(project_path: Path) -> bool:
-    """Install the Level-1 ``post-commit`` dispatcher stub.
+    """Install the ``post-commit`` dispatcher stub.
 
-    The on-disk hook is now a 3-line shell snippet that ``exec``s
-    ``cmind hook post-commit``.  All orchestration lives in the
+    The on-disk hook is a short shell snippet that delegates to
+    ``cmind hook post-commit``. All orchestration lives in the
     :func:`hook` Python command:
 
-    * **Phase 1 (foreground)**: ``update_graphs.py sync`` advances
-      ``meta.git`` to the new HEAD.  Output is teed into
-      ``~/.cmind/workspaces/<workspace-id>/logs/hooks.log``.
+        * **Foreground sync**: ``update_graphs.py sync`` advances
+            ``meta.git`` to the new HEAD. Output is teed into
+            ``~/.cmind/workspaces/<workspace-id>/logs/hooks.log``.
 
-    * **Phase 2 (background)**: ``update_graphs.py update-rpg`` is
-      detached via ``subprocess.Popen(start_new_session=True)``.  A
-      mkdir-based directory lock at
-      ``~/.cmind/workspaces/<workspace-id>/logs/.update_rpg.lock`` serialises
-      overlapping commits; locks older than 60 minutes are treated as
-      orphaned and removed.  The worker's stdout/stderr land in
-      ``~/.cmind/workspaces/<workspace-id>/logs/update_rpg.log``.
+        * **Background update**: ``update_graphs.py update-rpg`` is
+            detached via ``subprocess.Popen(start_new_session=True)``. A
+            mkdir-based directory lock at
+            ``~/.cmind/workspaces/<workspace-id>/logs/.update_rpg.lock`` serialises
+            overlapping commits; locks older than 60 minutes are treated as
+            orphaned and removed. The worker's stdout/stderr land in
+            ``~/.cmind/workspaces/<workspace-id>/logs/update_rpg.log``.
 
-    Both phases are best-effort: every failure path is swallowed inside
+    Both steps are best-effort: every failure path is swallowed inside
     :func:`hook` so a hook misbehaviour never blocks ``git commit``.
 
-    Legacy multi-line shell bodies from earlier releases (pre-Level-1)
-    are stripped on upgrade -- the ``legacy_blocks`` tuple below covers
-    every shape we've shipped.
+    CoderMind-owned multi-line shell bodies are stripped on upgrade by
+    the ``legacy_blocks`` compatibility patterns below.
     """
     hooks_dir = _resolve_git_hooks_dir(project_path)
     if hooks_dir is None:
@@ -2752,11 +2755,9 @@ def _install_git_post_commit_hook(project_path: Path) -> bool:
         "post-commit",
         body,
         legacy_blocks=(
-            # v1 (pre-Step-3): two-line sync-only snippet.
+            # Two-line sync-only snippet.
             ("# CoderMind: advance meta.git after commit", 2),
-            # v3 (release 0576393): five-line snippet with phase-1 sync
-            # + phase-2 setsid background under the same marker we used
-            # before Level-1.
+            # Five-line sync + setsid background-update snippet.
             ("# CoderMind: advance meta.git + background feature graph update", 5),
         ),
     )
@@ -4551,12 +4552,8 @@ def update(
                 tracker.start("copilot-cli-mcp")
                 _register_copilot_cli_global_mcp(tracker=tracker)
 
-            # Re-install hooks so behavior fixes propagate to existing
-            # workspaces.  Without this, the .git/hooks/* files stay
-            # frozen at whatever version was active during the original
-            # `cmind init`, and the sentinel-block migration in
-            # _install_hook_snippet (the upgrade mechanism for hooks)
-            # never gets a chance to run.
+            # Reconcile hook files so existing workspaces receive the
+            # current post-commit/post-merge dispatcher contract.
             _install_hooks(project_path, selected_ai, tracker=tracker)
 
             tracker.complete("final", "update complete")
@@ -5001,13 +4998,13 @@ def hook(name: str = typer.Argument(..., help="Hook name: post-commit | post-mer
                 "sync",
             )
         elif name == "post-commit":
-            # Phase 1: synchronous meta.git advance (fast, ~50ms).
+            # Fast foreground sync keeps meta.git aligned with HEAD.
             _hook_run_foreground(
                 ws, log_path, env,
                 ["update_graphs.py", "sync"],
-                "phase1-sync",
+                "foreground-sync",
             )
-            # Phase 2: detached background LLM-driven RPG update.
+            # The LLM-driven RPG update runs detached from git commit.
             _hook_spawn_background(ws, home_dir, log_path, env)
         else:
             _hook_log_line(log_path, f"unknown hook name: {name!r}")
