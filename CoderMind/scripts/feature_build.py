@@ -269,6 +269,38 @@ def convert_leaves_to_list(tree: Dict[str, Any]) -> Dict[str, Any]:
     return result
 
 
+def _list_leaf_to_branch(item: Any) -> tuple[str | None, Any]:
+    """Converts a list leaf into a branch entry."""
+    if isinstance(item, str):
+        return item.strip(), []
+    if isinstance(item, dict):
+        name = item.get("name")
+        if isinstance(name, str) and name.strip():
+            children = item.get("children", [])
+            if isinstance(children, (dict, list)):
+                return name.strip(), copy.deepcopy(children)
+            return name.strip(), []
+        if len(item) == 1:
+            key, value = next(iter(item.items()))
+            if isinstance(key, str) and key.strip():
+                if isinstance(value, (dict, list)):
+                    return key.strip(), copy.deepcopy(value)
+                return key.strip(), []
+    if item is None:
+        return None, []
+    return str(item).strip(), []
+
+
+def _list_leaves_to_branch(items: List[Any]) -> Dict[str, Any]:
+    """Promotes list leaves to a branch map."""
+    branch: Dict[str, Any] = {}
+    for item in items:
+        key, value = _list_leaf_to_branch(item)
+        if key:
+            branch.setdefault(key, value)
+    return branch
+
+
 def apply_changes(tree: Dict[str, Any], paths: List[str]) -> Dict[str, Any]:
     """Apply path list to tree structure.
 
@@ -298,10 +330,8 @@ def apply_changes(tree: Dict[str, Any], paths: List[str]) -> Dict[str, Any]:
             if part not in current:
                 current[part] = {}
             elif isinstance(current[part], list):
-                # If we encounter a list, we need to convert it to a dict
-                # This happens when a previous leaf node needs to become a branch
                 old_list = current[part]
-                current[part] = {item: {} for item in old_list}
+                current[part] = _list_leaves_to_branch(old_list)
             elif not isinstance(current[part], dict):
                 # Unexpected type, convert to dict
                 current[part] = {}
