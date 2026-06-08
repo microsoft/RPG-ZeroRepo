@@ -5,8 +5,8 @@ that lets the decoder pipeline (skeleton / func_design / code_gen)
 treat the target programming language as a parameter rather than
 a hard-coded ``.py`` / ``ast`` / ``pytest`` assumption.
 
-The registry currently ships :class:`PythonBackend` and
-:class:`GoBackend` implementations. Decoder stages resolve the backend
+The registry currently ships :class:`PythonBackend`, :class:`GoBackend`,
+:class:`RustBackend`, and :class:`TypeScriptBackend` implementations. Decoder stages resolve the backend
 from explicit feature-spec language, RPG metadata, or source-file
 dominant language.
 
@@ -37,7 +37,9 @@ from .go_backend import GoBackend
 from .prompt_directive import language_directive, with_language_directive
 from .prompt_hints import PromptHints
 from .python_backend import PythonBackend
+from .rust_backend import RustBackend
 from .test_result import EnvHandle, TestFailure, TestRunResult
+from .typescript_backend import TypeScriptBackend
 
 # Side-effect: register backends on package import so the registry is
 # populated even when callers only ``import decoder_lang``. Python is
@@ -45,6 +47,8 @@ from .test_result import EnvHandle, TestFailure, TestRunResult
 # basic Go toolchain/test-runner behavior.
 register_backend(PythonBackend)
 register_backend(GoBackend)
+register_backend(RustBackend)
+register_backend(TypeScriptBackend)
 
 __all__ = [
     "EnvHandle",
@@ -52,9 +56,11 @@ __all__ = [
     "LanguageBackend",
     "PromptHints",
     "PythonBackend",
+    "RustBackend",
     "TestFailure",
     "TestRunResult",
     "ToolchainUnavailable",
+    "TypeScriptBackend",
     "get_backend",
     "language_directive",
     "list_backends",

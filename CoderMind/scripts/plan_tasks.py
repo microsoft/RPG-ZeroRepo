@@ -1027,7 +1027,7 @@ class TaskPlanner:
                     "- Module A defines function but Module B never imports/calls it\n"
                     "- Data format mismatch at module boundary\n"
                     "- CSS class names in templates not matching stylesheet definitions\n"
-                    "\nDo NOT create main.py — it will be created in a later task."
+                    "\nDo NOT create the main entry point — it will be created in a later task."
                 ),
                 file_path="<WIRING>",
                 units_key=["cross_module_wiring"],
@@ -1063,7 +1063,7 @@ class TaskPlanner:
                 "For ALL other project types, follow these steps:\n\n"
                 "## Step 1: Inventory existing assets\n"
                 "List all files related to user-facing output:\n"
-                "- Style modules (styles.py, *.css, theme files)\n"
+                "- Style, theme, or presentation files when the project type uses them\n"
                 "- Template/page/view files\n"
                 "- Layout/component files\n"
                 "- Static assets directory\n"
@@ -1096,7 +1096,7 @@ class TaskPlanner:
                 "- GUI: verify window opens without errors\n"
                 "- CLI: verify --help output and a basic command run\n"
                 "- Write tests that assert key structural elements\n\n"
-                "Do NOT create main.py — it will be created in a later task."
+                "Do NOT create the main entry point — it will be created in a later task."
             ),
             file_path="<UI_POLISH>",
             units_key=["ui_polish"],
@@ -1126,7 +1126,7 @@ class TaskPlanner:
                 "In addition, create clear usage examples (e.g., example scripts or notebooks) that demonstrate "
                 "typical end-to-end workflows. "
                 "Place the new test files and examples in appropriate locations in the project structure. "
-                "NOTE: The main entry point (main.py) will be created in the next task — "
+                "NOTE: The main entry point will be created in the next task — "
                 "do NOT create it here."
             ),
             file_path="<COMPREHENSIVE_TEST>",  # Special marker - let agent decide placement
@@ -1211,8 +1211,8 @@ class TaskPlanner:
         so they can reference the actual code content.
         
         Task types:
-        - project_requirements: requirements.txt (needs import validation test)
-        - project_docs: README.md (no tests needed)
+        - project_requirements: language-specific dependency metadata
+        - project_docs: README.md
         """
         print("\n   Adding project file tasks...")
         
@@ -1226,7 +1226,7 @@ class TaskPlanner:
             task=self._build_requirements_task(),
             file_path="<REQUIREMENTS>",
             units_key=["requirements_generation"],
-            unit_to_code={"requirements_generation": "# Generate requirements.txt"},
+            unit_to_code={"requirements_generation": "# Generate dependency metadata"},
             unit_to_features={"requirements_generation": ["dependency management"]},
             priority=3000,  # After main_entry (2100)
             subtree=pf_subtree,
@@ -1234,7 +1234,7 @@ class TaskPlanner:
         )
         planned_tasks[pf_subtree]["<REQUIREMENTS>"] = [requirements_task.to_dict()]
         agent_results[pf_subtree]["<REQUIREMENTS>"] = {"success": True, "type": "project_requirements"}
-        print("      -  Added requirements.txt generation task (with import test)")
+        print("      -  Added dependency metadata task (with validation test)")
         
         # 2. README documentation task (no tests needed)
         readme_task = PlannedTask(
@@ -1254,7 +1254,7 @@ class TaskPlanner:
         self.logger.info("Added 2 project file tasks")
     
     def _build_requirements_task(self) -> str:
-        """Build task description for requirements.txt generation."""
+        """Build task description for dependency metadata generation."""
         if self.backend.name == "go":
             module_name = self._go_module_name()
             return f"""Generate or update Go module dependency files for the repository: {self.repo_name}
@@ -1273,6 +1273,43 @@ class TaskPlanner:
 - Do NOT create Python dependency files for a Go project.
 - Keep the module compact and local to this repository.
 - The fixture expects standard-library-only code unless the implementation proves otherwise.
+"""
+        if self.backend.name == "rust":
+            package_name = self._package_slug(separator="-")
+            return f"""Generate or update Rust Cargo dependency files for the repository: {self.repo_name}
+
+**Files to create/update:**
+1. `Cargo.toml` - Cargo package declaration using package name `{package_name}`
+2. `Cargo.lock` - Only if dependency resolution creates it
+
+**Instructions:**
+1. Prefer the Rust standard library for CLI parsing and file handling unless implemented code already requires a crate.
+2. Include `serde` and `serde_json` when JSON serialization is implemented.
+3. Use edition `2021` unless the implemented code requires another stable edition.
+4. Run `cargo test` after updating dependencies.
+
+**Important:**
+- Do NOT create Python dependency files for a Rust project.
+- Keep dependency choices minimal and justified by actual imports.
+"""
+        if self.backend.name == "typescript":
+            package_name = self._package_slug(separator="-")
+            return f"""Generate or update Node.js/TypeScript dependency files for the repository: {self.repo_name}
+
+**Files to create/update:**
+1. `package.json` - Package metadata, scripts, and dependencies using package name `{package_name}`
+2. `tsconfig.json` - TypeScript compiler configuration for Node.js
+3. `package-lock.json` - Only if dependency installation creates it
+
+**Instructions:**
+1. Prefer Node.js standard APIs for local file and CLI behavior.
+2. Add TypeScript tooling and a minimal test runner only when needed by the implemented code.
+3. Provide scripts for `npm start`, `npm test`, and type checking when appropriate.
+4. Run `npm test` after updating dependencies.
+
+**Important:**
+- Do NOT create Python dependency files for a TypeScript project.
+- Keep dependencies minimal and aligned with actual imports.
 """
         return f"""Generate or update the dependency management files for the repository: {self.repo_name}
 
@@ -1344,6 +1381,62 @@ Repository purpose: {self.repo_info}
 **Important:**
 - Read `docs/` first and faithfully expose the requested behavior.
 - Do NOT create Python package entry points for this Go project.
+"""
+
+        if self.backend.name == "rust":
+            return f"""Create the Rust command entry point for the repository: {self.repo_name}
+Repository purpose: {self.repo_info}
+
+**Goal:** Create a production-quality Cargo CLI entry point that lets users run the complete product through documented commands.
+
+**Files to create:**
+1. `src/main.rs` - Binary entry point for the CLI.
+2. `src/lib.rs` (optional) - Library module that exposes reusable task/store logic.
+
+**Critical Rules:**
+- Do NOT re-implement business logic in `main.rs`. Delegate to modules already defined in the crate.
+- Every `use` path must reference real modules and symbols.
+- Use idiomatic `Result`-based error handling and explicit non-zero exits for user-facing failures.
+- Keep output plain text unless the requirements explicitly ask otherwise.
+
+**Requirements:**
+1. Provide a `main()` function in `src/main.rs`.
+2. Expose all major CLI commands and options described in `docs/`.
+3. Delegate storage and task lifecycle behavior to implemented modules.
+4. Handle invalid commands, invalid ids, missing arguments, and runtime errors clearly.
+5. Verify with `cargo run -- --help` and `cargo test`.
+
+**Important:**
+- Read `docs/` first and faithfully expose the requested behavior.
+- Do NOT create Python package entry points for this Rust project.
+"""
+
+        if self.backend.name == "typescript":
+            return f"""Create the TypeScript command entry point for the repository: {self.repo_name}
+Repository purpose: {self.repo_info}
+
+**Goal:** Create a production-quality Node.js CLI entry point that lets users run the complete product through documented commands.
+
+**Files to create:**
+1. `src/index.ts` - CLI entry point exported or referenced by package scripts.
+2. `src/cli.ts` (optional) - Command parsing and dispatch separated from domain logic.
+
+**Critical Rules:**
+- Do NOT re-implement business logic in `index.ts`. Import and delegate to implemented modules.
+- Every import must reference real files and exported symbols.
+- Use explicit error handling and non-zero process exits for user-facing failures.
+- Keep output plain text unless the requirements explicitly ask otherwise.
+
+**Requirements:**
+1. Expose all major CLI commands and options described in `docs/`.
+2. Wire `package.json` scripts so users can run the CLI with `npm start -- --help`.
+3. Delegate storage and task lifecycle behavior to implemented modules.
+4. Handle invalid commands, invalid ids, missing arguments, and runtime errors clearly.
+5. Verify with `npm start -- --help` and `npm test`.
+
+**Important:**
+- Read `docs/` first and faithfully expose the requested behavior.
+- Do NOT create Python package entry points for this TypeScript project.
 """
 
         # Infer the main package name from the interfaces subtree structure
@@ -1490,6 +1583,14 @@ if __name__ == "__main__":
         candidate = _re.sub(r"[^a-z0-9-]+", "-", candidate).strip("-")
         return candidate or "project"
 
+    def _package_slug(self, separator: str = "-") -> str:
+        """Infer a compact package name from repository metadata."""
+        raw = self.repo_name or "project"
+        candidate = raw.lower().replace(" ", separator).replace("_", separator)
+        candidate = _re.sub(rf"[^a-z0-9{_re.escape(separator)}]+", separator, candidate)
+        candidate = _re.sub(rf"{_re.escape(separator)}+", separator, candidate)
+        return candidate.strip(separator) or "project"
+
     def _build_readme_task(self) -> str:
         """Build task description for README.md generation."""
         if self.backend.name == "go":
@@ -1531,6 +1632,88 @@ Repository purpose: {self.repo_info}
 
 **Important:**
 - Do NOT document Python commands, Python test runners, or Python dependency files for this Go project.
+- Base everything on the actual implemented code, not assumptions.
+- Keep the tone professional and concise.
+"""
+        if self.backend.name == "rust":
+            return f"""Update the README.md for the repository: {self.repo_name}
+Repository purpose: {self.repo_info}
+
+**Goal:** Replace the placeholder README with comprehensive documentation for the actual Rust CLI implementation.
+
+**Sections to include:**
+
+## 1. Project Title & Description
+- Clear, concise description of what the CLI does
+- Key commands and capabilities
+
+## 2. Installation
+- Rust/Cargo prerequisite
+- Clone/build instructions
+- Dependency setup with `cargo build`
+
+## 3. Usage
+- How to run the CLI with `cargo run -- --help`
+- Common command examples with expected plain-text output
+- Data file options and local persistence behavior if applicable
+
+## 4. Project Structure
+- Brief overview of `src/`, modules, and tests
+- Key modules and their purposes
+
+## 5. Development
+- How to run tests with `cargo test`
+- How to format code with `cargo fmt`
+
+**Instructions:**
+1. Read the `docs/` directory for the original requirements.
+2. Explore the actual Rust codebase to understand what was implemented.
+3. Run `cargo run -- --help` if the binary exists.
+4. Reference actual module names, structs, traits, enums, and functions.
+
+**Important:**
+- Do NOT document Python commands, Python test runners, or Python dependency files for this Rust project.
+- Base everything on the actual implemented code, not assumptions.
+- Keep the tone professional and concise.
+"""
+        if self.backend.name == "typescript":
+            return f"""Update the README.md for the repository: {self.repo_name}
+Repository purpose: {self.repo_info}
+
+**Goal:** Replace the placeholder README with comprehensive documentation for the actual TypeScript CLI implementation.
+
+**Sections to include:**
+
+## 1. Project Title & Description
+- Clear, concise description of what the CLI does
+- Key commands and capabilities
+
+## 2. Installation
+- Node.js/npm prerequisite
+- Clone/install instructions using `npm install`
+- TypeScript build or runtime notes if applicable
+
+## 3. Usage
+- How to run the CLI with `npm start -- --help`
+- Common command examples with expected plain-text output
+- Data file options and local persistence behavior if applicable
+
+## 4. Project Structure
+- Brief overview of `src/`, `tests/`, and configuration files
+- Key modules and their purposes
+
+## 5. Development
+- How to run tests with `npm test`
+- How to type-check or build the project
+
+**Instructions:**
+1. Read the `docs/` directory for the original requirements.
+2. Explore the actual TypeScript codebase to understand what was implemented.
+3. Run `npm start -- --help` if the script exists.
+4. Reference actual module names, exported types, classes, and functions.
+
+**Important:**
+- Do NOT document Python commands, Python test runners, or Python dependency files for this TypeScript project.
 - Base everything on the actual implemented code, not assumptions.
 - Keep the tone professional and concise.
 """

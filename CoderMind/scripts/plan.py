@@ -247,11 +247,7 @@ def probe(invoker: list[str]) -> list[StageState]:
                 stage=stage,
                 type=type_,
                 message=str(result.get("message", "")),
-                # Treat ``warning`` as complete (matches ``decide()``):
-                # the artefact is present and usable, only a soft
-                # inconsistency was flagged. Anything else (``init`` /
-                # ``error``) is incomplete.
-                done=(type_ in ("update", "warning")),
+                done=(type_ == "update"),
                 raw=result,
             )
         )
@@ -261,16 +257,10 @@ def probe(invoker: list[str]) -> list[StageState]:
 def decide(states: list[StageState], force: bool) -> None:
     """Mark each state's ``will_run`` / ``reason`` in place.
 
-    Rule: any stage with ``type not in {"update", "warning"}`` runs.
-    ``warning`` means the artefact is present and usable but a soft
-    inconsistency was detected (e.g. tasks.json with auxiliary tasks
-    lacking a 1:1 interface mapping). Treating ``warning`` the same as
-    ``update`` here keeps re-runs idempotent: a stage that successfully
-    produced a warning-state artefact will not be rebuilt on the next
-    ``cmind script plan.py`` invocation. Once any stage runs, *all*
-    downstream stages run too (cascade), so derived artifacts never get
-    out of sync with regenerated upstream ones. ``--force`` flips every
-    stage to ``will_run``.
+    Rule: only ``type == "update"`` is complete. Any warning means the
+    artifact exists but violates a cross-stage contract, so the stage is
+    rerun and downstream artifacts are rebuilt from it. ``--force`` flips
+    every stage to ``will_run``.
     """
     cascade = False
     for state in states:
@@ -282,9 +272,9 @@ def decide(states: list[StageState], force: bool) -> None:
             state.will_run = True
             state.reason = "upstream rebuilt"
             continue
-        if state.type in ("update", "warning"):
+        if state.type == "update":
             state.will_run = False
-            state.reason = "up-to-date" if state.type == "update" else "up-to-date (warning)"
+            state.reason = "up-to-date"
         else:
             state.will_run = True
             state.reason = f"type={state.type}"
@@ -504,21 +494,13 @@ def main(argv: Optional[list[str]] = None) -> int:
         # fails, otherwise the user would see a JSON dump after every
         # stage.
         #
-        # ``update``  -> stage is fully valid; continue.
-        # ``warning`` -> artefact is usable but a soft inconsistency was
-        #                detected (e.g. tasks.json having auxiliary tasks
-        #                without a 1:1 interface mapping). Print the
-        #                message and continue; do not fail the pipeline.
-        # ``init`` / ``error`` -> artefact is missing or unusable; fail.
+        # ``update`` -> stage is fully valid; continue.
+        # Any other type means the artifact is missing, unusable, or
+        # violates a cross-stage contract; fail so bench cannot report a
+        # false PASS for partial plans.
         verify = _run_check(invoker, s.stage.check_script)
         verify_type = verify.get("type", "error")
-        if verify_type == "warning":
-            print(
-                f"   warning: {verify.get('message', 'no message')}"
-                f" (continuing)",
-                file=sys.stderr,
-            )
-        elif verify_type != "update":
+        if verify_type != "update":
             print(
                 f"   verification failed: {verify_type} — "
                 f"{verify.get('message', 'no message')}",

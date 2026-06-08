@@ -93,3 +93,121 @@ def test_task_planner_project_tasks_use_go_conventions() -> None:
     assert "main.py" not in main_entry
     assert "go test ./..." in readme
     assert "pytest" not in readme
+
+
+def test_task_planner_project_tasks_use_rust_conventions() -> None:
+    planner = TaskPlanner(
+        interfaces={"meta": {"primary_language": "rust", "target_languages": ["rust"]}},
+        data_flow={"meta": {"primary_language": "rust", "target_languages": ["rust"]}},
+        repo_name="tasklite",
+        repo_info="Rust CLI task tracker.",
+    )
+
+    requirements = planner._build_requirements_task()
+    main_entry = planner._build_main_entry_task()
+    readme = planner._build_readme_task()
+
+    assert "Cargo.toml" in requirements
+    assert "requirements.txt" not in requirements
+    assert "src/main.rs" in main_entry
+    assert "main.py" not in main_entry
+    assert "cargo test" in readme
+    assert "pytest" not in readme
+
+
+def test_task_planner_project_tasks_use_typescript_conventions() -> None:
+    planner = TaskPlanner(
+        interfaces={
+            "meta": {
+                "primary_language": "typescript",
+                "target_languages": ["typescript"],
+            }
+        },
+        data_flow={
+            "meta": {
+                "primary_language": "typescript",
+                "target_languages": ["typescript"],
+            }
+        },
+        repo_name="tasklite",
+        repo_info="TypeScript CLI task tracker.",
+    )
+
+    requirements = planner._build_requirements_task()
+    main_entry = planner._build_main_entry_task()
+    readme = planner._build_readme_task()
+
+    assert "package.json" in requirements
+    assert "requirements.txt" not in requirements
+    assert "src/index.ts" in main_entry
+    assert "main.py" not in main_entry
+    assert "npm test" in readme
+    assert "pytest" not in readme
+
+
+def test_task_planner_special_tasks_are_language_neutral() -> None:
+    planner = TaskPlanner(
+        interfaces={"meta": {"primary_language": "rust", "target_languages": ["rust"]}},
+        data_flow={
+            "meta": {"primary_language": "rust", "target_languages": ["rust"]},
+            "data_flow": [
+                {"source": "Core", "target": "CLI", "data_type": "Payload"},
+            ],
+        },
+        repo_name="tasklite",
+        repo_info="Rust CLI task tracker.",
+    )
+    planned_tasks: dict = {"Core": {}}
+    agent_results: dict = {"Core": {}}
+
+    planner._add_special_tasks(planned_tasks, agent_results, ["Core"])
+    text = "\n".join(
+        task["task"]
+        for files in planned_tasks.values()
+        for tasks in files.values()
+        for task in tasks
+    )
+
+    assert "main.py" not in text
+    assert "styles.py" not in text
+
+
+def test_rust_backend_accepts_basic_declarations() -> None:
+    backend = get_backend("rust")
+    code = "pub struct Task {\n    pub title: String,\n}\n\npub fn run() {}\n"
+
+    ok, error = backend.syntax_check(code, "src/lib.rs")
+    units = backend.list_code_units(code, "src/lib.rs")
+
+    assert ok, error
+    assert {unit.unit_type for unit in units} >= {"struct", "function"}
+    assert backend.prompt_hints().test_framework_name == "cargo test"
+
+
+def test_typescript_backend_accepts_basic_declarations() -> None:
+    backend = get_backend("typescript")
+    code = "export interface Task { title: string }\nexport function run(): void {}\n"
+
+    ok, error = backend.syntax_check(code, "src/index.ts")
+    units = backend.list_code_units(code, "src/index.ts")
+
+    assert ok, error
+    assert "interface Task" in [f"{unit.unit_type} {unit.name}" for unit in units]
+    assert any(unit.name == "run" for unit in units)
+    assert backend.prompt_hints().test_framework_name == "npm test"
+
+
+def test_interface_validation_accepts_typescript_interface() -> None:
+    backend = get_backend("typescript")
+    ok, error, info = validate_interface(
+        {
+            "features": ["Task Domain Model/task schema"],
+            "code": "export interface Task { title: string }\n",
+        },
+        {"Task Domain Model/task schema"},
+        set(),
+        backend=backend,
+    )
+
+    assert ok, error
+    assert "interface Task" in info["declarations"]
