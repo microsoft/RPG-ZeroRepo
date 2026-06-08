@@ -1921,9 +1921,22 @@ class InterfaceOrchestrator:
         all_import_warnings = []  # collect import cross-validation warnings
         all_new_features = []  # collect new features created across all subtrees
         coverage_status = self._new_coverage_status()
+        restored_subtrees = self._restore_completed_subtrees(
+            skeleton=skeleton,
+            subtree_order=subtree_order,
+            all_interfaces=all_interfaces,
+            implemented_subtrees=implemented_subtrees,
+            coverage_status=coverage_status,
+            global_registry=global_registry,
+        )
 
         # Process each subtree
         for subtree_name in subtree_order:
+            if subtree_name in restored_subtrees:
+                self.logger.info(
+                    f"[InterfaceOrchestrator] Reusing completed subtree: {subtree_name}"
+                )
+                continue
             self.logger.info(f"[InterfaceOrchestrator] Processing subtree: {subtree_name}")
             
             # Find files for this subtree
@@ -2246,6 +2259,123 @@ class InterfaceOrchestrator:
             self.logger.info(f"[InterfaceOrchestrator] Saved interfaces to {output}")
         except Exception as e:
             self.logger.warning(f"[InterfaceOrchestrator] Failed to save interfaces: {e}")
+
+    def _load_existing_interfaces(self) -> Optional[Dict[str, Any]]:
+        """Load an existing interfaces file for subtree-level resume."""
+        if not self.output_path:
+            return None
+        path = Path(self.output_path)
+        if not path.exists():
+            return None
+        try:
+            with path.open("r", encoding="utf-8") as handle:
+                data = json.load(handle)
+        except Exception as exc:
+            self.logger.warning(
+                f"[InterfaceOrchestrator] Failed to load existing interfaces: {exc}"
+            )
+            return None
+        return data if isinstance(data, dict) else None
+
+    def _restore_completed_subtrees(
+        self,
+        skeleton: Dict[str, Any],
+        subtree_order: List[str],
+        all_interfaces: Dict[str, Any],
+        implemented_subtrees: Dict[str, List[Dict[str, Any]]],
+        coverage_status: Dict[str, Any],
+        global_registry: "GlobalInterfaceRegistry",
+    ) -> Set[str]:
+        """Restore a contiguous prefix of complete subtrees from output_path."""
+        existing = self._load_existing_interfaces()
+        if not existing:
+            return set()
+
+        restored: Set[str] = set()
+        existing_subtrees = existing.get("subtrees") or {}
+        if not isinstance(existing_subtrees, dict):
+            return restored
+
+        for subtree_name in subtree_order:
+            subtree_data = existing_subtrees.get(subtree_name)
+            if not isinstance(subtree_data, dict):
+                break
+
+            file_nodes = self._find_files_for_subtree(skeleton, subtree_name)
+            file_container = subtree_data.get(
+                "interfaces",
+                subtree_data.get("files", {}),
+            )
+            if not isinstance(file_container, dict):
+                break
+            if not self._subtree_interfaces_complete(file_nodes, file_container):
+                break
+
+            all_interfaces[subtree_name] = {
+                "files_order": subtree_data.get("files_order")
+                or [node.get("path", "") for node in file_nodes],
+                "interfaces": file_container,
+            }
+            implemented_subtrees[subtree_name] = self._implemented_files_from_existing(
+                file_nodes,
+                file_container,
+            )
+            for file_node in file_nodes:
+                self._record_file_coverage(
+                    coverage_status=coverage_status,
+                    subtree_name=subtree_name,
+                    file_node=file_node,
+                    result=file_container.get(file_node.get("path", "")),
+                )
+            global_registry.register_from_subtree_result(subtree_name, file_container)
+            restored.add(subtree_name)
+
+        if restored:
+            self.logger.info(
+                f"[InterfaceOrchestrator] Restored {len(restored)} completed subtree(s): "
+                f"{sorted(restored)}"
+            )
+        return restored
+
+    @classmethod
+    def _subtree_interfaces_complete(
+        cls,
+        file_nodes: List[Dict[str, Any]],
+        file_container: Dict[str, Any],
+    ) -> bool:
+        """Return True when existing subtree interfaces cover all features."""
+        expected_features: Set[str] = set()
+        for file_node in file_nodes:
+            expected_features.update(file_node.get("feature_paths", []))
+        if not expected_features:
+            return False
+
+        produced_features: Set[str] = set()
+        for result in file_container.values():
+            if isinstance(result, dict):
+                produced_features.update(cls._features_from_file_result(result))
+        return expected_features <= produced_features
+
+    @staticmethod
+    def _implemented_files_from_existing(
+        file_nodes: List[Dict[str, Any]],
+        file_container: Dict[str, Any],
+    ) -> List[Dict[str, Any]]:
+        """Build implemented_subtrees entries from restored interface data."""
+        implemented: List[Dict[str, Any]] = []
+        for file_node in file_nodes:
+            file_path = file_node.get("path", "")
+            result = file_container.get(file_path)
+            if not isinstance(result, dict) or not result.get("units"):
+                continue
+            implemented.append({
+                "path": file_path,
+                "features": file_node.get("feature_paths", []),
+                "code": result.get("file_code", ""),
+                "units": result.get("units", []),
+                "units_to_features": result.get("units_to_features", {}),
+            })
+        return implemented
     
     def _build_base_class_files_mapping(
         self,

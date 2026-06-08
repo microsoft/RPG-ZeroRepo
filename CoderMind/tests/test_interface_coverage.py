@@ -11,7 +11,7 @@ _SCRIPTS = _REPO / "scripts"
 if str(_SCRIPTS) not in sys.path:
     sys.path.insert(0, str(_SCRIPTS))
 
-from func_design.interface_agent import InterfaceOrchestrator
+from func_design.interface_agent import GlobalInterfaceRegistry, InterfaceOrchestrator
 
 _SPEC = importlib.util.spec_from_file_location(
     "design_interfaces_script",
@@ -147,3 +147,77 @@ def test_design_interfaces_main_fails_on_incomplete_coverage(
     assert design_interfaces.main() == 1
     saved = json.loads(output_path.read_text())
     assert saved["success"] is False
+
+
+def test_restore_completed_subtrees_reuses_only_complete_prefix(tmp_path: Path) -> None:
+    output_path = tmp_path / "interfaces.json"
+    output_path.write_text(json.dumps({
+        "subtrees": {
+            "Core": {
+                "files_order": ["core.go"],
+                "interfaces": {
+                    "core.go": {
+                        "file_code": "package core\n\ntype Core struct{}\n",
+                        "units": ["struct Core"],
+                        "units_to_features": {"struct Core": ["Core/run"]},
+                    }
+                },
+            },
+            "Store": {
+                "files_order": ["store.go"],
+                "interfaces": {},
+            },
+        }
+    }))
+    skeleton = {
+        "root": {
+            "type": "directory",
+            "children": [
+                {"type": "file", "path": "core.go", "feature_paths": ["Core/run"]},
+                {"type": "file", "path": "store.go", "feature_paths": ["Store/load"]},
+            ],
+        }
+    }
+    orchestrator = InterfaceOrchestrator(
+        llm_client=object(),
+        output_path=str(output_path),
+        target_language="go",
+    )
+    all_interfaces = {}
+    implemented_subtrees = {}
+    coverage = InterfaceOrchestrator._new_coverage_status()
+    registry = GlobalInterfaceRegistry()
+
+    restored = orchestrator._restore_completed_subtrees(
+        skeleton=skeleton,
+        subtree_order=["Core", "Store"],
+        all_interfaces=all_interfaces,
+        implemented_subtrees=implemented_subtrees,
+        coverage_status=coverage,
+        global_registry=registry,
+    )
+
+    assert restored == {"Core"}
+    assert list(all_interfaces) == ["Core"]
+    assert implemented_subtrees["Core"][0]["path"] == "core.go"
+    assert coverage["expected_features"] == 1
+    assert coverage["covered_features"] == 1
+
+
+def test_subtree_complete_allows_cross_file_feature_mapping() -> None:
+    file_nodes = [
+        {"path": "cmd/main.go", "feature_paths": ["CLI/run"]},
+        {"path": "cmd/usage.go", "feature_paths": ["CLI/help"]},
+    ]
+    file_container = {
+        "cmd/main.go": {
+            "units": ["function Run"],
+            "units_to_features": {"function Run": ["CLI/run", "CLI/help"]},
+        },
+        "cmd/usage.go": {"units": [], "units_to_features": {}},
+    }
+
+    assert InterfaceOrchestrator._subtree_interfaces_complete(
+        file_nodes,
+        file_container,
+    )
