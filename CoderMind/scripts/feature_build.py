@@ -895,6 +895,25 @@ def _extract_paths_and_descs(items: List) -> Tuple[List[str], Dict[str, str]]:
     return paths, desc_map
 
 
+def _target_languages(data: Dict[str, Any]) -> List[str]:
+    """Returns normalized target language list from feature data."""
+    raw_languages = data.get("target_languages") or []
+    languages: List[str] = []
+    if isinstance(raw_languages, list):
+        for lang in raw_languages:
+            if isinstance(lang, str):
+                cleaned = lang.strip().lower()
+                if cleaned and cleaned not in languages:
+                    languages.append(cleaned)
+    primary = data.get("target_language")
+    if isinstance(primary, str) and primary.strip():
+        cleaned = primary.strip().lower()
+        if cleaned in languages:
+            languages.remove(cleaned)
+        languages.insert(0, cleaned)
+    return languages
+
+
 def _save_intermediate(
     feature_tree: Dict[str, Any],
     current_tree: Dict[str, Any],
@@ -908,6 +927,8 @@ def _save_intermediate(
         "repository_name": feature_tree.get("repository_name", "unknown"),
         "repository_purpose": feature_tree.get("repository_purpose", ""),
         "repository_specification": feature_tree.get("repository_specification", ""),
+        "target_language": feature_tree.get("target_language"),
+        "target_languages": _target_languages(feature_tree),
         "feature_tree": current_tree,
         "previous_feature_tree": previous_feature_tree,
         "iteration_logs": iteration_logs,
@@ -1516,6 +1537,8 @@ def build_from_spec(
         "repository_name": feature_tree.get("repository_name", "unknown"),
         "repository_purpose": feature_tree.get("repository_purpose", ""),
         "repository_specification": feature_tree.get("repository_specification", ""),
+        "target_language": feature_tree.get("target_language"),
+        "target_languages": _target_languages(feature_tree),
         "feature_tree": current_tree,
         "previous_feature_tree": previous_feature_tree,
         "iteration_logs": iteration_logs,
@@ -1707,6 +1730,8 @@ def expand_with_direction(
         "repository_name": feature_tree.get("repository_name", "unknown"),
         "repository_purpose": feature_tree.get("repository_purpose", ""),
         "repository_specification": feature_tree.get("repository_specification", ""),
+        "target_language": feature_tree.get("target_language"),
+        "target_languages": _target_languages(feature_tree),
         "feature_tree": current_tree,
         "previous_feature_tree": previous_feature_tree,
         "iteration_logs": iteration_logs,
@@ -2038,6 +2063,8 @@ def _load_feature_data(feature_build_path: Path, feature_spec_path: Path) -> Dic
                 "repository_name": "",
                 "repository_purpose": "",
                 "repository_specification": "",
+                "target_language": None,
+                "target_languages": [],
                 "feature_tree": {},
             }
 
@@ -2053,6 +2080,19 @@ def _load_feature_data(feature_build_path: Path, feature_spec_path: Path) -> Dic
                 feature_tree["repository_purpose"] = spec_repo_purpose
                 logger.info(
                     f"Loaded repository_purpose from feature_spec.json ({len(spec_repo_purpose)} chars)"
+                )
+
+            for key in ("target_language", "target_languages"):
+                value = feature_spec.get(key)
+                if value:
+                    feature_tree[key] = value
+            languages = _target_languages(feature_tree)
+            if languages:
+                feature_tree["target_language"] = languages[0]
+                feature_tree["target_languages"] = languages
+                logger.info(
+                    "Loaded target languages from feature_spec.json: %s",
+                    ", ".join(languages),
                 )
 
             spec_content = feature_spec_path.read_text(encoding="utf-8").strip()

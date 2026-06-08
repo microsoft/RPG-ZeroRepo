@@ -66,6 +66,13 @@ class ResolveDecoderLanguageTests(unittest.TestCase):
         )
         self.assertEqual(result, "typescript")
 
+    def test_tier_0_uses_first_target_languages_item(self) -> None:
+        result = resolve_decoder_language(
+            feature_spec={"target_languages": ["go", "typescript"]},
+            rpg_obj={"root": {"meta": {"language": "python"}}},
+        )
+        self.assertEqual(result, "go")
+
     # --- Tier 1: RPG root meta -------------------------------------
 
     def test_tier_1_rpg_meta_when_no_feature_spec(self) -> None:
@@ -95,9 +102,8 @@ class ResolveDecoderLanguageTests(unittest.TestCase):
         self.assertEqual(result, "python")
 
     def test_resolve_target_language_unchanged(self) -> None:
-        # PR-1's resolve_target_language must still work in isolation
-        # (no feature_spec argument). Sanity check that PR-2 didn't
-        # break the older API.
+        # The project-language resolver works without a feature_spec
+        # argument; callers that only have RPG metadata use this path.
         self.assertEqual(
             resolve_target_language({"root": {"meta": {"language": "go"}}}),
             "go",
@@ -134,11 +140,33 @@ class FeatureSpecOutputSchemaTests(unittest.TestCase):
         payload = {**self.minimal_payload, "target_language": "go"}
         spec = self.FeatureSpecOutput.model_validate(payload)
         self.assertEqual(spec.target_language, "go")
+        self.assertEqual(spec.target_languages, ["go"])
         # JSON dump preserves the field.
         round_tripped = self.FeatureSpecOutput.model_validate_json(
             spec.model_dump_json()
         )
         self.assertEqual(round_tripped.target_language, "go")
+        self.assertEqual(round_tripped.target_languages, ["go"])
+
+    def test_target_languages_sets_primary_language(self) -> None:
+        payload = {**self.minimal_payload, "target_languages": ["go", "typescript"]}
+        spec = self.FeatureSpecOutput.model_validate(payload)
+        self.assertEqual(spec.target_language, "go")
+        self.assertEqual(spec.target_languages, ["go", "typescript"])
+
+    def test_infers_go_from_requirement_text(self) -> None:
+        from feature.spec import InputSource, _infer_target_languages  # noqa: E402
+
+        source = InputSource(
+            kind="user_input",
+            text=(
+                "TaskLite is a small command-line task tracker written in Go. "
+                "It validates the decoder pipeline for a non-Python project. "
+                "Run it with go test ./..."
+            ),
+        )
+
+        self.assertEqual(_infer_target_languages(source)[0], "go")
 
 
 class FileDesignerWiringTests(unittest.TestCase):

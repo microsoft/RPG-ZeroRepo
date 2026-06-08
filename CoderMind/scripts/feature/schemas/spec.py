@@ -31,7 +31,7 @@ from __future__ import annotations
 
 from typing import List, Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 
 ProjectType = Literal[
@@ -250,6 +250,36 @@ class FeatureSpecOutput(BaseModel):
             "``meta.language`` and finally default to ``\"python\"``."
         ),
     )
+    target_languages: List[str] = Field(
+        default_factory=list,
+        description=(
+            "All programming languages expected in the generated repository. "
+            "The first item is the primary language and mirrors "
+            "``target_language`` when present. Multi-language repositories "
+            "can list additional languages here."
+        ),
+    )
+
+    @model_validator(mode="after")
+    def _normalise_target_languages(self) -> "FeatureSpecOutput":
+        """Keeps scalar and list language hints consistent."""
+        langs = []
+        for lang in self.target_languages:
+            if isinstance(lang, str):
+                cleaned = lang.strip().lower()
+                if cleaned and cleaned not in langs:
+                    langs.append(cleaned)
+        if self.target_language:
+            primary = self.target_language.strip().lower()
+            if primary:
+                self.target_language = primary
+                if primary in langs:
+                    langs.remove(primary)
+                langs.insert(0, primary)
+        elif langs:
+            self.target_language = langs[0]
+        self.target_languages = langs
+        return self
 
 
 __all__ = [

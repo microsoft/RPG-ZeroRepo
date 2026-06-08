@@ -27,6 +27,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 from dataclasses import dataclass, field
 from datetime import date
 from pathlib import Path
@@ -214,7 +215,44 @@ def _call_llm(
             "LLM failed to produce a valid feature_spec.json after "
             f"{max_retries} attempts (see LLM trace logs for details)."
         )
-    return result
+    inferred = _infer_target_languages(source)
+    if inferred and not result.target_languages:
+        result.target_languages = inferred
+    if inferred and not result.target_language:
+        result.target_language = inferred[0]
+    return FeatureSpecOutput.model_validate(result.model_dump())
+
+
+def _infer_target_languages(source: InputSource) -> list[str]:
+    """Infers implementation languages from requirement text."""
+    text = _source_text(source).lower()
+    patterns = [
+        ("typescript", r"\btypescript\b|\bts\b"),
+        ("javascript", r"\bjavascript\b|\bnode(?:\.js)?\b"),
+        ("go", r"\bgolang\b|\bgo\b|\bgo test\b|\bgo run\b|\bgo\.mod\b"),
+        ("rust", r"\brust\b|\bcargo\b"),
+        ("cpp", r"\bc\+\+\b|\bcpp\b"),
+        ("c", r"\bc language\b|\bc project\b"),
+        ("python", r"(?<!non-)\bpython\b|\bflask\b|\bpytest\b"),
+    ]
+    found: list[str] = []
+    for language, pattern in patterns:
+        if re.search(pattern, text) and language not in found:
+            found.append(language)
+    return found
+
+
+def _source_text(source: InputSource) -> str:
+    """Returns all source requirement text as one string."""
+    if source.kind == "user_input":
+        return source.text or ""
+    chunks: list[str] = []
+    for doc in source.docs:
+        try:
+            chunks.append(doc.read_text(encoding="utf-8"))
+        except OSError:
+            continue
+    return "\n".join(chunks)
 
 
 # ===========================================================================

@@ -42,6 +42,9 @@ def create_initial_rpg(repo_data: Dict[str, Any]) -> RPG:
     # Set generator for repo node (created in RPG.__init__)
     if rpg.repo_node:
         rpg.repo_node.meta.generator = "build_skeleton"
+        target_language = repo_data.get("target_language")
+        if isinstance(target_language, str) and target_language.strip():
+            rpg.repo_node.meta.language = target_language.strip().lower()
 
     logging.info(f"Creating initial RPG for repository: {repo_name}")
     logging.info(f"Found {len(repo_cmpt)} components to process")

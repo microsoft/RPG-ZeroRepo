@@ -64,6 +64,8 @@ class FeatureSpecOutput(BaseModel):
     functional_requirements:      list[FeatureNode]
     repository_name:              str    # 1-3 words, kebab-case
     repository_purpose:           str    # 1-2 sentences
+  target_language:              str | None = None
+  target_languages:             list[str] = []
 ```
 
 You may include reasoning, planning notes or commentary outside the
@@ -91,6 +93,11 @@ Choose from this whitelist (multi-select allowed; at least one required):
 
 - ``repository_name``: concise, kebab-case, 1-3 words (e.g. ``todo-list-app``).
 - ``repository_purpose``: 1-2 sentences capturing the core objective.
+- ``target_language``: primary implementation language in lowercase
+  (e.g. ``python``, ``go``, ``typescript``, ``rust``, ``c``, ``cpp``).
+- ``target_languages``: all implementation languages in priority order;
+  include ``target_language`` as the first item. For single-language
+  projects this is a one-item list.
 
 ### Background & NFR
 

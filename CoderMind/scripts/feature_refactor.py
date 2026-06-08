@@ -460,6 +460,8 @@ class FeatureTreeRefactor:
             "repository_specification": json.dumps(
                 repo_data.get("repository_specification", {}), indent=2
             ),
+            "target_language": repo_data.get("target_language"),
+            "target_languages": repo_data.get("target_languages") or [],
             "features": feature_tree,
             "components": components,
             # "components_format": convert_component_to_features(components),
@@ -1091,6 +1093,8 @@ Example usage:
             "background_and_overview": background_and_overview,
             "functional_requirements": functional_requirements,
             "repository_specification": repo_specification_data,
+            "target_language": repo_specification_data.get("target_language"),
+            "target_languages": repo_specification_data.get("target_languages") or [],
         }
         # Create LLM client
         # Initialize trajectory

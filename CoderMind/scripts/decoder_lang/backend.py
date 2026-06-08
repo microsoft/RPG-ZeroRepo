@@ -339,12 +339,19 @@ def resolve_decoder_language(
     # Tier 0: explicit override on feature_spec
     if feature_spec is not None:
         spec_lang: Any = None
+        spec_langs: Any = None
         if isinstance(feature_spec, dict):
             spec_lang = feature_spec.get("target_language")
+            spec_langs = feature_spec.get("target_languages")
         else:
             # pydantic model / dataclass / SimpleNamespace
             spec_lang = getattr(feature_spec, "target_language", None)
+            spec_langs = getattr(feature_spec, "target_languages", None)
         if isinstance(spec_lang, str) and spec_lang:
             return spec_lang
+        if isinstance(spec_langs, list):
+            for item in spec_langs:
+                if isinstance(item, str) and item.strip():
+                    return item.strip().lower()
     # Tier 1-3 share the same logic as resolve_target_language.
     return resolve_target_language(rpg_obj, valid_files=valid_files)
