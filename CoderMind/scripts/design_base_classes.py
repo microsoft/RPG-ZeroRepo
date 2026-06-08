@@ -34,8 +34,9 @@ from common import (
 # Import the BaseClassAgent
 from func_design.base_class_agent import (
     BaseClassAgent,
-    extract_class_names
+    extract_declaration_names,
 )
+from decoder_lang import get_backend
 from rpg import (
     RPG, Node, NodeType, EdgeType, NodeMetaData, strip_uuid8, uuid8,
     class_node_path,
@@ -49,6 +50,7 @@ from common.paths import (
     REPO_RPG_FILE
 )
 from common import get_project_background_context
+from common.language_meta import extract_language_metadata, metadata_with_languages
 
 
 def load_data_flow() -> Dict[str, Any]:
@@ -94,6 +96,8 @@ def update_rpg_with_base_classes(base_classes_data: Dict[str, Any], rpg_path: Pa
     rpg.remove_nodes_by_generator("design_base_classes")
     
     base_classes = base_classes_data.get("base_classes", [])
+    backend = get_backend(extract_language_metadata(base_classes_data)[0])
+
     if not base_classes:
         rpg.save_json(str(rpg_path))  # Save to persist cleanup
         return
@@ -184,8 +188,8 @@ def update_rpg_with_base_classes(base_classes_data: Dict[str, Any], rpg_path: Pa
                 file_nodes[scope_file_key] = file_node
                 added_nodes += 1
         
-        # Extract classes from code
-        class_names = extract_class_names(code)
+        # Extract declarations from target-language code.
+        class_names = extract_declaration_names(code, backend)
         
         for class_name in class_names:
             # Check if class node with same signature already exists under this file
@@ -278,6 +282,9 @@ class BaseClassDesigner:
         """
         # Get repository info
         repo_name, repo_info = get_repo_info_from_files()
+        primary_language, _ = extract_language_metadata(skeleton)
+        if not primary_language:
+            primary_language = extract_language_metadata(data_flow)[0]
         
         # Get project background / technology context
         project_background = get_project_background_context()
@@ -316,7 +323,8 @@ class BaseClassDesigner:
             max_iterations=self.max_iterations,
             logger=self.logger,
             trajectory=self.trajectory,
-            step_id=self._current_step_id
+            step_id=self._current_step_id,
+            target_language=primary_language,
         )
         
         result = agent.design_base_classes(
@@ -327,6 +335,9 @@ class BaseClassDesigner:
             functional_areas=functional_areas,
             functional_areas_overview=functional_areas_overview,
             project_background=project_background,
+        )
+        result["meta"] = metadata_with_languages(
+            skeleton if extract_language_metadata(skeleton)[0] else data_flow
         )
         
         # Update trajectory
@@ -351,6 +362,8 @@ class BaseClassDesigner:
         print("=" * 60)
         
         base_classes = result.get("base_classes", [])
+        backend = get_backend(extract_language_metadata(result)[0])
+
         class_names = result.get("class_names", [])
         data_structures = result.get("data_structures", [])
         ds_class_names = result.get("data_structure_names", [])
@@ -365,7 +378,7 @@ class BaseClassDesigner:
             for bc in base_classes:
                 file_path = bc.get("file_path", "")[:40]
                 code = bc.get("code", "")
-                classes = extract_class_names(code)
+                classes = extract_declaration_names(code, backend)
                 class_str = ", ".join(classes[:3])
                 if len(classes) > 3:
                     class_str += f" (+{len(classes) - 3})"
@@ -382,7 +395,7 @@ class BaseClassDesigner:
             for ds in data_structures:
                 subtree = ds.get("subtree", "")[:30]
                 code = ds.get("code", "")
-                classes = extract_class_names(code)
+                classes = extract_declaration_names(code, backend)
                 class_str = ", ".join(classes[:3])
                 if len(classes) > 3:
                     class_str += f" (+{len(classes) - 3})"

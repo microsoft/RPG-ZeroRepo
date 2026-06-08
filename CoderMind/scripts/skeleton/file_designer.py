@@ -212,17 +212,22 @@ class FileDesigner:
 
         self.logger = logging.getLogger(__name__)
 
-        # Resolve target language with three-tier fallback (explicit
-        # kwarg → RPG root meta.language → "python"). Build a minimal
-        # RPG-shaped dict (just the root meta) so the resolver doesn't
-        # trigger a full RPG.to_dict() serialisation.
+        # Build a minimal RPG-shaped dict so language resolution does
+        # not trigger full graph serialization.
         rpg_meta_lang = None
         repo_node = getattr(self.rpg, "repo_node", None)
         if repo_node is not None and getattr(repo_node, "meta", None) is not None:
             rpg_meta_lang = getattr(repo_node.meta, "language", None)
         rpg_dict_minimal = {"root": {"meta": {"language": rpg_meta_lang}}}
         feature_spec_stub = (
-            {"target_language": target_language} if target_language else None
+            {
+                "meta": {
+                    "primary_language": target_language,
+                    "target_languages": [target_language],
+                }
+            }
+            if target_language
+            else None
         )
         self.target_language = resolve_decoder_language(
             feature_spec=feature_spec_stub,
@@ -378,13 +383,13 @@ class FileDesigner:
             tech_section = (
                 f"\n{self._project_background}\n"
                 "When a specific technology stack is described above, design the directory\n"
-                "structure to accommodate framework-specific conventions (e.g., `templates/`\n"
-                "for Jinja2, `models.py` for ORM, `app.py` for Flask entry point).\n"
+                "structure to accommodate the target language and framework conventions.\n"
             )
 
-        # Sanitize repo name for use as a Python package directory
-        # (e.g., "blog-system" -> "blog_system")
-        safe_repo_name = self.rpg.repo_name.replace("-", "_")
+        hints = self.backend.prompt_hints()
+        safe_repo_name = self.backend.sanitize_module_identifier(
+            self.rpg.repo_name.replace(" ", "_")
+        )
 
         base_user_prompt = f"""## Repository Information
 {repo_info}
@@ -395,7 +400,9 @@ class FileDesigner:
 ## Task
 Assign each component to an appropriate directory path.
 Use "{safe_repo_name}" as the project name in paths (e.g., src/{safe_repo_name}/...).
-IMPORTANT: Directory names MUST be valid Python identifiers (use underscores, not hyphens).
+IMPORTANT: {hints.module_naming_rule}
+Target layout example:
+{hints.package_layout_example}
 IMPORTANT: You MUST assign ALL {len(required_components)} components: {', '.join(required_components)}
 """
 
@@ -494,6 +501,8 @@ IMPORTANT: You MUST assign ALL {len(required_components)} components: {', '.join
             if self._project_background and self._project_background.strip():
                 tech_section = f"\n{self._project_background}\n"
 
+            hints = self.backend.prompt_hints()
+
             user_prompt = f"""## Repository Information
 {repo_info}
 {tech_section}
@@ -505,7 +514,8 @@ Directory: {comp_dir}
 {feature_list}
 
 ## Task
-Assign ALL the above features to Python files under {comp_dir}/.
+Assign ALL the above features to {hints.display_name} source files under {comp_dir}/.
+Source files should use the {hints.file_extension} extension.
 Every feature MUST be assigned to exactly one file.
 """
 
@@ -690,6 +700,8 @@ Every feature MUST be assigned to exactly one file.
             if self._project_background and self._project_background.strip():
                 tech_section = f"\n{self._project_background}\n"
 
+            hints = self.backend.prompt_hints()
+
             user_prompt = f"""## Repository Information
 {repo_info}
 {tech_section}
@@ -700,7 +712,8 @@ Directory: {comp_dir}
 {feature_list}
 
 ## Task
-Assign ALL the above features to Python files under {comp_dir}/.
+Assign ALL the above features to {hints.display_name} source files under {comp_dir}/.
+Source files should use the {hints.file_extension} extension.
 Every feature MUST be assigned to exactly one file.
 You may add features to existing files in this directory or create new files.
 """

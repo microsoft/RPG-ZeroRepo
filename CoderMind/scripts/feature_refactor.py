@@ -20,6 +20,7 @@ from feature.prompts import (
 from common.paths import FEATURE_BUILD_FILE, FEATURE_TREE_FILE
 from common import print_unicode_table, get_all_leaf_paths, get_leaf_name, get_all_leaf_descriptions
 from common.llm_client import LLMClient
+from common.language_meta import metadata_with_languages
 from common.trajectory import load_or_create_trajectory
 
 
@@ -460,8 +461,7 @@ class FeatureTreeRefactor:
             "repository_specification": json.dumps(
                 repo_data.get("repository_specification", {}), indent=2
             ),
-            "target_language": repo_data.get("target_language"),
-            "target_languages": repo_data.get("target_languages") or [],
+            "meta": metadata_with_languages(repo_data),
             "features": feature_tree,
             "components": components,
             # "components_format": convert_component_to_features(components),
@@ -1093,8 +1093,7 @@ Example usage:
             "background_and_overview": background_and_overview,
             "functional_requirements": functional_requirements,
             "repository_specification": repo_specification_data,
-            "target_language": repo_specification_data.get("target_language"),
-            "target_languages": repo_specification_data.get("target_languages") or [],
+            "meta": metadata_with_languages(repo_specification_data),
         }
         # Create LLM client
         # Initialize trajectory

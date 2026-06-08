@@ -29,6 +29,8 @@ from rpg.code_unit import ParsedFile, CodeUnit
 # ``ast`` import supports Python-specific node inspection for docstrings
 # and annotation syntax below.
 from decoder_lang import get_backend
+from decoder_lang.backend import LanguageBackend
+from decoder_lang.prompt_directive import with_language_directive
 
 # Import common LLMClient with trajectory support
 from common import (
@@ -117,7 +119,12 @@ class DependencyCollector:
     2. LLM declarations - expected function calls declared by LLM
     """
     
-    def __init__(self, known_base_classes: Set[str], known_types: Set[str]):
+    def __init__(
+        self,
+        known_base_classes: Set[str],
+        known_types: Set[str],
+        target_language: Optional[str] = None,
+    ):
         """Initialize the dependency collector.
         
         Args:
@@ -126,6 +133,7 @@ class DependencyCollector:
         """
         self.known_base_classes = known_base_classes
         self.known_types = known_types
+        self.backend = get_backend(target_language)
         self.original_edges: List[Dict[str, Any]] = []
         self.inheritance_edges: List[Dict[str, Any]] = []
         self.invocation_edges: List[Dict[str, Any]] = []
@@ -243,11 +251,7 @@ class DependencyCollector:
             file_path: Path of the file containing this code
             base_class_files: Mapping of class names to their file paths
         """
-        # Type-name extraction below needs raw Python AST nodes
-        # (Subscript / BinOp / Tuple). PythonBackend stores the raw
-        # node in ``unit.extra['ast_node']`` for each code unit.
-        backend = get_backend("python")
-        units = backend.list_code_units(code, file_path)
+        units = self.backend.list_code_units(code, file_path)
         # Invalid interface code yields no dependency edges here.
         for unit in units:
             node = (unit.extra or {}).get("ast_node")
@@ -952,12 +956,14 @@ def check_has_docstring(code: str) -> Tuple[bool, str]:
 def validate_interface(
     interface: Dict[str, Any],
     target_features: Set[str],
-    covered_features: Set[str]
+    covered_features: Set[str],
+    backend: Optional[LanguageBackend] = None,
 ) -> Tuple[bool, str, Dict[str, Any]]:
     """Validate a single interface definition using ParsedFile.
     
     Returns: (is_valid, error_message, parsed_info)
     """
+    backend = backend or get_backend("python")
     features = interface.get("features", [])
     code = interface.get("code", "")
     errors = []
@@ -979,53 +985,49 @@ def validate_interface(
             if invalid_features:
                 errors.append(f"Features {list(invalid_features)} are not in target features")
     
-    # Auto-fix hyphenated module names in import statements
-    # (e.g., "from blog-system.security import ..." -> "from blog_system.security import ...")
-    code = re.sub(
-        r'^(\s*(?:from|import)\s+)([\w\-]+(?:\.[\w\-]+)*)',
-        lambda m: m.group(1) + m.group(2).replace('-', '_'),
-        code,
-        flags=re.MULTILINE,
-    )
-    # Persist the fixed code back so downstream consumers get corrected imports
-    interface["code"] = code
+    if backend.name == "python":
+        code = re.sub(
+            r'^(\s*(?:from|import)\s+)([\w\-]+(?:\.[\w\-]+)*)',
+            lambda m: m.group(1) + m.group(2).replace('-', '_'),
+            code,
+            flags=re.MULTILINE,
+        )
+        interface["code"] = code
 
-    # Parse code with ParsedFile
-    parsed_file = ParsedFile(code=code, file_path="temp_interface.py")
-    
-    # Check for syntax errors
-    if parsed_file.has_error():
-        error = parsed_file.error
-        errors.append(f"Syntax error: line {error.lineno}, column {error.offset}: {error.msg}")
+    ok, syntax_error = backend.syntax_check(code, f"temp_interface{backend.file_extension}")
+    if not ok:
+        errors.append(f"Syntax error: {syntax_error}")
         return False, "; ".join(errors), {}
-    
-    # Extract only class and function units (not methods)
+
     interface_units = [
-        unit for unit in parsed_file.units
-        if unit.unit_type in ["function", "class"]
+        unit for unit in backend.list_code_units(code, f"temp_interface{backend.file_extension}")
+        if unit.unit_type in ["function", "class", "struct", "interface", "method"]
+        and (unit.parent is None or unit.unit_type == "method")
     ]
-    
+
     if not interface_units:
-        errors.append("No valid functions/classes found in code")
-    
-    # Check docstrings
-    for unit in interface_units:
-        if not unit.docstring and unit.unit_type in ["function", "class"]:
-            errors.append(
-                f"Missing docstring for {unit.unit_type} '{unit.name}' "
-                f"in features {features}"
-            )
+        errors.append("No valid target-language declarations found in code")
+
+    if backend.name == "python":
+        for unit in interface_units:
+            if not unit.docstring and unit.unit_type in ["function", "class"]:
+                errors.append(
+                    f"Missing docstring for {unit.unit_type} '{unit.name}' "
+                    f"in features {features}"
+                )
     
     if errors:
         return False, "; ".join(errors), {}
     
     # Build parsed info with CodeUnit objects
-    functions = [u.name for u in interface_units if u.unit_type == "function"]
-    classes = [u.name for u in interface_units if u.unit_type == "class"]
+    functions = [u.name for u in interface_units if u.unit_type in {"function", "method"}]
+    classes = [u.name for u in interface_units if u.unit_type in {"class", "struct", "interface"}]
+    declarations = [f"{u.unit_type} {u.name}" for u in interface_units]
     
     return True, "", {
         "functions": functions,
         "classes": classes,
+        "declarations": declarations,
         "features": features,
         "units": interface_units  # Include CodeUnit objects
     }
@@ -1145,7 +1147,8 @@ class InterfaceAgent:
         max_iterations: int = 10,
         logger: Optional[logging.Logger] = None,
         trajectory: Optional[Any] = None,
-        step_id: Optional[int] = None
+        step_id: Optional[int] = None,
+        target_language: Optional[str] = None,
     ):
         # Create LLMClient with trajectory support if not provided
         if llm_client is None:
@@ -1157,6 +1160,7 @@ class InterfaceAgent:
                 self.llm.set_trajectory(trajectory, step_id)
         self.max_iterations = max_iterations
         self.logger = logger or logging.getLogger(__name__)
+        self.backend = get_backend(target_language)
     
     def design_file_interface(
         self,
@@ -1195,7 +1199,7 @@ class InterfaceAgent:
         feature_interface_map = {}
 
         # Build system prompt (tool description is now integrated)
-        system_prompt = INTERFACE_PROMPT
+        system_prompt = with_language_directive(INTERFACE_PROMPT, self.backend)
 
         # Build user prompt
         features_str = "\n".join([f"- {f}" for f in file_features])
@@ -1271,12 +1275,17 @@ Global context you can use:
                 valid_interfaces = []
                 for interface in interfaces:
                     is_valid, error, info = validate_interface(
-                        interface, target_features, covered_features
+                        interface,
+                        target_features,
+                        covered_features,
+                        backend=self.backend,
                     )
                     
                     if is_valid:
                         # Add name field from parsed info
-                        if info.get("classes"):
+                        if info.get("declarations"):
+                            interface["name"] = info["declarations"][0]
+                        elif info.get("classes"):
                             interface["name"] = f"class {info['classes'][0]}"
                         elif info.get("functions"):
                             interface["name"] = f"function {info['functions'][0]}"
@@ -1411,7 +1420,8 @@ class SubtreeInterfaceAgent:
         max_iterations: int = 10,
         logger: Optional[logging.Logger] = None,
         trajectory: Optional[Any] = None,
-        step_id: Optional[int] = None
+        step_id: Optional[int] = None,
+        target_language: Optional[str] = None,
     ):
         if llm_client is None:
             self.llm = LLMClient(trajectory=trajectory, step_id=step_id)
@@ -1421,6 +1431,7 @@ class SubtreeInterfaceAgent:
                 self.llm.set_trajectory(trajectory, step_id)
         self.max_iterations = max_iterations
         self.logger = logger or logging.getLogger(__name__)
+        self.backend = get_backend(target_language)
     
     def design_subtree_interfaces(
         self,
@@ -1474,7 +1485,7 @@ class SubtreeInterfaceAgent:
             return {}
 
         # Build system prompt (tool description is now integrated)
-        system_prompt = SUBTREE_INTERFACE_PROMPT
+        system_prompt = with_language_directive(SUBTREE_INTERFACE_PROMPT, self.backend)
 
         last_error = ""
         
@@ -1547,12 +1558,17 @@ class SubtreeInterfaceAgent:
                     for interface in file_block.interfaces:
                         iface_dict = interface.model_dump()
                         is_valid, error, info = validate_interface(
-                            iface_dict, target_features, covered_features
+                            iface_dict,
+                            target_features,
+                            covered_features,
+                            backend=self.backend,
                         )
                         
                         if is_valid:
                             # Add name from parsed info
-                            if info.get("classes"):
+                            if info.get("declarations"):
+                                iface_dict["name"] = info["declarations"][0]
+                            elif info.get("classes"):
                                 iface_dict["name"] = f"class {info['classes'][0]}"
                             elif info.get("functions"):
                                 iface_dict["name"] = f"function {info['functions'][0]}"
@@ -1675,7 +1691,7 @@ class SubtreeInterfaceAgent:
             
             completed_parts.append(
                 f"File: `{file_path}` (already designed)\n"
-                f"```python\n{code_preview}\n```"
+                f"```{self.backend.markdown_fence}\n{code_preview}\n```"
             )
         
         completed_context = (
@@ -1833,7 +1849,8 @@ class InterfaceOrchestrator:
         logger: Optional[logging.Logger] = None,
         trajectory: Optional[Any] = None,
         step_id: Optional[int] = None,
-        output_path: Optional[str] = None
+        output_path: Optional[str] = None,
+        target_language: Optional[str] = None,
     ):
         # Create LLMClient with trajectory support if not provided
         if llm_client is None:
@@ -1849,6 +1866,7 @@ class InterfaceOrchestrator:
         self.trajectory = trajectory
         self.step_id = step_id
         self.output_path = output_path
+        self.backend = get_backend(target_language)
     
     def design_all_interfaces(
         self,
@@ -1940,7 +1958,8 @@ class InterfaceOrchestrator:
             agent = SubtreeInterfaceAgent(
                 llm_client=self.llm,
                 max_iterations=self.max_file_iterations,
-                logger=self.logger
+                logger=self.logger,
+                target_language=self.backend.name,
             )
 
             # Layer-2 retry: if the agent's internal 10-iteration loop
@@ -2035,12 +2054,14 @@ class InterfaceOrchestrator:
                         if edge.get("caller_file") == file_path:
                             declared_calls.add(edge.get("callee", ""))
                 
-                warnings = cross_validate_imports_vs_calls(
-                    code=file_code,
-                    file_path=file_path,
-                    declared_calls=list(declared_calls),
-                    global_registry=global_registry
-                )
+                warnings = []
+                if self.backend.name == "python":
+                    warnings = cross_validate_imports_vs_calls(
+                        code=file_code,
+                        file_path=file_path,
+                        declared_calls=list(declared_calls),
+                        global_registry=global_registry,
+                    )
                 if warnings:
                     all_import_warnings.extend(warnings)
                     for w in warnings:
@@ -2086,6 +2107,10 @@ class InterfaceOrchestrator:
     ) -> Dict[str, Any]:
         """Build the result dict from current state."""
         return {
+            "meta": {
+                "primary_language": self.backend.name,
+                "target_languages": [self.backend.name],
+            },
             "subtrees": all_interfaces,
             "subtree_order": subtree_order,
             "implemented_subtrees": {

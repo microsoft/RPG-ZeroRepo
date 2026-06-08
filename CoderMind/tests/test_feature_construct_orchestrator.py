@@ -50,12 +50,34 @@ def _write_text(path: Path, text: str) -> None:
 
 def _valid_feature_spec() -> dict[str, object]:
     return {
-        "meta": {"generated_at": "2026-05-25", "project_types": ["CLI"]},
+        "meta": {
+            "generated_at": "2026-05-25",
+            "project_types": ["CLI"],
+            "primary_language": "python",
+            "target_languages": ["python"],
+        },
         "repository_name": "sample-cli",
         "repository_purpose": "Build a sample CLI.",
         "background_and_overview": [{"id": "BG-001", "description": "Users need a CLI."}],
         "functional_requirements": [{"id": "FT-001", "name": "CLI", "children": []}],
         "non_functional_requirements": [{"id": "NFR-001", "description": "Fast startup."}],
+    }
+
+
+def _valid_feature_build(language: str = "python") -> dict[str, object]:
+    return {
+        "feature_tree": {},
+        "meta": {"primary_language": language, "target_languages": [language]},
+    }
+
+
+def _valid_feature_tree(
+    language: str = "python",
+    component_name: str = "core",
+) -> dict[str, object]:
+    return {
+        "components": [{"name": component_name}],
+        "meta": {"primary_language": language, "target_languages": [language]},
     }
 
 
@@ -88,8 +110,8 @@ class TestCompletionDetection:
 
     def test_valid_artifacts_are_complete(self, artifact_paths: dict[str, Path]) -> None:
         _write_json(artifact_paths["feature_spec"], _valid_feature_spec())
-        _write_json(artifact_paths["feature_build"], {"feature_tree": {}})
-        _write_json(artifact_paths["feature_refactor"], {"components": [{"name": "core"}]})
+        _write_json(artifact_paths["feature_build"], _valid_feature_build())
+        _write_json(artifact_paths["feature_refactor"], _valid_feature_tree())
 
         states = feature_construct.probe()
         assert [state.type for state in states] == ["update", "update", "update"]
@@ -105,6 +127,57 @@ class TestCompletionDetection:
         assert state.done is False
         assert "functional_requirements" in state.message
 
+    def test_feature_spec_requires_language_fields(self, artifact_paths: dict[str, Path]) -> None:
+        spec = _valid_feature_spec()
+        meta = spec["meta"]
+        assert isinstance(meta, dict)
+        meta.pop("primary_language")
+        meta.pop("target_languages")
+        _write_json(artifact_paths["feature_spec"], spec)
+
+        state = feature_construct.probe()[0]
+
+        assert state.type == "warning"
+        assert state.done is False
+        assert "meta.primary_language" in state.message
+        assert "meta.target_languages" in state.message
+
+    def test_feature_build_preserves_feature_spec_language(self, artifact_paths: dict[str, Path]) -> None:
+        spec = _valid_feature_spec()
+        spec["meta"] = {**spec["meta"], "primary_language": "go", "target_languages": ["go"]}
+        _write_json(artifact_paths["feature_spec"], spec)
+        _write_json(
+            artifact_paths["feature_build"],
+            {
+                "feature_tree": {},
+                "meta": {"primary_language": "python", "target_languages": ["python"]},
+            },
+        )
+
+        state = feature_construct.probe()[1]
+
+        assert state.type == "warning"
+        assert state.done is False
+        assert "expected 'go'" in state.message
+
+    def test_feature_refactor_preserves_feature_spec_language(self, artifact_paths: dict[str, Path]) -> None:
+        spec = _valid_feature_spec()
+        spec["meta"] = {**spec["meta"], "primary_language": "go", "target_languages": ["go"]}
+        _write_json(artifact_paths["feature_spec"], spec)
+        _write_json(
+            artifact_paths["feature_refactor"],
+            {
+                "components": [{"name": "core"}],
+                "meta": {"primary_language": "go", "target_languages": []},
+            },
+        )
+
+        state = feature_construct.probe()[2]
+
+        assert state.type == "warning"
+        assert state.done is False
+        assert "target_languages" in state.message
+
     def test_feature_refactor_requires_non_empty_components(self, artifact_paths: dict[str, Path]) -> None:
         _write_json(artifact_paths["feature_refactor"], {"components": []})
 
@@ -117,7 +190,7 @@ class TestCompletionDetection:
 class TestCheckOnlyJson:
     def test_json_payload_reports_progress(self, artifact_paths: dict[str, Path], capsys: pytest.CaptureFixture[str]) -> None:
         _write_json(artifact_paths["feature_spec"], _valid_feature_spec())
-        _write_json(artifact_paths["feature_build"], {"feature_tree": {}})
+        _write_json(artifact_paths["feature_build"], _valid_feature_build())
 
         rc = feature_construct.main(["--check-only", "--json"])
         captured = capsys.readouterr()
@@ -134,6 +207,7 @@ class TestCheckOnlyJson:
             "feature_refactor",
         ]
         assert [stage["done"] for stage in payload["stages"]] == [True, True, False]
+        assert payload["stages"][0]["details"]["primary_language"] == "python"
 
 
 class TestExecutionReset:
@@ -144,7 +218,7 @@ class TestExecutionReset:
     ) -> None:
         _write_json(artifact_paths["feature_spec"], _valid_feature_spec())
         _write_json(artifact_paths["feature_build"], {"stale": "build"})
-        _write_json(artifact_paths["feature_refactor"], {"components": [{"name": "stale"}]})
+        _write_json(artifact_paths["feature_refactor"], _valid_feature_tree(component_name="stale"))
         calls: list[str] = []
 
         def fake_run_stage(invoker: list[str], script_name: str, extra: list[str]) -> int:
@@ -153,10 +227,10 @@ class TestExecutionReset:
                 _write_json(artifact_paths["feature_spec"], _valid_feature_spec())
             elif script_name == "feature_build.py":
                 assert not artifact_paths["feature_build"].exists()
-                _write_json(artifact_paths["feature_build"], {"feature_tree": {"fresh": True}})
+                _write_json(artifact_paths["feature_build"], _valid_feature_build())
             elif script_name == "feature_refactor.py":
                 assert not artifact_paths["feature_refactor"].exists()
-                _write_json(artifact_paths["feature_refactor"], {"components": [{"name": "fresh"}]})
+                _write_json(artifact_paths["feature_refactor"], _valid_feature_tree(component_name="fresh"))
             return 0
 
         monkeypatch.setattr(feature_construct, "_run_stage", fake_run_stage)
@@ -175,7 +249,7 @@ class TestExecutionReset:
         spec.pop("repository_purpose")
         _write_json(artifact_paths["feature_spec"], spec)
         _write_json(artifact_paths["feature_build"], {"stale": "build"})
-        _write_json(artifact_paths["feature_refactor"], {"components": [{"name": "stale"}]})
+        _write_json(artifact_paths["feature_refactor"], _valid_feature_tree(component_name="stale"))
         calls: list[str] = []
 
         def fake_run_stage(invoker: list[str], script_name: str, extra: list[str]) -> int:
@@ -184,10 +258,10 @@ class TestExecutionReset:
                 _write_json(artifact_paths["feature_spec"], _valid_feature_spec())
             elif script_name == "feature_build.py":
                 assert not artifact_paths["feature_build"].exists()
-                _write_json(artifact_paths["feature_build"], {"feature_tree": {"fresh": True}})
+                _write_json(artifact_paths["feature_build"], _valid_feature_build())
             elif script_name == "feature_refactor.py":
                 assert not artifact_paths["feature_refactor"].exists()
-                _write_json(artifact_paths["feature_refactor"], {"components": [{"name": "fresh"}]})
+                _write_json(artifact_paths["feature_refactor"], _valid_feature_tree(component_name="fresh"))
             return 0
 
         monkeypatch.setattr(feature_construct, "_run_stage", fake_run_stage)
@@ -204,17 +278,17 @@ class TestExecutionReset:
     ) -> None:
         _write_json(artifact_paths["feature_spec"], _valid_feature_spec())
         _write_text(artifact_paths["feature_build"], "{")
-        _write_json(artifact_paths["feature_refactor"], {"components": [{"name": "stale"}]})
+        _write_json(artifact_paths["feature_refactor"], _valid_feature_tree(component_name="stale"))
         calls: list[str] = []
 
         def fake_run_stage(invoker: list[str], script_name: str, extra: list[str]) -> int:
             calls.append(script_name)
             if script_name == "feature_build.py":
                 assert not artifact_paths["feature_build"].exists()
-                _write_json(artifact_paths["feature_build"], {"feature_tree": {"fresh": True}})
+                _write_json(artifact_paths["feature_build"], _valid_feature_build())
             elif script_name == "feature_refactor.py":
                 assert not artifact_paths["feature_refactor"].exists()
-                _write_json(artifact_paths["feature_refactor"], {"components": [{"name": "fresh"}]})
+                _write_json(artifact_paths["feature_refactor"], _valid_feature_tree(component_name="fresh"))
             return 0
 
         monkeypatch.setattr(feature_construct, "_run_stage", fake_run_stage)
@@ -230,8 +304,8 @@ class TestExecutionReset:
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
         _write_json(artifact_paths["feature_spec"], _valid_feature_spec())
-        _write_json(artifact_paths["feature_build"], {"feature_tree": {}})
-        _write_json(artifact_paths["feature_refactor"], {"components": [{"name": "core"}]})
+        _write_json(artifact_paths["feature_build"], _valid_feature_build())
+        _write_json(artifact_paths["feature_refactor"], _valid_feature_tree())
 
         def fail_run_stage(invoker: list[str], script_name: str, extra: list[str]) -> int:
             pytest.fail(f"unexpected stage run: {script_name}")
@@ -253,7 +327,7 @@ class TestExecutionReset:
     ) -> None:
         _write_text(artifact_paths["feature_spec"], "{")
         _write_json(artifact_paths["feature_build"], {"stale": "build"})
-        _write_json(artifact_paths["feature_refactor"], {"components": [{"name": "stale"}]})
+        _write_json(artifact_paths["feature_refactor"], _valid_feature_tree(component_name="stale"))
 
         def fail_run_stage(invoker: list[str], script_name: str, extra: list[str]) -> int:
             pytest.fail(f"unexpected stage run: {script_name}")
@@ -275,7 +349,7 @@ class TestExecutionReset:
     ) -> None:
         _write_json(artifact_paths["feature_spec"], _valid_feature_spec())
         _write_text(artifact_paths["feature_build"], "{")
-        _write_json(artifact_paths["feature_refactor"], {"components": [{"name": "stale"}]})
+        _write_json(artifact_paths["feature_refactor"], _valid_feature_tree(component_name="stale"))
 
         def fail_run_stage(invoker: list[str], script_name: str, extra: list[str]) -> int:
             pytest.fail(f"unexpected stage run: {script_name}")

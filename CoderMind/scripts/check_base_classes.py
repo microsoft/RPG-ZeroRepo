@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
 """Check Base Classes Script.
 
-Function: Validate base_classes.json state and validate Python syntax
+Function: Validate base_classes.json state and target-language syntax
 - Checks if base_classes.json exists (init state)
 - Validates JSON structure (error state if invalid)
-- Validates Python code syntax (error state if syntax errors)
+- Validates source syntax (error state if syntax errors)
 - Returns update state if valid
 
 Input: .cmind/base_classes.json
@@ -15,8 +15,9 @@ import argparse
 from pathlib import Path
 from typing import Dict, Any, List, Tuple
 
-# Import from common utils
-from common import validate_python_syntax, extract_class_names
+from common.language_meta import extract_language_metadata
+from decoder_lang import get_backend
+from func_design.base_class_agent import extract_declaration_names
 
 # Import centralized paths
 from common.paths import BASE_CLASSES_FILE
@@ -34,6 +35,7 @@ def load_json(file_path: Path) -> Dict[str, Any]:
 def validate_base_classes_structure(data: Dict[str, Any]) -> Tuple[bool, List[str]]:
     """Validate base classes structure."""
     errors = []
+    backend = get_backend(extract_language_metadata(data)[0])
     
     base_classes = data.get("base_classes", [])
     
@@ -53,16 +55,15 @@ def validate_base_classes_structure(data: Dict[str, Any]) -> Tuple[bool, List[st
             elif not bc[field]:
                 errors.append(f"Base class {i}: field '{field}' is empty")
         
-        # Validate Python syntax
         code = bc.get("code", "")
         if code:
-            is_valid, error = validate_python_syntax(code)
+            is_valid, error = backend.syntax_check(code, bc.get("file_path", ""))
             if not is_valid:
                 # Try to get name from bc or extract from code
                 name = bc.get("name", "")
                 if not name:
-                    class_names = extract_class_names(code)
-                    name = class_names[0] if class_names else "unknown"
+                    declarations = extract_declaration_names(code, backend)
+                    name = declarations[0] if declarations else "unknown"
                 errors.append(f"Base class {i} ({name}): syntax error - {error}")
     
     # Also validate data_structures if present
@@ -94,11 +95,13 @@ def validate_base_classes_structure(data: Dict[str, Any]) -> Tuple[bool, List[st
             
             code = ds.get("code", "")
             if code:
-                is_valid, error = validate_python_syntax(code)
+                is_valid, error = backend.syntax_check(
+                    code,
+                    ds.get("file_path", f"data_structure{backend.file_extension}"),
+                )
                 if not is_valid:
-                    name = ""
-                    class_names = extract_class_names(code)
-                    name = class_names[0] if class_names else "unknown"
+                    declarations = extract_declaration_names(code, backend)
+                    name = declarations[0] if declarations else "unknown"
                     errors.append(f"Data structure {i} ({name}): syntax error - {error}")
     
     return len(errors) == 0, errors
@@ -172,6 +175,7 @@ def inspect_state(base_classes_path: Path) -> Dict[str, Any]:
             "data_structure_names": ds_class_names,
             "data_structure_subtrees": ds_subtrees,
             "data_structure_file_paths": ds_file_paths,
+            "language": extract_language_metadata(data)[0],
         }
     }
 

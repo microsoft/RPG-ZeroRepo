@@ -2,8 +2,8 @@
 
 Focus:
 * :func:`decoder_lang.resolve_decoder_language` priority chain.
-* ``FeatureSpecOutput.target_language`` is optional and defaults to
-    None, so specs without the field load unchanged.
+* ``FeatureSpecOutput.meta.primary_language`` is optional and defaults
+    to None, so specs without the field load unchanged.
 * ``FileDesigner`` accepts and stores the language; the resolved
   backend is the registered :class:`PythonBackend` singleton in the
     decoder pipeline.
@@ -13,6 +13,7 @@ from __future__ import annotations
 import sys
 import unittest
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import MagicMock
 
 # Make ``scripts/`` importable for direct invocation.
@@ -35,14 +36,15 @@ class ResolveDecoderLanguageTests(unittest.TestCase):
 
     def test_tier_0_dict_feature_spec_wins_over_rpg(self) -> None:
         result = resolve_decoder_language(
-            feature_spec={"target_language": "go"},
+            feature_spec={"meta": {"primary_language": "go"}},
             rpg_obj={"root": {"meta": {"language": "python"}}},
         )
         self.assertEqual(result, "go")
 
     def test_tier_0_object_feature_spec_wins_over_rpg(self) -> None:
-        spec = MagicMock()
-        spec.target_language = "rust"
+        spec = SimpleNamespace(
+            meta=SimpleNamespace(primary_language="rust", target_languages=[])
+        )
         result = resolve_decoder_language(
             feature_spec=spec,
             rpg_obj={"root": {"meta": {"language": "python"}}},
@@ -54,21 +56,21 @@ class ResolveDecoderLanguageTests(unittest.TestCase):
         # to the RPG-meta tier rather than blowing up later in
         # get_backend("").
         result = resolve_decoder_language(
-            feature_spec={"target_language": ""},
+            feature_spec={"meta": {"primary_language": ""}},
             rpg_obj={"root": {"meta": {"language": "go"}}},
         )
         self.assertEqual(result, "go")
 
     def test_tier_0_skipped_when_feature_spec_lang_none(self) -> None:
         result = resolve_decoder_language(
-            feature_spec={"target_language": None},
+            feature_spec={"meta": {"primary_language": None}},
             rpg_obj={"root": {"meta": {"language": "typescript"}}},
         )
         self.assertEqual(result, "typescript")
 
     def test_tier_0_uses_first_target_languages_item(self) -> None:
         result = resolve_decoder_language(
-            feature_spec={"target_languages": ["go", "typescript"]},
+            feature_spec={"meta": {"target_languages": ["go", "typescript"]}},
             rpg_obj={"root": {"meta": {"language": "python"}}},
         )
         self.assertEqual(result, "go")
@@ -92,8 +94,7 @@ class ResolveDecoderLanguageTests(unittest.TestCase):
     # --- Robustness ------------------------------------------------
 
     def test_handles_missing_target_language_attr(self) -> None:
-        # Object without ``target_language`` attribute — should not
-        # AttributeError, should fall through.
+        # Object without language metadata should fall through.
         class _Bare:
             pass
 
@@ -111,7 +112,7 @@ class ResolveDecoderLanguageTests(unittest.TestCase):
 
 
 class FeatureSpecOutputSchemaTests(unittest.TestCase):
-    """``target_language`` is optional + back-compat with old specs."""
+    """Language metadata is optional and lives under ``meta``."""
 
     def setUp(self) -> None:
         from feature.schemas.spec import FeatureSpecOutput  # noqa: E402
@@ -131,25 +132,36 @@ class FeatureSpecOutputSchemaTests(unittest.TestCase):
             "repository_purpose": "Test repository.",
         }
 
-    def test_legacy_payload_loads_without_target_language(self) -> None:
-        # Old feature_spec.json files must continue to validate.
+    def test_payload_loads_without_language_metadata(self) -> None:
         spec = self.FeatureSpecOutput.model_validate(self.minimal_payload)
         self.assertIsNone(spec.target_language)
 
-    def test_target_language_round_trips(self) -> None:
-        payload = {**self.minimal_payload, "target_language": "go"}
+    def test_primary_language_round_trips_under_meta(self) -> None:
+        payload = {
+            **self.minimal_payload,
+            "meta": {
+                **self.minimal_payload["meta"],
+                "primary_language": "go",
+            },
+        }
         spec = self.FeatureSpecOutput.model_validate(payload)
         self.assertEqual(spec.target_language, "go")
         self.assertEqual(spec.target_languages, ["go"])
-        # JSON dump preserves the field.
         round_tripped = self.FeatureSpecOutput.model_validate_json(
             spec.model_dump_json()
         )
         self.assertEqual(round_tripped.target_language, "go")
         self.assertEqual(round_tripped.target_languages, ["go"])
+        self.assertNotIn("target_language", spec.model_dump())
 
     def test_target_languages_sets_primary_language(self) -> None:
-        payload = {**self.minimal_payload, "target_languages": ["go", "typescript"]}
+        payload = {
+            **self.minimal_payload,
+            "meta": {
+                **self.minimal_payload["meta"],
+                "target_languages": ["go", "typescript"],
+            },
+        }
         spec = self.FeatureSpecOutput.model_validate(payload)
         self.assertEqual(spec.target_language, "go")
         self.assertEqual(spec.target_languages, ["go", "typescript"])

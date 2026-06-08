@@ -46,10 +46,10 @@ def language_directive(backend: Optional[LanguageBackend]) -> str:
             f"Source files use the ``{hints.file_extension}`` extension. "
             f"Test framework: {hints.test_framework_name}."
         ),
+        "Every code snippet must parse as standalone source for its target file.",
         "",
     ]
     return "\n".join(lines) + "\n"
-
 
 def with_language_directive(
     system_prompt: str,

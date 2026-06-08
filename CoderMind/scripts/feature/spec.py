@@ -34,6 +34,7 @@ from pathlib import Path
 from typing import List, Optional
 
 from common.llm_client import LLMClient
+from common.language_meta import normalize_language_metadata
 from common.paths import FEATURE_SPEC_FILE, WORKSPACE_ROOT
 from common.trajectory import load_or_create_trajectory
 
@@ -216,10 +217,16 @@ def _call_llm(
             f"{max_retries} attempts (see LLM trace logs for details)."
         )
     inferred = _infer_target_languages(source)
-    if inferred and not result.target_languages:
-        result.target_languages = inferred
-    if inferred and not result.target_language:
-        result.target_language = inferred[0]
+    if inferred and not result.meta.target_languages:
+        result.meta.target_languages = inferred
+    if inferred and not result.meta.primary_language:
+        result.meta.primary_language = inferred[0]
+    primary, languages = normalize_language_metadata(
+        result.meta.primary_language,
+        result.meta.target_languages,
+    )
+    result.meta.primary_language = primary
+    result.meta.target_languages = languages
     return FeatureSpecOutput.model_validate(result.model_dump())
 
 

@@ -26,7 +26,7 @@ from .data_flow_prompts import (
 from .base_class_agent import (
     BaseClassAgent,
     LLMClient as BaseClassLLMClient,
-    extract_class_names,
+    extract_declaration_names,
     validate_base_classes,
     DataStructureDefinition,
     extract_data_flow_types,
@@ -93,7 +93,7 @@ __all__ = [
     # Base Class
     "BaseClassAgent",
     "BaseClassLLMClient",
-    "extract_class_names",
+    "extract_declaration_names",
     "validate_base_classes",
     "DataStructureDefinition",
     "extract_data_flow_types",

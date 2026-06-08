@@ -23,11 +23,10 @@ from .base_class_prompts import (
 import sys
 from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent.parent))
-from common import (
-    LLMClient,
-    validate_python_syntax,
-    extract_class_names,
-)
+from common import LLMClient
+from decoder_lang import get_backend
+from decoder_lang.backend import LanguageBackend
+from decoder_lang.prompt_directive import with_language_directive
 
 
 # ============================================================================
@@ -37,7 +36,7 @@ from common import (
 class BaseClassDefinition(BaseModel):
     """Definition of a base class or data structure."""
     file_path: str = Field(..., description="Path where this base class should be placed")
-    code: str = Field(..., description="Full Python code for the class")
+    code: str = Field(..., description="Full target-language code for the definition")
     scope: str = Field(..., description="Scope: 'global' or a specific subtree/component name")
     subclasses: Dict[str, List[str]] = Field(..., description="Mapping from base class name to list of concrete subclass names (each list must have at least 2 items)")
     
@@ -62,7 +61,7 @@ class DataStructureDefinition(BaseModel):
     Note: file_path is NOT assigned here. It will be assigned later by
     the interface designer and written back to base_classes.json.
     """
-    code: str = Field(..., description="Python stub code (dataclass skeleton with fields and type annotations)")
+    code: str = Field(..., description="Target-language data structure stub code")
     subtree: str = Field(..., description="The functional area / subtree this data structure belongs to (must be a valid subtree name, NOT 'global')")
     data_flow_types: List[str] = Field(..., min_length=1, description="Which data_flow data_type names this definition covers")
     file_path: str = Field(default="", description="File path assigned later by the interface designer. Leave empty during base class design.")
@@ -80,9 +79,10 @@ class BaseClassOutput(BaseModel):
 
 def validate_base_classes_model(
     model: "BaseClassOutput",
-    valid_subtrees: Optional[List[str]] = None
+    valid_subtrees: Optional[List[str]] = None,
+    backend: Optional[LanguageBackend] = None,
 ) -> Tuple[bool, str]:
-    """Validate base class definitions from Pydantic model: 1. Code has valid Python syntax 2. Scope is either 'global' or an exact match to a valid subtree name.
+    """Validate base class definitions from a Pydantic model.
     
     Args:
         model: BaseClassOutput Pydantic model
@@ -90,6 +90,7 @@ def validate_base_classes_model(
     
     Returns: (is_valid, error_message)
     """
+    backend = backend or get_backend("python")
     # Build set of valid scope values
     valid_scopes = {"global"}
     if valid_subtrees:
@@ -107,8 +108,7 @@ def validate_base_classes_model(
             )
             continue
         
-        # Validate Python syntax
-        is_valid, error_msg = validate_python_syntax(bc.code)
+        is_valid, error_msg = backend.syntax_check(bc.code, bc.file_path)
         if not is_valid:
             errors.append(f"Base class {i} ({bc.file_path}): syntax error - {error_msg}")
     
@@ -120,9 +120,10 @@ def validate_base_classes_model(
 
 def validate_base_classes(
     base_classes: List[Dict[str, Any]],
-    valid_subtrees: Optional[List[str]] = None
+    valid_subtrees: Optional[List[str]] = None,
+    backend: Optional[LanguageBackend] = None,
 ) -> Tuple[bool, str]:
-    """Validate base class definitions: 1. Each has file_path, code, and scope 2. Code has valid Python syntax 3. Scope is either 'global' or an exact match to a valid subtree name.
+    """Validate base class definitions.
     
     Args:
         base_classes: List of base class definitions
@@ -130,6 +131,7 @@ def validate_base_classes(
     
     Returns: (is_valid, error_message)
     """
+    backend = backend or get_backend("python")
     if not base_classes:
         return False, "Empty base classes provided"
     
@@ -185,7 +187,7 @@ def validate_base_classes(
             )
             continue
         
-        is_valid, error_msg = validate_python_syntax(code)
+        is_valid, error_msg = backend.syntax_check(code, file_path)
         if not is_valid:
             errors.append(f"Base class {i} ({file_path}): syntax error - {error_msg}")
     
@@ -216,12 +218,28 @@ def extract_data_flow_types(data_flow: List[Dict[str, Any]]) -> List[str]:
     return sorted(types)
 
 
+def extract_declaration_names(code: str, backend: LanguageBackend) -> List[str]:
+    """Extract top-level type or function names from target-language code."""
+    names: List[str] = []
+    for unit in backend.list_code_units(code):
+        if getattr(unit, "parent", None) is not None:
+            continue
+        if getattr(unit, "unit_type", "") in {
+            "class", "struct", "interface", "function",
+        }:
+            name = getattr(unit, "name", "")
+            if name and name not in names:
+                names.append(name)
+    return names
+
+
 def validate_data_structures(
     data_structures: List[Dict[str, Any]],
     data_flow_types: List[str],
-    valid_subtrees: Optional[List[str]] = None
+    valid_subtrees: Optional[List[str]] = None,
+    backend: Optional[LanguageBackend] = None,
 ) -> Tuple[bool, str]:
-    """Validate data structure definitions: 1. Each has code, subtree, and data_flow_types 2. Code has valid Python syntax 3. Subtree is a valid subtree name (NOT 'global').
+    """Validate data structure definitions.
     
     Note: file_path is NOT validated here — it is assigned later by the
     interface designer.
@@ -233,6 +251,7 @@ def validate_data_structures(
         
     Returns: (is_valid, error_message)
     """
+    backend = backend or get_backend("python")
     # Build set of valid subtree values (no 'global' for data structures)
     valid_subtree_set = set()
     if valid_subtrees:
@@ -274,8 +293,7 @@ def validate_data_structures(
             errors.append(f"Data structure {i}: data_flow_types must not be empty")
             continue
         
-        # Validate Python syntax
-        is_valid, error_msg = validate_python_syntax(code)
+        is_valid, error_msg = backend.syntax_check(code, f"data_structure{backend.file_extension}")
         if not is_valid:
             errors.append(f"Data structure {i} (subtree={subtree}): syntax error - {error_msg}")
         
@@ -300,7 +318,8 @@ class BaseClassAgent:
         max_iterations: int = 5,
         logger: Optional[logging.Logger] = None,
         trajectory: Optional[Any] = None,
-        step_id: Optional[int] = None
+        step_id: Optional[int] = None,
+        target_language: Optional[str] = None,
     ):
         # Create LLMClient with trajectory support if not provided
         if llm_client is None:
@@ -312,6 +331,7 @@ class BaseClassAgent:
                 self.llm.set_trajectory(trajectory, step_id)
         self.max_iterations = max_iterations
         self.logger = logger or logging.getLogger(__name__)
+        self.backend = get_backend(target_language)
     
     def design_base_classes(
         self,
@@ -342,7 +362,7 @@ class BaseClassAgent:
         self.logger.info(f"[BaseClassAgent] Designing base classes for {repo_name}")
 
         # Build system prompt (tool description is now integrated)
-        system_prompt = BASE_CLASS_PROMPT
+        system_prompt = with_language_directive(BASE_CLASS_PROMPT, self.backend)
 
         # Extract unique data_type values from data flow (for post-validation)
         data_flow_type_names = extract_data_flow_types(data_flow)
@@ -367,8 +387,10 @@ When the project specifies a concrete technology stack (framework, database, etc
 design base classes that are idiomatic for those technologies rather than purely
 abstract. For example, if the project uses Flask, prefer Flask Blueprint patterns
 over generic abstract request handlers.  If no specific technology is mentioned,
-use abstract base classes (ABC).
+            use the target language's idiomatic abstraction mechanism.
 """
+
+        hints = self.backend.prompt_hints()
 
         user_prompt = f"""Based on the repository structure and data flow, generate base class definitions:
 Repository Name: {repo_name}
@@ -391,12 +413,12 @@ Focus on:
 1. Shared behavioral abstractions (base classes with abstract methods)
 2. Common data structures that flow between components
 3. Keep it minimal - only create abstractions that will be reused by multiple components
-4. Use dataclasses for data structures, ABC for behavioral abstractions
+4. Use idiomatic {hints.display_name} constructs for data structures and behavioral abstractions
 
 Additionally, for data_structures:
 - Data flow types that are generic enough to serve as base classes (with subclasses) should go into base_classes, not data_structures
 - The remaining data flow types that are NOT absorbed by base classes should be defined as data_structures
-- Use @dataclass with explicit fields, type annotations, and docstrings
+- Use idiomatic {hints.display_name} data containers with explicit fields and documentation
 - These are stubs (skeleton code) — they will be fully implemented later
 - Each data structure must belong to a specific subtree (not global)
 - Do NOT specify file_path — it will be assigned by the interface designer later"""
@@ -430,7 +452,11 @@ Additionally, for data_structures:
             data_structures = [ds.model_dump() for ds in result_model.data_structures]
             
             # Custom validation (scope and syntax) for base classes
-            is_valid, error_msg = validate_base_classes_model(result_model, valid_subtrees=functional_areas)
+            is_valid, error_msg = validate_base_classes_model(
+                result_model,
+                valid_subtrees=functional_areas,
+                backend=self.backend,
+            )
             
             if not is_valid:
                 self.logger.warning(f"[BaseClassAgent] Base class validation failed: {error_msg}")
@@ -439,7 +465,10 @@ Additionally, for data_structures:
             
             # Validate data structures
             ds_valid, ds_error = validate_data_structures(
-                data_structures, data_flow_type_names, valid_subtrees=functional_areas
+                data_structures,
+                data_flow_type_names,
+                valid_subtrees=functional_areas,
+                backend=self.backend,
             )
             
             if not ds_valid:
@@ -450,14 +479,12 @@ Additionally, for data_structures:
             # Extract class names for logging
             all_classes = []
             for bc in base_classes:
-                class_names = extract_class_names(bc.get("code", ""))
-                all_classes.extend(class_names)
+                all_classes.extend(extract_declaration_names(bc.get("code", ""), self.backend))
             
             # Extract data structure class names
             ds_class_names = []
             for ds in data_structures:
-                class_names = extract_class_names(ds.get("code", ""))
-                ds_class_names.extend(class_names)
+                ds_class_names.extend(extract_declaration_names(ds.get("code", ""), self.backend))
             
             # Check data_flow_type coverage (base_classes code may also cover some types)
             bc_class_set = set(all_classes)

@@ -9,7 +9,7 @@ This module contains prompts for interface design stage.
 # ============================================================================
 
 INTERFACE_PROMPT = """
-You are designing interfaces (functions or classes) for a large, production-oriented Python repository.
+You are designing interfaces (functions, classes, structs, interfaces, or methods) for a large, production-oriented target-language repository.
 The goal is not to write arbitrary APIs, but to define interfaces that integrate cleanly into the repository's architecture, respect existing data flows, and follow established conventions for modules, base classes, and shared data structures.
 
 ## Objective
@@ -113,7 +113,7 @@ For each interface you design, reason through:
         "fully/qualified/feature/path_1",
         "fully/qualified/feature/path_2"
       ],
-      "code": "Python code string with imports, class/function signature, docstring, and pass body",
+      "code": "Target-language code string with imports and declaration stubs",
       "dependencies": {{
         "inherits_from": ["BaseClassName"],
         "calls": ["function_or_method_name"],
@@ -138,7 +138,7 @@ Constraints:
 # ============================================================================
 
 SUBTREE_INTERFACE_PROMPT = """
-You are designing interfaces (functions or classes) for a large, production-oriented Python repository.
+You are designing interfaces (functions, classes, structs, interfaces, or methods) for a large, production-oriented target-language repository.
 The goal is to define interfaces that integrate cleanly into the repository's architecture, respect existing data flows, and follow established conventions.
 
 ## Objective
@@ -214,7 +214,7 @@ For each file in order, reason through:
       "interfaces": [
         {{
           "features": ["fully/qualified/feature/path_1", "fully/qualified/feature/path_2"],
-          "code": "Python code string with imports, class/function signature, docstring, and pass body",
+          "code": "Target-language code string with imports and declaration stubs",
           "dependencies": {{
             "inherits_from": ["BaseClassName"],
             "calls": ["function_or_method_name"],
@@ -242,7 +242,7 @@ Constraints:
 # ============================================================================
 
 PLAN_FILE_PROMPT = """
-You are an expert software architect assisting in planning feature implementation within a Python codebase.
+You are an expert software architect assisting in planning feature implementation within a target-language codebase.
 
 Your task is to construct an **implementation dependency graph** across a set of files that collectively realize a functional subtree of the system.  
 Each file corresponds to one or more feature paths. These features may have logical dependencies derived from the feature hierarchy and standard software layering principles.

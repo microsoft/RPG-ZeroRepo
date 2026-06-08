@@ -23,6 +23,8 @@ from collections import Counter, defaultdict, deque
 
 from common.trajectory import Trajectory, load_or_create_trajectory
 from common import LLMClient
+from common.language_meta import extract_language_metadata, metadata_with_languages
+from decoder_lang import get_backend
 from rpg import uuid8
 
 # Import centralized paths
@@ -738,6 +740,11 @@ class TaskPlanner:
         self.repo_info = repo_info
         self.debug = debug
         self.trajectory = trajectory
+        self.primary_language = (
+            extract_language_metadata(interfaces)[0]
+            or extract_language_metadata(data_flow)[0]
+        )
+        self.backend = get_backend(self.primary_language)
         self.llm: Optional[LLMClient] = None
         self.logger = logging.getLogger(__name__)
         
@@ -881,6 +888,11 @@ class TaskPlanner:
                     planned_tasks_serializable[subtree][file_path] = valid_tasks
         
         result = {
+            "meta": metadata_with_languages(
+                self.interfaces
+                if extract_language_metadata(self.interfaces)[0]
+                else self.data_flow
+            ),
             "planned_tasks_dict": planned_tasks_serializable,
             "agent_results_dict": self.agent_results_dict,
             "file_order_diagnostics": self.file_order_diagnostics,
@@ -915,6 +927,11 @@ class TaskPlanner:
         updated_subtree_order = subtree_order + ["FINAL_TASKS", "PROJECT_FILES"]
         
         result = {
+            "meta": metadata_with_languages(
+                self.interfaces
+                if extract_language_metadata(self.interfaces)[0]
+                else self.data_flow
+            ),
             "planned_tasks_dict": planned_tasks_serializable,
             "agent_results_dict": self.agent_results_dict,
             "file_order_diagnostics": self.file_order_diagnostics,
@@ -1238,6 +1255,25 @@ class TaskPlanner:
     
     def _build_requirements_task(self) -> str:
         """Build task description for requirements.txt generation."""
+        if self.backend.name == "go":
+            module_name = self._go_module_name()
+            return f"""Generate or update Go module dependency files for the repository: {self.repo_name}
+
+**Files to create/update:**
+1. `go.mod` - Go module declaration using module path `{module_name}`
+2. `go.sum` - Only if external dependencies are introduced
+
+**Instructions:**
+1. Prefer the Go standard library. Do not add third-party dependencies unless the implemented code already requires them.
+2. If there are no external dependencies, create a minimal `go.mod` with a current Go version.
+3. If dependencies are needed, run `go mod tidy` after adding imports.
+4. Verify the module with `go test ./...`.
+
+**Important:**
+- Do NOT create Python dependency files for a Go project.
+- Keep the module compact and local to this repository.
+- The fixture expects standard-library-only code unless the implementation proves otherwise.
+"""
         return f"""Generate or update the dependency management files for the repository: {self.repo_name}
 
 **Files to create/update:**
@@ -1281,6 +1317,35 @@ package3>=3.0.0  # For feature X
     
     def _build_main_entry_task(self) -> str:
         """Build task description for main entry point generation."""
+        if self.backend.name == "go":
+            module_name = self._go_module_name()
+            command_path = f"cmd/{module_name}/main.go"
+            return f"""Create the Go command entry point for the repository: {self.repo_name}
+Repository purpose: {self.repo_info}
+
+**Goal:** Create a production-quality Go CLI entry point that lets users run the complete product through documented commands.
+
+**Files to create:**
+1. `{command_path}` - Main package for the CLI command.
+
+**Critical Rules:**
+- Do NOT re-implement business logic in `main.go`. Import and delegate to internal packages already defined in the project.
+- Every import must reference real packages and symbols from this module.
+- Use idiomatic Go error handling with explicit non-zero exits on user-facing failures.
+- Keep output plain text unless the requirements explicitly ask otherwise.
+
+**Requirements:**
+1. Use `package main` and a `main()` function.
+2. Provide `--help` output and subcommands/options that expose all major CLI features.
+3. Delegate to implemented internal packages for task storage and task lifecycle behavior.
+4. Handle invalid commands, invalid ids, missing arguments, and runtime errors clearly.
+5. Verify with `go run ./{command_path.rsplit('/', 1)[0]} --help` and `go test ./...`.
+
+**Important:**
+- Read `docs/` first and faithfully expose the requested behavior.
+- Do NOT create Python package entry points for this Go project.
+"""
+
         # Infer the main package name from the interfaces subtree structure
         package_name = self._get_package_name()
 
@@ -1418,8 +1483,57 @@ if __name__ == "__main__":
             return self.repo_name.lower().replace("-", "_").replace(" ", "_")
         return "project"
 
+    def _go_module_name(self) -> str:
+        """Infer a compact Go module or command name from repository metadata."""
+        raw = self.repo_name or "project"
+        candidate = raw.lower().replace(" ", "-").replace("_", "-")
+        candidate = _re.sub(r"[^a-z0-9-]+", "-", candidate).strip("-")
+        return candidate or "project"
+
     def _build_readme_task(self) -> str:
         """Build task description for README.md generation."""
+        if self.backend.name == "go":
+            module_name = self._go_module_name()
+            return f"""Update the README.md for the repository: {self.repo_name}
+Repository purpose: {self.repo_info}
+
+**Goal:** Replace the placeholder README with comprehensive documentation for the actual Go CLI implementation.
+
+**Sections to include:**
+
+## 1. Project Title & Description
+- Clear, concise description of what the CLI does
+- Key commands and capabilities
+
+## 2. Installation
+- Go version prerequisite
+- Clone/build instructions
+- Module setup using `go mod tidy` when needed
+
+## 3. Usage
+- How to run the CLI with `go run ./cmd/{module_name} --help`
+- Common command examples with expected plain-text output
+- Data file options and local persistence behavior if applicable
+
+## 4. Project Structure
+- Brief overview of `cmd/`, `internal/`, and test files
+- Key packages and their purposes
+
+## 5. Development
+- How to run tests with `go test ./...`
+- How to format code with `gofmt`
+
+**Instructions:**
+1. Read the `docs/` directory for the original requirements.
+2. Explore the actual Go codebase to understand what was implemented.
+3. Run `go run ./cmd/{module_name} --help` if the command exists.
+4. Reference actual package names, types, and functions.
+
+**Important:**
+- Do NOT document Python commands, Python test runners, or Python dependency files for this Go project.
+- Base everything on the actual implemented code, not assumptions.
+- Keep the tone professional and concise.
+"""
         return f"""Update the README.md for the repository: {self.repo_name}
 Repository purpose: {self.repo_info}
 

@@ -29,6 +29,8 @@ from typing import (
     runtime_checkable,
 )
 
+from common.language_meta import extract_language_metadata
+
 from .prompt_hints import PromptHints
 from .test_result import EnvHandle, TestRunResult
 
@@ -321,14 +323,14 @@ def resolve_decoder_language(
     """Determine the target language for a *decoder* stage.
 
     Extends :func:`resolve_target_language` with a higher-priority
-    tier 0: an explicit ``target_language`` field on the loaded
-    ``feature_spec.json``. Falls through to the same RPG-then-default
+     tier 0: explicit language metadata on the loaded ``feature_spec.json``.
+     Falls through to the same RPG-then-default
     chain when the field is absent.
 
     Tier order:
 
-    0. ``feature_spec["target_language"]`` (dict) or
-       ``feature_spec.target_language`` (pydantic / dataclass-like).
+     0. ``feature_spec["meta"]["primary_language"]`` or the first
+         ``feature_spec["meta"]["target_languages"]`` item.
     1. ``rpg_obj["root"]["meta"]["language"]``.
     2. ``lang_parser.dominant_language(valid_files)``.
     3. ``"python"`` default with WARNING.
@@ -338,20 +340,10 @@ def resolve_decoder_language(
     """
     # Tier 0: explicit override on feature_spec
     if feature_spec is not None:
-        spec_lang: Any = None
-        spec_langs: Any = None
-        if isinstance(feature_spec, dict):
-            spec_lang = feature_spec.get("target_language")
-            spec_langs = feature_spec.get("target_languages")
-        else:
-            # pydantic model / dataclass / SimpleNamespace
-            spec_lang = getattr(feature_spec, "target_language", None)
-            spec_langs = getattr(feature_spec, "target_languages", None)
-        if isinstance(spec_lang, str) and spec_lang:
-            return spec_lang
-        if isinstance(spec_langs, list):
-            for item in spec_langs:
-                if isinstance(item, str) and item.strip():
-                    return item.strip().lower()
+        primary, languages = extract_language_metadata(feature_spec)
+        if primary:
+            return primary
+        if languages:
+            return languages[0]
     # Tier 1-3 share the same logic as resolve_target_language.
     return resolve_target_language(rpg_obj, valid_files=valid_files)

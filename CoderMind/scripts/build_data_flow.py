@@ -38,6 +38,7 @@ from rpg import EdgeType
 # Import centralized paths
 from common.paths import SKELETON_FILE, DATA_FLOW_FILE, REPO_RPG_FILE
 from common import get_project_background_context
+from common.language_meta import extract_language_metadata, metadata_with_languages
 
 
 # ============================================================================
@@ -139,6 +140,7 @@ class DataFlowBuilder:
         """
         # Get repository info
         repo_name, repo_info = get_repo_info_from_files()
+        primary_language, _ = extract_language_metadata(skeleton)
         
         # Enrich repo_info with project background / technology context
         project_background = get_project_background_context()
@@ -185,7 +187,8 @@ class DataFlowBuilder:
             max_iterations=self.max_iterations,
             logger=self.logger,
             trajectory=self.trajectory,
-            step_id=self._current_step_id
+            step_id=self._current_step_id,
+            target_language=primary_language,
         )
         
         result = agent.build_data_flow(
@@ -198,6 +201,7 @@ class DataFlowBuilder:
         
         # Add components to result
         result["components"] = functional_areas
+        result["meta"] = metadata_with_languages(skeleton)
         
         # Update trajectory
         if self.trajectory and self._current_step_id:

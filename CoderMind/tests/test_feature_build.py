@@ -53,8 +53,10 @@ def test_load_feature_data_preserves_target_languages(tmp_path) -> None:
         json.dumps({
             "repository_name": "tasklite",
             "repository_purpose": "Go CLI task tracker.",
-            "target_language": "go",
-            "target_languages": ["go"],
+            "meta": {
+                "primary_language": "go",
+                "target_languages": ["go"],
+            },
             "functional_requirements": [],
         }),
         encoding="utf-8",
@@ -62,5 +64,5 @@ def test_load_feature_data_preserves_target_languages(tmp_path) -> None:
 
     data = _load_feature_data(feature_build, feature_spec)
 
-    assert data["target_language"] == "go"
-    assert data["target_languages"] == ["go"]
+    assert data["meta"]["primary_language"] == "go"
+    assert data["meta"]["target_languages"] == ["go"]

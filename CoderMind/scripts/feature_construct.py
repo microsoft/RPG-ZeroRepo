@@ -14,6 +14,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Optional
 
+from common.language_meta import extract_language_metadata
 from common.paths import FEATURE_BUILD_FILE as _FEATURE_BUILD_FILE
 from common.paths import FEATURE_SPEC_FILE as _FEATURE_SPEC_FILE
 from common.paths import FEATURE_TREE_FILE as _FEATURE_TREE_FILE
@@ -113,7 +114,71 @@ def _has_content(value: Any) -> bool:
     return True
 
 
-def _state(stage: Stage, type_: str, message: str, raw: Optional[dict[str, Any]] = None) -> StageState:
+def _language_fields(data: dict[str, Any]) -> tuple[Optional[str], list[str]]:
+    return extract_language_metadata(data)
+
+
+def _language_raw(data: dict[str, Any]) -> dict[str, Any]:
+    primary, languages = _language_fields(data)
+    return {
+        "primary_language": primary,
+        "target_languages": languages,
+    }
+
+
+def _expected_language_fields() -> tuple[Optional[str], list[str]]:
+    data, error = _load_json_object(FEATURE_SPEC_FILE)
+    if error or data is None:
+        return None, []
+    return _language_fields(data)
+
+
+def _language_errors(
+    logical: str,
+    data: dict[str, Any],
+    *,
+    expected: tuple[Optional[str], list[str]] | None = None,
+    required: bool = False,
+) -> list[str]:
+    primary, languages = _language_fields(data)
+    errors: list[str] = []
+    meta = data.get("meta") if isinstance(data.get("meta"), dict) else {}
+    raw_primary = meta.get("primary_language")
+    raw_languages = meta.get("target_languages")
+    has_primary = isinstance(raw_primary, str) and bool(raw_primary.strip())
+    has_languages = isinstance(raw_languages, list) and any(
+        isinstance(item, str) and item.strip() for item in raw_languages
+    )
+    if required and not has_primary:
+        errors.append(f"{logical} is missing meta.primary_language")
+    if required and not has_languages:
+        errors.append(f"{logical} is missing meta.target_languages")
+    if primary and languages and primary != languages[0]:
+        errors.append(
+            f"{logical} meta.primary_language does not match "
+            "meta.target_languages[0]"
+        )
+    if expected:
+        expected_primary, expected_languages = expected
+        if expected_primary and primary != expected_primary:
+            errors.append(
+                f"{logical} meta.primary_language={primary!r}, "
+                f"expected {expected_primary!r}"
+            )
+        if expected_languages and languages != expected_languages:
+            errors.append(
+                f"{logical} meta.target_languages={languages!r}, "
+                f"expected {expected_languages!r}"
+            )
+    return errors
+
+
+def _state(
+    stage: Stage,
+    type_: str,
+    message: str,
+    raw: Optional[dict[str, Any]] = None,
+) -> StageState:
     return StageState(
         stage=stage,
         type=type_,
@@ -131,7 +196,11 @@ def _check_feature_spec(stage: Stage) -> StageState:
     if error:
         return _state(stage, "warning", f"{logical} is not complete: {error}")
 
-    missing = [field for field in _REQUIRED_FEATURE_SPEC_FIELDS if not _has_content(data.get(field))]
+    missing = [
+        field
+        for field in _REQUIRED_FEATURE_SPEC_FIELDS
+        if not _has_content(data.get(field))
+    ]
     if missing:
         return _state(
             stage,
@@ -139,7 +208,15 @@ def _check_feature_spec(stage: Stage) -> StageState:
             f"{logical} is missing required fields: {', '.join(missing)}",
             {"missing_fields": missing},
         )
-    return _state(stage, "update", f"{logical} is valid")
+    language_errors = _language_errors(logical, data, required=True)
+    if language_errors:
+        return _state(
+            stage,
+            "warning",
+            "; ".join(language_errors),
+            _language_raw(data),
+        )
+    return _state(stage, "update", f"{logical} is valid", _language_raw(data))
 
 
 def _check_feature_build(stage: Stage) -> StageState:
@@ -149,7 +226,17 @@ def _check_feature_build(stage: Stage) -> StageState:
         return _state(stage, "init", f"{logical} is missing")
     if error:
         return _state(stage, "warning", f"{logical} is not complete: {error}")
-    return _state(stage, "update", f"{logical} is valid JSON", {"keys": sorted(data.keys())})
+    expected = _expected_language_fields()
+    language_errors = _language_errors(
+        logical,
+        data,
+        expected=expected,
+        required=bool(expected[0] or expected[1]),
+    )
+    raw = {"keys": sorted(data.keys()), **_language_raw(data)}
+    if language_errors:
+        return _state(stage, "warning", "; ".join(language_errors), raw)
+    return _state(stage, "update", f"{logical} is valid JSON", raw)
 
 
 def _check_feature_refactor(stage: Stage) -> StageState:
@@ -162,7 +249,16 @@ def _check_feature_refactor(stage: Stage) -> StageState:
 
     components = data.get("components")
     if isinstance(components, (list, dict)) and components:
-        return _state(stage, "update", f"{logical} has components")
+        expected = _expected_language_fields()
+        language_errors = _language_errors(
+            logical,
+            data,
+            expected=expected,
+            required=bool(expected[0] or expected[1]),
+        )
+        if language_errors:
+            return _state(stage, "warning", "; ".join(language_errors), _language_raw(data))
+        return _state(stage, "update", f"{logical} has components", _language_raw(data))
     return _state(stage, "warning", f"{logical} has no non-empty components collection")
 
 
@@ -246,6 +342,7 @@ def _check_only_payload(states: list[StageState]) -> dict[str, Any]:
                 "done": state.done,
                 "will_run": state.will_run,
                 "reason": state.reason,
+                "details": state.raw,
             }
             for state in states
         ],

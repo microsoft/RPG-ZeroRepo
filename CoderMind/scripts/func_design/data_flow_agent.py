@@ -26,6 +26,8 @@ import sys
 from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 from common import LLMClient
+from decoder_lang import get_backend
+from decoder_lang.prompt_directive import with_language_directive
 
 
 # ============================================================================
@@ -194,7 +196,8 @@ class DataFlowAgent:
         max_iterations: int = 5,
         logger: Optional[logging.Logger] = None,
         trajectory: Optional[Any] = None,
-        step_id: Optional[int] = None
+        step_id: Optional[int] = None,
+        target_language: Optional[str] = None,
     ):
         # Create LLMClient with trajectory support if not provided
         if llm_client is None:
@@ -206,6 +209,7 @@ class DataFlowAgent:
                 self.llm.set_trajectory(trajectory, step_id)
         self.max_iterations = max_iterations
         self.logger = logger or logging.getLogger(__name__)
+        self.backend = get_backend(target_language)
     
     def build_data_flow(
         self,
@@ -233,7 +237,7 @@ class DataFlowAgent:
         self.logger.info(f"[DataFlowAgent] Building data flow for {len(functional_areas)} components")
 
         # Build system prompt (tool description is now integrated)
-        system_prompt = DATA_FLOW_PROMPT
+        system_prompt = with_language_directive(DATA_FLOW_PROMPT, self.backend)
 
         # Build user prompt
         areas_str = format_functional_areas(functional_areas, component_dirs)

@@ -15,7 +15,7 @@ def test_create_initial_rpg_preserves_target_language() -> None:
     rpg = create_initial_rpg({
         "repository_name": "tasklite",
         "repository_purpose": "Go CLI task tracker.",
-        "target_language": "Go",
+        "meta": {"primary_language": "Go", "target_languages": ["Go"]},
         "components": [],
     })
 

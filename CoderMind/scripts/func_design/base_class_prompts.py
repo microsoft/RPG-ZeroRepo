@@ -9,7 +9,7 @@ This module contains prompts for base class design stage.
 # ============================================================================
 
 BASE_CLASS_PROMPT = """
-You are an expert software engineer designing reusable abstractions and shared data structures for a Python codebase.
+You are an expert software engineer designing reusable abstractions and shared data structures for a target-language codebase.
 
 Your objective is to introduce only the minimum necessary set of well-justified base classes and shared data structures — enough to improve modularity and consistency, but not so many that the system becomes rigid or over-engineered.
 
@@ -42,8 +42,8 @@ Purpose:
 Provide standardized data containers that flow across subtrees and pipeline components.
 
 Requirements:
-- Should be fully implemented (for example, dataclasses).
-- Must use explicit fields with type annotations and meaningful docstrings.
+- Should be fully implemented using idiomatic target-language constructs.
+- Must use explicit fields/types and meaningful documentation.
 - Represent real semantic units, not generic catch-all containers.
 
 Design Guidelines:
@@ -56,7 +56,7 @@ Purpose:
 Some `data_type` labels from the data flow graph may be generic enough to be modeled as base classes (with subclasses). Those should go into `base_classes` above. The **remaining** data flow types — those that are concrete, self-contained data containers — should be defined here as data structure stubs. These stubs ensure design continuity and will be fully implemented during later code generation batches.
 
 Requirements:
-- Should be `@dataclass` stubs with explicit fields, type annotations, and docstrings.
+- Should be target-language data container stubs with explicit fields and documentation.
 - Fields should be inferred from the data flow context (source, target, transformation descriptions).
 - Mark fields with reasonable defaults or `None` where the full implementation is not yet known.
 - These are **stubs** — they will be fully implemented later. Keep them minimal but structurally correct.
@@ -88,18 +88,18 @@ Your internal reasoning and drafts — this is scratch space for evaluating trad
 {{
   "base_classes": [
     {{
-      "file_path": "Path to the Python file where the base class code should live (string).",
-      "code": "Full Python source code for that file, including base class definitions (string).",
+      "file_path": "Path to the target-language source file where the abstraction code should live (string).",
+      "code": "Full target-language source code for that file, including abstraction definitions (string).",
       "scope": "'global' for repository-wide (L0) base class, or a specific subtree/functional area name (**NOT** directory name) for module-level (L1) base class (string, required).",
       "subclasses": "Mapping from each base class name to its concrete subclass names (object, required). Example: {\"BaseNode\": [\"ItemNode\", \"FunctionNode\"], \"BaseConfig\": [\"RunConfig\", \"TestConfig\"]}. Each base class must have at least 2 subclasses."
     }}
   ],
   "data_structures": [
     {{
-      "code": "Python stub code: @dataclass skeleton with fields, type annotations, and docstrings (string).",
+      "code": "Target-language data structure stub code with fields and documentation (string).",
       "subtree": "The functional area / subtree name this data structure belongs to (string, required). Must be one of the Functional Areas listed in the prompt. Do NOT use 'global'.",
       "data_flow_types": "List of data_type names from the data flow that this definition covers (list of strings, required, at least 1). Example: [\"ParsedExpression\", \"TokenList\"]",
-      "file_path": "Path to the Python file where this data structure stub should live (string, optional). If not provided, the interface designer will assign it during integration."
+      "file_path": "Path to the target-language source file where this data structure stub should live (string, optional). If not provided, the interface designer will assign it during integration."
     }}
   ]
 }}
@@ -112,7 +112,7 @@ Constraints:
 """
 
 BASE_CLASS_REVIEW_PROMPT = """
-You are a senior software architect reviewing a set of functional base classes and global shared data structures for a Python repo.
+You are a senior software architect reviewing a set of functional base classes and global shared data structures for a target-language repo.
 These abstractions are foundational contracts for future modules and subtrees.
 
 Core constraint:

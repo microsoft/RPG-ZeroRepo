@@ -9,7 +9,7 @@ This module contains prompts for data flow design stage.
 # ============================================================================
 
 DATA_FLOW_PROMPT = """
-You are a system architect designing the **inter-subtree data flow** for a Python repository.
+You are a system architect designing the **inter-subtree data flow** for a software repository.
 
 Your goal is to describe **how data moves** between functional subtrees as a **directed acyclic graph (DAG)** of edges.
 Each edge represents one data object passed from one subtree to another.

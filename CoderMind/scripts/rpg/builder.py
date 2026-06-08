@@ -13,6 +13,8 @@ import logging
 from typing import Dict, Any, Union
 from pathlib import Path
 
+from common.language_meta import extract_language_metadata
+
 from .models import RPG, Node, NodeMetaData, NodeType, uuid8
 
 
@@ -42,9 +44,9 @@ def create_initial_rpg(repo_data: Dict[str, Any]) -> RPG:
     # Set generator for repo node (created in RPG.__init__)
     if rpg.repo_node:
         rpg.repo_node.meta.generator = "build_skeleton"
-        target_language = repo_data.get("target_language")
-        if isinstance(target_language, str) and target_language.strip():
-            rpg.repo_node.meta.language = target_language.strip().lower()
+        target_language = extract_language_metadata(repo_data)[0]
+        if target_language:
+            rpg.repo_node.meta.language = target_language
 
     logging.info(f"Creating initial RPG for repository: {repo_name}")
     logging.info(f"Found {len(repo_cmpt)} components to process")

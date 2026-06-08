@@ -22,7 +22,7 @@ Your task is to propose a clean, modular file-system skeleton that organizes the
 
 ## Requirements
 1. The structure must clearly separate each functional component and reflect logical domain boundaries.
-2. Folder names must be concise, meaningful, and follow Python naming conventions (snake_case).
+2. Folder names must be concise, meaningful, and follow the target language's naming conventions.
 3. Component names serve as functional descriptions, not required folder names.
    - Rename folders as needed for clarity and readability.
    - Include a mapping from folder names to the original component names.
@@ -64,19 +64,19 @@ Feel free to explore options, debate trade-offs, sketch out intermediate designs
 # Group Skeleton Generation Prompt
 # ============================================================================
 
-GROUP_SKELETON_PROMPT = """You are a repository architect responsible for incrementally assigning features from a functional component into a production-grade Python repository structure.
+GROUP_SKELETON_PROMPT = """You are a repository architect responsible for incrementally assigning features from a functional component into a production-grade target-language repository structure.
 
-Your primary goals are clarity, modularity, and long-term maintainability. The resulting layout should resemble a modern, well-structured Python library rather than a direct projection of the feature tree.
+Your primary goals are clarity, modularity, and long-term maintainability. The resulting layout should resemble a modern, well-structured repository in the target language rather than a direct projection of the feature tree.
 
 You may:
 - Group related features into shared modules,
 - Introduce or adjust folders when semantically appropriate,
 - Refine or reorganize previous design decisions as needed.
 
-Your task is to assign each feature to a `.py` file path that:
+Your task is to assign each feature to a target-language source file path that:
 - Begins with the designated folder,
 - Groups semantically related features together (even if they originate from different branches of the feature tree),
-- Reflects realistic Python module organization,
+- Reflects realistic target-language module/package organization,
 - Uses folders where helpful to express higher-level structure.
 
 ## Rules
@@ -93,9 +93,9 @@ Your task is to assign each feature to a `.py` file path that:
 - When a folder becomes crowded, introduce semantically meaningful subfolders rather than scattering features into many tiny modules.
 
 ### Naming and Organization Guidelines
-1. Use clear, concise, semantically meaningful names in `snake_case`. Each file or folder should represent a well-scoped functional area.
-2. Names should reflect functional purpose without redundancy. Avoid repeating folder context in filenames when it is obvious (for example, inside `auth/`, prefer `token.py` over `auth_token.py`).
-3. Avoid vague or purely placeholder names such as `module_part1.py` or `other_module.py`.
+1. Use clear, concise, semantically meaningful names that follow target-language conventions. Each file or folder should represent a well-scoped functional area.
+2. Names should reflect functional purpose without redundancy. Avoid repeating folder context in filenames when it is obvious.
+3. Avoid vague or purely placeholder names such as `module_part1` or `other_module`.
 4. Utility-style modules are allowed when they are clearly scoped. Examples:
    - `vector_utils.py`, `io_utils.py`, or `text_utils.py` inside appropriately named folders,
    - `util.py` or `utils.py` within a well-defined domain folder, where the utility code is narrowly focused on that domain.
@@ -113,7 +113,7 @@ Internal reasoning and drafts — use this area for exploration, planning, and s
 {
   "assignments": [
     {
-      "file_path": "src/project/component/module.py",
+      "file_path": "src/project/component/module.ext",
       "features": ["feature1", "feature2"],
       "purpose": "Brief description of file purpose"
     }
@@ -166,7 +166,7 @@ Rules:
 - Do not add new fields or categories beyond the four listed.
 """
 
-GROUP_SKELETON_REVIEW_PROMPT = """You are a senior software architect reviewing the feature-to-file assignments proposed by an architecture assistant. Your role is to critically evaluate the structural quality of the resulting Python module layout across the five criteria below.
+GROUP_SKELETON_REVIEW_PROMPT = """You are a senior software architect reviewing the feature-to-file assignments proposed by an architecture assistant. Your role is to critically evaluate the structural quality of the resulting target-language module layout across the five criteria below.
 
 ## Review Criteria
 ### 1. File Scope Appropriateness
@@ -186,7 +186,7 @@ GROUP_SKELETON_REVIEW_PROMPT = """You are a senior software architect reviewing 
 - Each module should map to a single clear abstraction.
 - Flag mixed-purpose, catch-all, or poorly scoped modules for redesign.
 ### 4. Naming Quality
-- Names must be clear, concise, meaningful, and consistently in `snake_case`.
+- Names must be clear, concise, meaningful, and consistent with target-language naming conventions.
 - Avoid redundancy between folder and file names.
 - Reject vague, generic, placeholder, or suffix-based names.
 - Prefer succinct, expressive names that accurately reflect functionality.
@@ -198,7 +198,7 @@ GROUP_SKELETON_REVIEW_PROMPT = """You are a senior software architect reviewing 
 
 ### Special Emphasis
 - Apply strict scrutiny to both naming and structural decisions.
-- Placeholder or incremental naming patterns (`_a.py`, `_b.py`, `_c.py`) must be rejected.
+- Placeholder or incremental naming patterns must be rejected.
 - When flagging an issue, always recommend specific, meaningful alternatives.
 
 ## Output Format

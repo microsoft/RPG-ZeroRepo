@@ -54,6 +54,7 @@ from common.paths import (
 from common import print_unicode_table, get_repo_info_from_files
 import ast
 from common import get_project_background_context
+from common.language_meta import extract_language_metadata, metadata_with_languages
 from func_design.interface_review import review_orphan_units
 
 
@@ -758,6 +759,14 @@ class InterfaceDesigner:
         # Get base classes list
         base_classes_list = base_classes.get("base_classes", [])
         data_structures_list = base_classes.get("data_structures", [])
+        primary_language, _ = extract_language_metadata(skeleton)
+        if not primary_language:
+            primary_language = extract_language_metadata(data_flow)[0]
+        if not primary_language:
+            primary_language = extract_language_metadata(base_classes)[0]
+        metadata_source = skeleton
+        if not extract_language_metadata(metadata_source)[0]:
+            metadata_source = data_flow if extract_language_metadata(data_flow)[0] else base_classes
         
         # Extract known classes and types for dependency analysis
         known_base_classes, known_types = extract_known_classes_and_types(base_classes)
@@ -765,7 +774,8 @@ class InterfaceDesigner:
         # Initialize dependency collector
         dependency_collector = DependencyCollector(
             known_base_classes=known_base_classes,
-            known_types=known_types
+            known_types=known_types,
+            target_language=primary_language,
         )
         
         # Store original data flow edges
@@ -778,7 +788,8 @@ class InterfaceDesigner:
             logger=self.logger,
             trajectory=self.trajectory,
             step_id=self._current_step_id,
-            output_path=self.output_path
+            output_path=self.output_path,
+            target_language=primary_language,
         )
         
         result = orchestrator.design_all_interfaces(
@@ -789,6 +800,7 @@ class InterfaceDesigner:
             dependency_collector=dependency_collector,
             data_structures=data_structures_list
         )
+        result["meta"] = metadata_with_languages(metadata_source)
         
         # =====================================================================
         # Post-process invocation edges (normalise + resolve)
