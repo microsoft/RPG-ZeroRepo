@@ -8,6 +8,7 @@ from typing import Any
 
 from .backend import ToolchainUnavailable
 from .prompt_hints import PromptHints
+from .project_tasks import ProjectTaskContext, ProjectTaskTemplates
 from .test_result import EnvHandle, TestFailure, TestRunResult
 
 _RUST_IDENT_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
@@ -186,6 +187,92 @@ class RustBackend:
         )
         RustBackend._PROMPT_HINTS_SINGLETON = hints
         return hints
+
+    def project_task_templates(self, context: ProjectTaskContext) -> ProjectTaskTemplates:
+        return ProjectTaskTemplates(
+            dependencies=f"""Generate or update Rust Cargo dependency files for the repository: {context.repo_name}
+
+**Files to create/update:**
+1. `Cargo.toml` - Cargo package declaration using package name `{context.package_name}`
+2. `Cargo.lock` - Only if dependency resolution creates it
+
+**Instructions:**
+1. Prefer the Rust standard library for CLI parsing and file handling unless implemented code already requires a crate.
+2. Include `serde` and `serde_json` when JSON serialization is implemented.
+3. Use edition `2021` unless the implemented code requires another stable edition.
+4. Run `cargo test` after updating dependencies.
+
+**Important:**
+- Do NOT create Python dependency files for a Rust project.
+- Keep dependency choices minimal and justified by actual imports.
+""",
+            main_entry=f"""Create the Rust command entry point for the repository: {context.repo_name}
+Repository purpose: {context.repo_info}
+
+**Goal:** Create a production-quality Cargo CLI entry point that lets users run the complete product through documented commands.
+
+**Files to create:**
+1. `src/main.rs` - Binary entry point for the CLI.
+2. `src/lib.rs` (optional) - Library module that exposes reusable task/store logic.
+
+**Critical Rules:**
+- Do NOT re-implement business logic in `main.rs`. Delegate to modules already defined in the crate.
+- Every `use` path must reference real modules and symbols.
+- Use idiomatic `Result`-based error handling and explicit non-zero exits for user-facing failures.
+- Keep output plain text unless the requirements explicitly ask otherwise.
+
+**Requirements:**
+1. Provide a `main()` function in `src/main.rs`.
+2. Expose all major CLI commands and options described in `docs/`.
+3. Delegate storage and task lifecycle behavior to implemented modules.
+4. Handle invalid commands, invalid ids, missing arguments, and runtime errors clearly.
+5. Verify with `cargo run -- --help` and `cargo test`.
+
+**Important:**
+- Read `docs/` first and faithfully expose the requested behavior.
+- Do NOT create Python package entry points for this Rust project.
+""",
+            readme=f"""Update the README.md for the repository: {context.repo_name}
+Repository purpose: {context.repo_info}
+
+**Goal:** Replace the placeholder README with comprehensive documentation for the actual Rust CLI implementation.
+
+**Sections to include:**
+
+## 1. Project Title & Description
+- Clear, concise description of what the CLI does
+- Key commands and capabilities
+
+## 2. Installation
+- Rust/Cargo prerequisite
+- Clone/build instructions
+- Dependency setup with `cargo build`
+
+## 3. Usage
+- How to run the CLI with `cargo run -- --help`
+- Common command examples with expected plain-text output
+- Data file options and local persistence behavior if applicable
+
+## 4. Project Structure
+- Brief overview of `src/`, modules, and tests
+- Key modules and their purposes
+
+## 5. Development
+- How to run tests with `cargo test`
+- How to format code with `cargo fmt`
+
+**Instructions:**
+1. Read the `docs/` directory for the original requirements.
+2. Explore the actual Rust codebase to understand what was implemented.
+3. Run `cargo run -- --help` if the binary exists.
+4. Reference actual module names, structs, traits, enums, and functions.
+
+**Important:**
+- Do NOT document Python commands, Python test runners, or Python dependency files for this Rust project.
+- Base everything on the actual implemented code, not assumptions.
+- Keep the tone professional and concise.
+""",
+        )
 
     @staticmethod
     def _parser() -> Any:

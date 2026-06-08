@@ -32,6 +32,7 @@ from typing import (
 from common.language_meta import extract_language_metadata
 
 from .prompt_hints import PromptHints
+from .project_tasks import ProjectTaskContext, ProjectTaskTemplates
 from .test_result import EnvHandle, TestRunResult
 
 # Re-exported for convenience of method signatures. Callers that want
@@ -206,6 +207,12 @@ class LanguageBackend(Protocol):
     def prompt_hints(self) -> PromptHints:
         """Return the per-language strings the decoder injects into
         LLM prompts (see :class:`PromptHints` for the field list)."""
+
+    def project_task_templates(
+        self,
+        context: ProjectTaskContext,
+    ) -> ProjectTaskTemplates | None:
+        """Return project-level task prompts, or None for planner fallback."""
 
 
 # ---------------------------------------------------------------------------

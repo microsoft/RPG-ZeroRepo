@@ -19,6 +19,7 @@ from typing import Any
 
 from .backend import ToolchainUnavailable
 from .prompt_hints import PromptHints
+from .project_tasks import ProjectTaskContext, ProjectTaskTemplates
 from .test_result import EnvHandle, TestRunResult
 
 logger = logging.getLogger(__name__)
@@ -434,6 +435,13 @@ class PythonBackend:
         )
         PythonBackend._PROMPT_HINTS_SINGLETON = hints
         return hints
+
+    def project_task_templates(
+        self,
+        context: ProjectTaskContext,
+    ) -> ProjectTaskTemplates | None:
+        """Return None so plan_tasks can use its Python fallback."""
+        return None
 
 
 # Re-export for callers that want the exception without pulling in

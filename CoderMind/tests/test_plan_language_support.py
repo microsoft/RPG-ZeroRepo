@@ -8,7 +8,7 @@ SCRIPTS_DIR = Path(__file__).resolve().parents[1] / "scripts"
 if str(SCRIPTS_DIR) not in sys.path:
     sys.path.insert(0, str(SCRIPTS_DIR))
 
-from decoder_lang import get_backend  # noqa: E402
+from decoder_lang import ProjectTaskTemplates, get_backend  # noqa: E402
 from func_design.base_class_agent import (  # noqa: E402
     BaseClassOutput,
     validate_base_classes_model,
@@ -93,6 +93,28 @@ def test_task_planner_project_tasks_use_go_conventions() -> None:
     assert "main.py" not in main_entry
     assert "go test ./..." in readme
     assert "pytest" not in readme
+
+
+def test_task_planner_prefers_backend_project_task_templates(monkeypatch) -> None:
+    planner = TaskPlanner(
+        interfaces={"meta": {"primary_language": "go", "target_languages": ["go"]}},
+        data_flow={"meta": {"primary_language": "go", "target_languages": ["go"]}},
+        repo_name="tasklite",
+        repo_info="Go CLI task tracker.",
+    )
+
+    def fake_templates(context):
+        return ProjectTaskTemplates(
+            dependencies=f"deps for {context.package_name}",
+            main_entry=f"main for {context.package_name}",
+            readme=f"readme for {context.package_name}",
+        )
+
+    monkeypatch.setattr(planner.backend, "project_task_templates", fake_templates)
+
+    assert planner._build_requirements_task() == "deps for tasklite"
+    assert planner._build_main_entry_task() == "main for tasklite"
+    assert planner._build_readme_task() == "readme for tasklite"
 
 
 def test_task_planner_project_tasks_use_rust_conventions() -> None:

@@ -1101,12 +1101,29 @@ class InterfaceDesigner:
         # Stage 2: Coverage
         # ------------------------------------------------------------------
         print("\n[Stage 2] Coverage — is every skeleton feature mapped to some unit?")
-        # NOTE: We can compute the skeleton-feature universe from
-        # interfaces.json alone (every unit declares its features); for a
-        # canonical count we'd need skeleton.json again. The cross-validate
-        # path already runs `check_interfaces.py` for that; here we just
-        # report what the produced data carries.
-        print(f"  Distinct features mapped to a unit: {len(all_unit_features)}")
+        coverage = result.get("coverage", {}) or {}
+        if coverage:
+            expected_features = coverage.get("expected_features", 0)
+            covered_features = coverage.get("covered_features", 0)
+            expected_files = coverage.get("expected_files", 0)
+            successful_files = coverage.get("successful_files", 0)
+            print(f"  Files fully covered: {successful_files}/{expected_files}")
+            print(f"  Features covered: {covered_features}/{expected_features}")
+            issues = coverage.get("issues", []) or []
+            if issues:
+                print(f"  [WARNING] {len(issues)} coverage issue(s):")
+                for issue in issues[:10]:
+                    file_path = issue.get("file_path") or "(subtree)"
+                    missing = issue.get("missing_features", []) or []
+                    print(f"    - {file_path}: {issue.get('reason', 'incomplete')}")
+                    for feature in missing[:3]:
+                        print(f"      * {feature}")
+                    if len(missing) > 3:
+                        print(f"      ... and {len(missing) - 3} more")
+                if len(issues) > 10:
+                    print(f"    ... and {len(issues) - 10} more")
+        else:
+            print(f"  Distinct features mapped to a unit: {len(all_unit_features)}")
         if not all_unit_features:
             print("  [WARNING] no feature mappings at all — likely Stage 1 failed")
 
@@ -1170,8 +1187,14 @@ class InterfaceDesigner:
         # ------------------------------------------------------------------
         # Verdict — mirrors Stage 3's `passed`.
         # ------------------------------------------------------------------
-        passed = bool(global_review.get("passed"))
-        verdict = "✓ PASS" if passed else "✗ FAIL — see Stage 3 above"
+        generation_passed = result.get("success", True)
+        passed = generation_passed and bool(global_review.get("passed"))
+        if passed:
+            verdict = "✓ PASS"
+        elif not generation_passed:
+            verdict = "✗ FAIL — interface coverage incomplete"
+        else:
+            verdict = "✗ FAIL — see Stage 3 above"
         print(f"\nOverall: {verdict}")
         print("(Stage 3 is the strictest; PASS requires Stages 1+2 also clean.)")
         print("=" * 60)
@@ -1320,9 +1343,10 @@ def main():
 
         # RPG update is now handled inside InterfaceDesigner.build() via InterfacesStore
 
-        if not result.get("success", True) and "error" in result:
+        if not result.get("success", True):
+            error = result.get("error", "Interface coverage incomplete")
             if trajectory:
-                trajectory.fail(result["error"])
+                trajectory.fail(error)
             return 1
         
         # Mark trajectory as complete

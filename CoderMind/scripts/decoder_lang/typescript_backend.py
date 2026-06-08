@@ -9,6 +9,7 @@ from typing import Any
 
 from .backend import ToolchainUnavailable
 from .prompt_hints import PromptHints
+from .project_tasks import ProjectTaskContext, ProjectTaskTemplates
 from .test_result import EnvHandle, TestFailure, TestRunResult
 
 _TS_SEGMENT_RE = re.compile(r"^[A-Za-z0-9_$-]+$")
@@ -187,6 +188,93 @@ class TypeScriptBackend:
         )
         TypeScriptBackend._PROMPT_HINTS_SINGLETON = hints
         return hints
+
+    def project_task_templates(self, context: ProjectTaskContext) -> ProjectTaskTemplates:
+        return ProjectTaskTemplates(
+            dependencies=f"""Generate or update Node.js/TypeScript dependency files for the repository: {context.repo_name}
+
+**Files to create/update:**
+1. `package.json` - Package metadata, scripts, and dependencies using package name `{context.package_name}`
+2. `tsconfig.json` - TypeScript compiler configuration for Node.js
+3. `package-lock.json` - Only if dependency installation creates it
+
+**Instructions:**
+1. Prefer Node.js standard APIs for local file and CLI behavior.
+2. Add TypeScript tooling and a minimal test runner only when needed by the implemented code.
+3. Provide scripts for `npm start`, `npm test`, and type checking when appropriate.
+4. Run `npm test` after updating dependencies.
+
+**Important:**
+- Do NOT create Python dependency files for a TypeScript project.
+- Keep dependencies minimal and aligned with actual imports.
+""",
+            main_entry=f"""Create the TypeScript command entry point for the repository: {context.repo_name}
+Repository purpose: {context.repo_info}
+
+**Goal:** Create a production-quality Node.js CLI entry point that lets users run the complete product through documented commands.
+
+**Files to create:**
+1. `src/index.ts` - CLI entry point exported or referenced by package scripts.
+2. `src/cli.ts` (optional) - Command parsing and dispatch separated from domain logic.
+
+**Critical Rules:**
+- Do NOT re-implement business logic in `index.ts`. Import and delegate to implemented modules.
+- Every import must reference real files and exported symbols.
+- Use explicit error handling and non-zero process exits for user-facing failures.
+- Keep output plain text unless the requirements explicitly ask otherwise.
+
+**Requirements:**
+1. Expose all major CLI commands and options described in `docs/`.
+2. Wire `package.json` scripts so users can run the CLI with `npm start -- --help`.
+3. Delegate storage and task lifecycle behavior to implemented modules.
+4. Handle invalid commands, invalid ids, missing arguments, and runtime errors clearly.
+5. Verify with `npm start -- --help` and `npm test`.
+
+**Important:**
+- Read `docs/` first and faithfully expose the requested behavior.
+- Do NOT create Python package entry points for this TypeScript project.
+""",
+            readme=f"""Update the README.md for the repository: {context.repo_name}
+Repository purpose: {context.repo_info}
+
+**Goal:** Replace the placeholder README with comprehensive documentation for the actual TypeScript CLI implementation.
+
+**Sections to include:**
+
+## 1. Project Title & Description
+- Clear, concise description of what the CLI does
+- Key commands and capabilities
+
+## 2. Installation
+- Node.js/npm prerequisite
+- Clone/install instructions using `npm install`
+- TypeScript build or runtime notes if applicable
+
+## 3. Usage
+- How to run the CLI with `npm start -- --help`
+- Common command examples with expected plain-text output
+- Data file options and local persistence behavior if applicable
+
+## 4. Project Structure
+- Brief overview of `src/`, `tests/`, and configuration files
+- Key modules and their purposes
+
+## 5. Development
+- How to run tests with `npm test`
+- How to run type checks and build commands if scripts exist
+
+**Instructions:**
+1. Read the `docs/` directory for the original requirements.
+2. Explore the actual TypeScript codebase to understand what was implemented.
+3. Run `npm start -- --help` if package scripts exist.
+4. Reference actual exported types, functions, and modules.
+
+**Important:**
+- Do NOT document Python commands, Python test runners, or Python dependency files for this TypeScript project.
+- Base everything on the actual implemented code, not assumptions.
+- Keep the tone professional and concise.
+""",
+        )
 
     @staticmethod
     def _parser() -> Any:

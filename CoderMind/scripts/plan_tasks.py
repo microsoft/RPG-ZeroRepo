@@ -24,7 +24,7 @@ from collections import Counter, defaultdict, deque
 from common.trajectory import Trajectory, load_or_create_trajectory
 from common import LLMClient
 from common.language_meta import extract_language_metadata, metadata_with_languages
-from decoder_lang import get_backend
+from decoder_lang import ProjectTaskContext, get_backend
 from rpg import uuid8
 
 # Import centralized paths
@@ -1252,9 +1252,23 @@ class TaskPlanner:
         print("      -  Added README.md generation task (no test)")
         
         self.logger.info("Added 2 project file tasks")
+
+    def _backend_project_task_templates(self):
+        """Return backend-owned project task templates when available."""
+        return self.backend.project_task_templates(
+            ProjectTaskContext(
+                repo_name=self.repo_name,
+                repo_info=self.repo_info,
+                package_name=self._package_slug(separator="-"),
+            )
+        )
     
     def _build_requirements_task(self) -> str:
         """Build task description for dependency metadata generation."""
+        templates = self._backend_project_task_templates()
+        if templates is not None:
+            return templates.dependencies
+
         if self.backend.name == "go":
             module_name = self._go_module_name()
             return f"""Generate or update Go module dependency files for the repository: {self.repo_name}
@@ -1354,6 +1368,10 @@ package3>=3.0.0  # For feature X
     
     def _build_main_entry_task(self) -> str:
         """Build task description for main entry point generation."""
+        templates = self._backend_project_task_templates()
+        if templates is not None:
+            return templates.main_entry
+
         if self.backend.name == "go":
             module_name = self._go_module_name()
             command_path = f"cmd/{module_name}/main.go"
@@ -1593,6 +1611,10 @@ if __name__ == "__main__":
 
     def _build_readme_task(self) -> str:
         """Build task description for README.md generation."""
+        templates = self._backend_project_task_templates()
+        if templates is not None:
+            return templates.readme
+
         if self.backend.name == "go":
             module_name = self._go_module_name()
             return f"""Update the README.md for the repository: {self.repo_name}

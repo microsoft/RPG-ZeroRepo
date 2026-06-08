@@ -1920,6 +1920,7 @@ class InterfaceOrchestrator:
         implemented_subtrees = {}  # subtree -> list of implemented file info
         all_import_warnings = []  # collect import cross-validation warnings
         all_new_features = []  # collect new features created across all subtrees
+        coverage_status = self._new_coverage_status()
 
         # Process each subtree
         for subtree_name in subtree_order:
@@ -1929,6 +1930,7 @@ class InterfaceOrchestrator:
             file_nodes = self._find_files_for_subtree(skeleton, subtree_name)
             if not file_nodes:
                 self.logger.warning(f"No files found for subtree: {subtree_name}")
+                self._record_missing_subtree(coverage_status, subtree_name)
                 continue
             
             self.logger.info(f"[InterfaceOrchestrator] Found {len(file_nodes)} files for {subtree_name}")
@@ -2035,6 +2037,14 @@ class InterfaceOrchestrator:
                     self.logger.info(f"[InterfaceOrchestrator] [OK] Completed {file_path}")
                 else:
                     self.logger.warning(f"[InterfaceOrchestrator] [FAIL] Failed {file_path}")
+
+            for file_node in file_nodes:
+                self._record_file_coverage(
+                    coverage_status=coverage_status,
+                    subtree_name=subtree_name,
+                    file_node=file_node,
+                    result=file_results.get(file_node.get("path", "")),
+                )
             
             # --- A1: Register completed subtree interfaces to GlobalInterfaceRegistry ---
             global_registry.register_from_subtree_result(subtree_name, subtree_interfaces)
@@ -2078,11 +2088,21 @@ class InterfaceOrchestrator:
             
             # Save after each subtree
             self._save_interfaces(
-                self._build_result(all_interfaces, subtree_order, implemented_subtrees)
+                self._build_result(
+                    all_interfaces,
+                    subtree_order,
+                    implemented_subtrees,
+                    coverage_status,
+                )
             )
         
         # Compile final result
-        final_result = self._build_result(all_interfaces, subtree_order, implemented_subtrees)
+        final_result = self._build_result(
+            all_interfaces,
+            subtree_order,
+            implemented_subtrees,
+            coverage_status,
+        )
 
         # Store import warnings and global registry in result for downstream use
         final_result["_import_warnings"] = all_import_warnings
@@ -2103,9 +2123,11 @@ class InterfaceOrchestrator:
         self,
         all_interfaces: Dict[str, Any],
         subtree_order: List[str],
-        implemented_subtrees: Dict[str, List[Dict[str, Any]]]
+        implemented_subtrees: Dict[str, List[Dict[str, Any]]],
+        coverage_status: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
         """Build the result dict from current state."""
+        coverage = coverage_status or self._new_coverage_status()
         return {
             "meta": {
                 "primary_language": self.backend.name,
@@ -2117,8 +2139,91 @@ class InterfaceOrchestrator:
                 st: [f["path"] for f in files]
                 for st, files in implemented_subtrees.items()
             },
-            "success": True
+            "coverage": coverage,
+            "success": not coverage.get("issues"),
         }
+
+    @staticmethod
+    def _new_coverage_status() -> Dict[str, Any]:
+        """Return an empty coverage accumulator for interface generation."""
+        return {
+            "expected_files": 0,
+            "successful_files": 0,
+            "expected_features": 0,
+            "covered_features": 0,
+            "missing_features": 0,
+            "failed_files": [],
+            "missing_subtrees": [],
+            "issues": [],
+        }
+
+    @staticmethod
+    def _features_from_file_result(result: Dict[str, Any]) -> Set[str]:
+        """Extract feature paths mapped by a generated file result."""
+        features: Set[str] = set()
+        for mapped_features in (result.get("units_to_features") or {}).values():
+            if isinstance(mapped_features, list):
+                features.update(str(feature) for feature in mapped_features)
+            elif isinstance(mapped_features, str):
+                features.add(mapped_features)
+        return features
+
+    @staticmethod
+    def _record_missing_subtree(
+        coverage_status: Dict[str, Any],
+        subtree_name: str,
+    ) -> None:
+        """Record a subtree referenced by data flow but absent from skeleton."""
+        coverage_status["missing_subtrees"].append(subtree_name)
+        coverage_status["issues"].append({
+            "subtree": subtree_name,
+            "file_path": None,
+            "reason": "subtree has no skeleton files",
+            "missing_features": [],
+        })
+
+    @classmethod
+    def _record_file_coverage(
+        cls,
+        coverage_status: Dict[str, Any],
+        subtree_name: str,
+        file_node: Dict[str, Any],
+        result: Optional[Dict[str, Any]],
+    ) -> None:
+        """Record generated interface coverage for one skeleton file."""
+        file_path = file_node.get("path", "")
+        expected_features = set(file_node.get("feature_paths", []))
+        if not expected_features:
+            return
+
+        coverage_status["expected_files"] += 1
+        coverage_status["expected_features"] += len(expected_features)
+
+        produced_features = cls._features_from_file_result(result or {})
+        covered_features = expected_features & produced_features
+        missing_features = sorted(expected_features - produced_features)
+        has_units = bool(result and result.get("units"))
+
+        coverage_status["covered_features"] += len(covered_features)
+        coverage_status["missing_features"] += len(missing_features)
+
+        if has_units and not missing_features:
+            coverage_status["successful_files"] += 1
+            return
+
+        reason = "missing features"
+        if not result:
+            reason = "no result"
+        elif not has_units:
+            reason = "no units"
+
+        coverage_status["failed_files"].append(file_path)
+        coverage_status["issues"].append({
+            "subtree": subtree_name,
+            "file_path": file_path,
+            "reason": reason,
+            "missing_features": missing_features,
+        })
     
     def _save_interfaces(self, result: Dict[str, Any]) -> None:
         """Save current interfaces result to output_path (if configured).

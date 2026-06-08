@@ -36,6 +36,7 @@ from .backend import (
 from .go_backend import GoBackend
 from .prompt_directive import language_directive, with_language_directive
 from .prompt_hints import PromptHints
+from .project_tasks import ProjectTaskContext, ProjectTaskTemplates
 from .python_backend import PythonBackend
 from .rust_backend import RustBackend
 from .test_result import EnvHandle, TestFailure, TestRunResult
@@ -55,6 +56,8 @@ __all__ = [
     "GoBackend",
     "LanguageBackend",
     "PromptHints",
+    "ProjectTaskContext",
+    "ProjectTaskTemplates",
     "PythonBackend",
     "RustBackend",
     "TestFailure",
