@@ -2001,41 +2001,17 @@ class InterfaceOrchestrator:
                 target_language=self.backend.name,
             )
 
-            # Layer-2 retry: if the agent's internal 10-iteration loop
-            # leaves any file with no units, give the whole subtree ONE
-            # second chance. This is the simple variant — attempt 2
-            # reruns the entire subtree (not just failed files). The
-            # cost (extra LLM round) is bounded and only paid when at
-            # least one file actually failed, which is rare in practice.
-            max_subtree_attempts = 2
-            file_results: Dict[str, Any] = {}
-            for attempt in range(max_subtree_attempts):
-                file_results = agent.design_subtree_interfaces(
-                    file_nodes=file_nodes,
-                    file_order=file_order,
-                    repo_info=repo_info,
-                    data_flow_str=filtered_data_flow_str,
-                    base_classes_str=base_classes_str,
-                    upstream_context=upstream_context,
-                    dependency_collector=dependency_collector,
-                    base_class_files=base_class_files,
-                    subtree_name=subtree_name,
-                )
-                failed_paths = [
-                    fp for fp, r in file_results.items()
-                    if fp != "__new_features__"
-                    and isinstance(r, dict)
-                    and not r.get("units")
-                ]
-                if not failed_paths:
-                    break
-                if attempt + 1 < max_subtree_attempts:
-                    self.logger.warning(
-                        f"[InterfaceOrchestrator] Subtree '{subtree_name}' "
-                        f"left {len(failed_paths)} file(s) without units "
-                        f"after attempt {attempt + 1}/{max_subtree_attempts}; "
-                        f"retrying whole subtree once. Failed: {failed_paths[:5]}"
-                    )
+            file_results = agent.design_subtree_interfaces(
+                file_nodes=file_nodes,
+                file_order=file_order,
+                repo_info=repo_info,
+                data_flow_str=filtered_data_flow_str,
+                base_classes_str=base_classes_str,
+                upstream_context=upstream_context,
+                dependency_collector=dependency_collector,
+                base_class_files=base_class_files,
+                subtree_name=subtree_name,
+            )
 
             # Extract new features from this subtree
             subtree_new_features = file_results.pop("__new_features__", [])
