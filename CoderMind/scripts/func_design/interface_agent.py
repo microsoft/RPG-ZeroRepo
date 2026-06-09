@@ -16,7 +16,7 @@ import ast
 import re
 from typing import Dict, List, Optional, Tuple, Any, Set
 from collections import defaultdict, deque
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 # Import ParsedFile and CodeUnit for code parsing
 import sys
@@ -65,6 +65,21 @@ class InterfaceDefinition(BaseModel):
     code: str = Field(..., description="Python code for the interface")
     dependencies: Optional[InterfaceDependency] = Field(default=None, description="Declared dependencies")
 
+    @model_validator(mode="before")
+    @classmethod
+    def _normalise_aliases(cls, value: Any) -> Any:
+        if not isinstance(value, dict):
+            return value
+        normalised = dict(value)
+        if "features" not in normalised:
+            if "feature_paths" in normalised:
+                normalised["features"] = normalised["feature_paths"]
+            elif "feature_path" in normalised:
+                normalised["features"] = [normalised["feature_path"]]
+        if "dependencies" not in normalised and "dependency" in normalised:
+            normalised["dependencies"] = normalised["dependency"]
+        return normalised
+
 
 class InterfaceOutput(BaseModel):
     """Output from LLM for interface design."""
@@ -75,6 +90,28 @@ class FileInterfaceBlock(BaseModel):
     """Block of interface definitions for a single file within a subtree batch."""
     file_path: str = Field(..., description="Path to the file being designed")
     interfaces: List[InterfaceDefinition] = Field(..., min_length=1, description="Interface definitions for this file")
+
+    @model_validator(mode="before")
+    @classmethod
+    def _normalise_aliases(cls, value: Any) -> Any:
+        if not isinstance(value, dict):
+            return value
+        normalised = dict(value)
+        if "file_path" not in normalised and "path" in normalised:
+            normalised["file_path"] = normalised["path"]
+        if "interfaces" not in normalised:
+            for alias in ("interface_definitions", "interface_units", "units"):
+                if alias in normalised:
+                    normalised["interfaces"] = normalised[alias]
+                    break
+        if "interfaces" not in normalised and "code" in normalised:
+            interface_data = {
+                key: normalised[key]
+                for key in ("features", "feature_paths", "feature_path", "code", "dependencies")
+                if key in normalised
+            }
+            normalised["interfaces"] = [interface_data]
+        return normalised
 
 
 class SubtreeInterfaceOutput(BaseModel):
@@ -981,27 +1018,37 @@ def validate_interface(
     Returns: (is_valid, error_message, parsed_info)
     """
     backend = backend or get_backend("python")
-    features = interface.get("features", [])
+    raw_features = interface.get("features", [])
+    features = list(raw_features) if isinstance(raw_features, list) else []
     code = _strip_markdown_code_fence(interface.get("code", ""))
     interface["code"] = code
     errors = []
+
+    if target_features:
+        invalid_features = sorted(set(features) - target_features)
+        duplicate_features = sorted(set(features) & covered_features)
+        filtered_features = [
+            feature for feature in features
+            if feature in target_features and feature not in covered_features
+        ]
+        if invalid_features or duplicate_features:
+            warnings = interface.setdefault("_validation_warnings", [])
+            if invalid_features:
+                warnings.append(
+                    "Ignored feature paths outside this file's target set: "
+                    + ", ".join(invalid_features)
+                )
+            if duplicate_features:
+                warnings.append(
+                    "Ignored feature paths already covered by earlier interfaces: "
+                    + ", ".join(duplicate_features)
+                )
+        features = filtered_features
+        interface["features"] = features
     
     # Check features
     if not features:
-        errors.append("Interface must have at least one feature")
-    else:
-        feature_set = set(features)
-        
-        # Check for overlap with already covered features
-        overlap = feature_set & covered_features
-        if overlap:
-            errors.append(f"Features {list(overlap)} are already covered by another interface")
-        
-        # Check if features are in target features
-        if target_features:
-            invalid_features = feature_set - target_features
-            if invalid_features:
-                errors.append(f"Features {list(invalid_features)} are not in target features")
+        errors.append("Interface must cover at least one uncovered target feature")
     
     if backend.name == "python":
         code = re.sub(

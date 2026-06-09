@@ -159,7 +159,7 @@ def safe_load_rpg(path: Path | str) -> Any:
 
 # Filenames inside the inner-git repo that we know how to recover.
 # Mirrors the layout produced by :mod:`cmind_cli._inner_git`:
-# ``data/rpg.json``, ``data/dep_graph.json``, etc.
+# ``data/rpg.json``, ``data/feature_spec.json``, etc.
 def _git_relpath_for(path: Path) -> Optional[str]:
     """Return the path relative to the home-workspace dir for git lookup.
 

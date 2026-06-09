@@ -60,9 +60,9 @@ def run_update_rpg(
     cur_repo_dir = os.path.abspath(cur_repo_dir)
     last_repo_dir = os.path.abspath(last_repo_dir)
     rpg_file = os.path.abspath(rpg_file)
-    # ``dep_graph_path`` defaults to the standard ``.cmind/data/dep_graph.json``
-    # location so that ``run_update_rpg.py`` (CLI) and the pre-commit
-    # hook agree on a single canonical file.
+    # ``dep_graph_path`` is a legacy standalone location retained for
+    # callers that still pass ``--dep-graph``. Normal updates embed the
+    # refreshed dependency graph in ``rpg.json``.
     if dep_graph_path is None:
         dep_graph_path = str(DEP_GRAPH_FILE)
     else:
@@ -232,8 +232,8 @@ def main():
         "--dep-graph",
         default=None,
         help=(
-            "Path to write dep_graph.json (default: .cmind/data/dep_graph.json). "
-            "Must match the path used by the pre-commit sync hook to avoid drift."
+            "Legacy standalone dep_graph path. Normal updates embed the "
+            "dependency graph in rpg.json."
         ),
     )
     parser.add_argument(

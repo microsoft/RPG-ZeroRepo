@@ -9,6 +9,22 @@ from typing import Any
 PRIMARY_LANGUAGE_FIELD = "primary_language"
 TARGET_LANGUAGES_FIELD = "target_languages"
 
+_LANGUAGE_ALIASES = {
+    "c++": "cpp",
+    "cplusplus": "cpp",
+    "cc": "cpp",
+    "js": "javascript",
+    "jsx": "javascript",
+    "ts": "typescript",
+    "tsx": "typescript",
+}
+
+
+def canonical_language_name(value: str) -> str:
+    """Return the decoder's canonical language key for a raw name."""
+    cleaned = value.strip().lower()
+    return _LANGUAGE_ALIASES.get(cleaned, cleaned)
+
 
 def normalize_language_metadata(
     primary: Any = None,
@@ -19,13 +35,13 @@ def normalize_language_metadata(
     if isinstance(languages, list):
         for language in languages:
             if isinstance(language, str):
-                cleaned = language.strip().lower()
+                cleaned = canonical_language_name(language)
                 if cleaned and cleaned not in normalized:
                     normalized.append(cleaned)
 
     clean_primary = None
     if isinstance(primary, str):
-        candidate = primary.strip().lower()
+        candidate = canonical_language_name(primary)
         if candidate:
             clean_primary = candidate
 

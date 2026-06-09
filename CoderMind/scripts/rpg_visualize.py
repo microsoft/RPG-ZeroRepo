@@ -3,15 +3,15 @@
 
 Renders three views:
 1. **Feat Graph** — collapsible tree layout (D3.js) from rpg.json
-2. **Dep Graph** — collapsible force-directed layout from dep_graph.json
-   Nodes are grouped by file hierarchy, collapsible at any level.
+2. **Dep Graph** — collapsible force-directed layout from the dep_graph
+  embedded in rpg.json. Nodes are grouped by file hierarchy, collapsible at any level.
    Edges merge when groups are collapsed.
 3. **Mapping** — RPG feature tree (L→R) linked to dep tree (R→L) via _dep_to_rpg_map
 
 Default: only the first level (functional areas) is expanded.
 
 Usage:
-    python3 scripts/rpg_visualize.py [rpg.json] [--dep-graph dep_graph.json] [-o output.html]
+    python3 scripts/rpg_visualize.py [rpg.json] [--dep-graph legacy_dep_graph.json] [-o output.html]
 """
 
 import argparse
@@ -59,7 +59,7 @@ def load_rpg(path: str | Path, dep_graph_path: str | Path | None = None) -> dict
         if resolved_dep_path:
             data["dep_graph"] = load_json(resolved_dep_path)
         elif dep_graph_path:
-            raise FileNotFoundError(f"dep_graph.json not found: {dep_graph_path}")
+          raise FileNotFoundError(f"dep_graph override not found: {dep_graph_path}")
 
     return data
 
@@ -1879,7 +1879,10 @@ def main():
     parser.add_argument("rpg_file", nargs="?", default=str(RPG_FILE),
                         help="Path to rpg.json (default: home-side workspace store at ~/.cmind/workspaces/<id>/data/rpg.json)")
     parser.add_argument("--dep-graph", default=None,
-                        help="Path to dep_graph.json (default: dep_graph_file field or sibling dep_graph.json)")
+              help=(
+                "Optional legacy external dep_graph override. "
+                "By default the embedded dep_graph in rpg.json is used."
+              ))
     parser.add_argument("-o", "--output", default=None,
                         help="Output HTML file (default: <rpg_file>.html)")
     args = parser.parse_args()

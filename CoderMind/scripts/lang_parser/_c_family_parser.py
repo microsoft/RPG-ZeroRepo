@@ -35,6 +35,12 @@ _FUNCTION_DEF_RE = re.compile(
     rf"(?:const\s*)?(?:noexcept(?:\s*\([^)]*\))?\s*)?(?:override\s*)?(?:final\s*)?"
     rf"(?:->\s*[^{{;]+)?(?::[^{{;]+)?\s*\{{"
 )
+_FUNCTION_DECL_RE = re.compile(
+    rf"^\s*(?:(?:extern\s+\"C\"\s+)?(?P<prefix>(?:[\w:<>~*&,\.\[\]\s]+)\s+))?"
+    rf"(?:(?P<parent>{_IDENTIFIER})::)?(?P<name>~?{_IDENTIFIER})\s*\([^;{{}}]*\)\s*"
+    rf"(?:const\s*)?(?:noexcept(?:\s*\([^)]*\))?\s*)?(?:override\s*)?(?:final\s*)?"
+    rf"(?:->\s*[^{{;]+)?(?::[^{{;]+)?\s*;"
+)
 _STATIC_CALL_RE = re.compile(rf"(?<![\w:])(?P<qualifier>{_IDENTIFIER})::(?P<name>~?{_IDENTIFIER})\s*\(")
 _NEW_EXPRESSION_RE = re.compile(rf"\bnew\s+(?P<name>{_IDENTIFIER})\s*\(")
 _DIRECT_CALL_RE = re.compile(rf"(?<![\w:.>])(?P<name>{_IDENTIFIER})\s*\(")
@@ -257,7 +263,7 @@ class CFamilyParser(BaseLanguageParser):
                 index += 1
                 continue
 
-            match, signature_end = self._match_function_definition(lines, index)
+            match, signature_end, has_body = self._match_function(lines, index)
             if match is None:
                 index += 1
                 continue
@@ -268,7 +274,7 @@ class CFamilyParser(BaseLanguageParser):
                 index += 1
                 continue
 
-            end = block_end_for_braces(lines, signature_end)
+            end = block_end_for_braces(lines, signature_end) if has_body else line_end_for_statement(lines, signature_end)
             unit_type = "method" if parent else "function"
             extra = {"qualified_parent": parent} if parent else None
             units.append(
@@ -281,20 +287,25 @@ class CFamilyParser(BaseLanguageParser):
                     line_start=index + 1,
                     line_end=end + 1,
                     language=self.language,
-                    node_type="method_definition" if parent else "function_definition",
+                    node_type=(
+                        "method_definition" if parent and has_body
+                        else "method_declaration" if parent
+                        else "function_definition" if has_body
+                        else "function_declaration"
+                    ),
                     extra=extra,
                 )
             )
             index = end + 1
         return units
 
-    def _match_function_definition(
+    def _match_function(
         self,
         lines: list[str],
         start_index: int,
-    ) -> tuple[re.Match[str] | None, int]:
+    ) -> tuple[re.Match[str] | None, int, bool]:
         if not self._clean_line(lines[start_index]).strip():
-            return None, start_index
+            return None, start_index, False
 
         statement_parts: list[str] = []
         max_end = min(len(lines), start_index + 8)
@@ -307,14 +318,17 @@ class CFamilyParser(BaseLanguageParser):
             open_index = statement.find("{")
             semi_index = statement.find(";")
             if semi_index != -1 and (open_index == -1 or semi_index < open_index):
-                return None, start_index
+                match = _FUNCTION_DECL_RE.match(statement)
+                if match is None:
+                    return None, start_index, False
+                return match, end_index, False
             if open_index == -1:
                 continue
             match = _FUNCTION_DEF_RE.match(statement)
             if match is None:
-                return None, start_index
-            return match, end_index
-        return None, start_index
+                return None, start_index, False
+            return match, end_index, True
+        return None, start_index, False
 
     def _extract_invokes(self, path: str, lines: list[str], units: list[LPCodeUnit]) -> list[LPDependency]:
         import_ranges = [

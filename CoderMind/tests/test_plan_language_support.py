@@ -14,7 +14,11 @@ from func_design.base_class_agent import (  # noqa: E402
     validate_base_classes_model,
     validate_data_structures,
 )
-from func_design.interface_agent import SubtreeInterfaceAgent, validate_interface  # noqa: E402
+from func_design.interface_agent import (  # noqa: E402
+    SubtreeInterfaceAgent,
+    SubtreeInterfaceOutput,
+    validate_interface,
+)
 from func_design.interface_prompts import SUBTREE_INTERFACE_PROMPT  # noqa: E402
 from plan_tasks import TaskPlanner  # noqa: E402
 
@@ -74,6 +78,49 @@ def test_interface_validation_accepts_go_declaration() -> None:
 
     assert ok, error
     assert "struct Task" in info["declarations"]
+
+
+def test_subtree_interface_output_accepts_common_file_aliases() -> None:
+    model = SubtreeInterfaceOutput.model_validate({
+        "files": [
+            {
+                "path": "src/tasklite_cli/task/task.c",
+                "features": ["Task Domain Model/task schema/define record"],
+                "code": "int task_record_init(void);\n",
+            }
+        ]
+    })
+
+    assert model.files[0].file_path == "src/tasklite_cli/task/task.c"
+    assert model.files[0].interfaces[0].features == [
+        "Task Domain Model/task schema/define record"
+    ]
+
+
+def test_interface_validation_filters_non_target_and_duplicate_features() -> None:
+    backend = get_backend("c")
+    interface = {
+        "features": [
+            "Task Domain Model/task schema/define record",
+            "Task Domain Model/glue/generated helper",
+            "Task Domain Model/task schema/already covered",
+        ],
+        "code": "int task_record_init(void);\n",
+    }
+
+    ok, error, info = validate_interface(
+        interface,
+        {
+            "Task Domain Model/task schema/define record",
+            "Task Domain Model/task schema/already covered",
+        },
+        {"Task Domain Model/task schema/already covered"},
+        backend=backend,
+    )
+
+    assert ok, error
+    assert interface["features"] == ["Task Domain Model/task schema/define record"]
+    assert "function task_record_init" in info["declarations"]
 
 
 def test_interface_validation_strips_markdown_fence() -> None:

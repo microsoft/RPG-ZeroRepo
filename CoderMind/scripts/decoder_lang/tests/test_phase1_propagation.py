@@ -154,6 +154,14 @@ class FeatureSpecOutputSchemaTests(unittest.TestCase):
         self.assertEqual(round_tripped.target_languages, ["go"])
         self.assertNotIn("target_language", spec.model_dump())
 
+    def test_language_aliases_are_canonicalized(self) -> None:
+        from common.language_meta import normalize_language_metadata  # noqa: E402
+
+        primary, languages = normalize_language_metadata("C++", ["C++", "TS", "js"])
+
+        self.assertEqual(primary, "cpp")
+        self.assertEqual(languages, ["cpp", "typescript", "javascript"])
+
     def test_target_languages_sets_primary_language(self) -> None:
         payload = {
             **self.minimal_payload,

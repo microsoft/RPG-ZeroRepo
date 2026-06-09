@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
-"""Apply an EditPlan to RPG feature graph and code, then refresh dep_graph.
+"""Apply an EditPlan to RPG feature graph and code.
 
 Reads an EditPlan JSON, applies feature_changes to the RPG, applies
-code_changes as diffs, refreshes dep_graph, runs related tests, and
-outputs a result JSON.  Supports rollback on test failure.
+code_changes as diffs, refreshes the embedded dep_graph, runs related
+tests, and outputs a result JSON. Supports rollback on test failure.
 """
 
 import argparse

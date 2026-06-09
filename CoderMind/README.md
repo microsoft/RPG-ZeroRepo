@@ -69,7 +69,7 @@ Reverse Direction: Code → RPG                                           │   
 │                  │         │  (full)  │       │ (manual  │                 │
 └──────────────────┘         └────┬─────┘       │ fallback)│                 │
                               rpg.json          └──────────┘                 │
-                              dep_graph.json     rpg.json / dep_graph.json   │
+                           (includes dep_graph)          rpg.json              │
                                   │                                          │
                                   └──────────────────────────────────────────┘
                                                   ▲

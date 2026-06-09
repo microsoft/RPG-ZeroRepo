@@ -452,7 +452,7 @@ class RPG:
 
         # Cross-graph mapping (dep_graph ↔ feature graph)
         self._feature_to_dep_map: Dict[str, List[str]] = {}  # feature_node_id -> [dep_node_ids]
-        self._dep_graph_file: Optional[str] = None  # relative path to dep_graph.json (for serialization)
+        self._dep_graph_file: Optional[str] = None  # legacy external dep_graph path
 
         # Git sync state — see :meth:`set_git_meta`.  ``None`` means the RPG
         # has never been linked to a git commit (e.g. brand-new RPG produced

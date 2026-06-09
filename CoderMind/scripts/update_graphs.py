@@ -2,7 +2,7 @@
 """Unified graph update tool — update dep_graph, feature graph, or both.
 
 Subcommands:
-  dep         Rebuild dep_graph.json from AST (no RPG changes)
+    dep         Rebuild the AST dependency graph and embed it in rpg.json
   enrich      Enrich feature graph from actual code (align paths + fill missing)
   sync        Full sync: dep + enrich + mappings
   update-rpg  Full RPG update (dep_graph + feature graph via LLM) against
@@ -580,8 +580,16 @@ def cmd_status(rpg_path: Path, dep_graph_path: Path) -> dict:
         "rpg_path": str(rpg_path),
         "dep_graph_path": str(dep_graph_path),
         "rpg_exists": rpg_path.exists(),
-        "dep_graph_exists": dep_graph_path.exists(),
+        "legacy_dep_graph_exists": dep_graph_path.exists(),
+        "dep_graph_exists": False,
+        "dep_graph_source": "none",
     }
+
+    def _count_graph(graph_data: dict) -> None:
+        nodes = graph_data.get("nodes") or []
+        edges = graph_data.get("edges") or []
+        status["dep_nodes"] = len(nodes) if isinstance(nodes, (list, dict)) else 0
+        status["dep_edges"] = len(edges) if isinstance(edges, (list, dict)) else 0
 
     if rpg_path.exists():
         try:
@@ -617,6 +625,13 @@ def cmd_status(rpg_path: Path, dep_graph_path: Path) -> dict:
                 status["last_synced_short"] = git_meta.get("head_short")
                 status["last_synced_branch"] = git_meta.get("head_branch")
                 status["last_synced_at"] = git_meta.get("head_timestamp")
+            embedded_dep = rpg_data.get("dep_graph")
+            if isinstance(embedded_dep, dict) and (
+                embedded_dep.get("nodes") or embedded_dep.get("edges")
+            ):
+                status["dep_graph_exists"] = True
+                status["dep_graph_source"] = "embedded"
+                _count_graph(embedded_dep)
         except (OSError, json.JSONDecodeError) as exc:
             status["rpg_error"] = str(exc)
 
@@ -637,12 +652,13 @@ def cmd_status(rpg_path: Path, dep_graph_path: Path) -> dict:
         if last and current_head.get("head_commit"):
             status["rpg_in_sync_with_head"] = last == current_head["head_commit"]
 
-    if dep_graph_path.exists():
+    if status["dep_graph_source"] == "none" and dep_graph_path.exists():
         try:
             with open(dep_graph_path, "r", encoding="utf-8") as f:
                 dg_data = json.load(f)
-            status["dep_nodes"] = len(dg_data.get("nodes") or [])
-            status["dep_edges"] = len(dg_data.get("edges") or [])
+            status["dep_graph_exists"] = True
+            status["dep_graph_source"] = "legacy_file"
+            _count_graph(dg_data)
             status["dep_generated_at"] = dg_data.get("generated_at")
         except (OSError, json.JSONDecodeError) as exc:
             status["dep_graph_error"] = str(exc)
@@ -785,13 +801,16 @@ def main():
         p.add_argument("--rpg", type=Path, default=REPO_RPG_FILE,
                         help="Path to RPG file (repo_rpg.json)")
         p.add_argument("--dep-graph", type=Path, default=DEP_GRAPH_FILE,
-                        help="Path to dep_graph.json")
+                        help=(
+                            "Legacy standalone dep_graph path used only "
+                            "when rpg.json has no embedded dep_graph"
+                        ))
         p.add_argument("--code-dir", type=str, default=None,
                         help="Code directory (default: auto-detect)")
         p.add_argument("--json", action="store_true", help="JSON output")
 
     # dep
-    p_dep = sub.add_parser("dep", help="Rebuild dep_graph.json from AST")
+    p_dep = sub.add_parser("dep", help="Rebuild dep_graph from AST into rpg.json")
     _add_common(p_dep)
 
     # enrich
@@ -909,7 +928,7 @@ def main():
     # Dispatch
     if command == "dep":
         # ``rpg_path`` is preferred (embedded dep_graph); falls back to
-        # writing a standalone dep_graph.json when the workspace has no
+        # writing a legacy standalone dep_graph when the workspace has no
         # rpg.json yet (very first commit before /cmind.encode).
         result = update_dep_only(
             code_dir, workspace_root, args.dep_graph,

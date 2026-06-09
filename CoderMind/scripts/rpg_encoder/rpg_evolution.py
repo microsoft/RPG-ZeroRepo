@@ -342,10 +342,9 @@ class RPGEvolution:
             repo_dir: Workspace root (which is also the project repo root
                 after the workspace=repo unification).
             logger: Logger for status output.
-            save_path: Path where ``dep_graph.json`` should be written.
-                If ``None``, dep_graph stays in-memory only (legacy
-                behaviour; preserved for callers that haven't been
-                migrated yet, but flagged with a warning).
+            save_path: Optional legacy path where a standalone
+                ``dep_graph.json`` should be written. If ``None``, the
+                caller persists the refreshed graph by saving ``rpg.json``.
         """
         logger.info("Updating dependency graph and RPG node index...")
         try:

@@ -6,7 +6,8 @@ treat the target programming language as a parameter rather than
 a hard-coded ``.py`` / ``ast`` / ``pytest`` assumption.
 
 The registry currently ships :class:`PythonBackend`, :class:`GoBackend`,
-:class:`RustBackend`, and :class:`TypeScriptBackend` implementations. Decoder stages resolve the backend
+:class:`RustBackend`, :class:`TypeScriptBackend`, :class:`CBackend`, and
+:class:`CppBackend` implementations. Decoder stages resolve the backend
 from explicit feature-spec language, RPG metadata, or source-file
 dominant language.
 
@@ -33,6 +34,8 @@ from .backend import (
     resolve_decoder_language,
     resolve_target_language,
 )
+from .c_backend import CBackend
+from .cpp_backend import CppBackend
 from .go_backend import GoBackend
 from .prompt_directive import language_directive, with_language_directive
 from .prompt_hints import PromptHints
@@ -50,9 +53,13 @@ register_backend(PythonBackend)
 register_backend(GoBackend)
 register_backend(RustBackend)
 register_backend(TypeScriptBackend)
+register_backend(CBackend)
+register_backend(CppBackend)
 
 __all__ = [
     "EnvHandle",
+    "CBackend",
+    "CppBackend",
     "GoBackend",
     "LanguageBackend",
     "PromptHints",

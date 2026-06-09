@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Pre-check for rpg_edit: verify repo_rpg.json and dep_graph.json exist and are loadable."""
+"""Pre-check for rpg_edit inputs and the embedded dependency graph."""
 
 import argparse
 import json
