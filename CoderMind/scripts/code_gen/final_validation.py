@@ -32,7 +32,8 @@ from code_gen.sub_agent import dispatch_sub_agent
 from code_gen.test_runner import (
     ensure_deps_installed,
     get_dev_python,
-    run_pytest,
+    resolve_test_backend,
+    run_project_tests,
 )
 
 logger = logging.getLogger(__name__)
@@ -67,20 +68,22 @@ def final_test(
     except RuntimeError as exc:
         return {"success": False, "error": str(exc)}
 
-    # Ensure all deps
-    try:
-        ensure_deps_installed(repo_path)
-    except Exception as exc:
-        logger.warning("Dependency install issue: %s", exc)
+    backend = resolve_test_backend()
+    if backend.name == "python":
+        try:
+            ensure_deps_installed(repo_path)
+        except Exception as exc:
+            logger.warning("Dependency install issue: %s", exc)
 
     # Run full test suite
-    result = run_pytest(
+    result = run_project_tests(
         repo_path,
         timeout=DEFAULT_PYTEST_OVERALL_TIMEOUT,
         extra_args=[
             "-v", "--tb=short",
             f"--timeout={DEFAULT_TEST_TIMEOUT}", "--timeout-method=thread",
         ],
+        backend=backend,
     )
 
     result_dict = {
@@ -150,13 +153,14 @@ def final_test(
                 )
                 if response:
                     # Verify repair didn't break existing tests
-                    recheck = run_pytest(
+                    recheck = run_project_tests(
                         repo_path,
                         timeout=DEFAULT_PYTEST_OVERALL_TIMEOUT,
                         extra_args=[
                             "-v", "--tb=short",
                             f"--timeout={DEFAULT_TEST_TIMEOUT}", "--timeout-method=thread",
                         ],
+                        backend=backend,
                     )
                     if not recheck.success:
                         logger.warning(

@@ -78,6 +78,7 @@ from code_gen.prompts import (
 from code_gen.test_runner import (
     ensure_dev_venv,
     ensure_deps_installed,
+    resolve_test_backend,
 )
 from code_gen.rpg_updater import run_rpg_update
 
@@ -148,6 +149,22 @@ MAX_BATCH_ATTEMPTS = 2               # initial + 1 auto-retry
 # (``code_gen.batch_prompts`` / ``.post_verify`` / ``.final_validation`` /
 # ``.global_review``) live in ``code_gen._constants``; the orchestrator
 # only needs the sub-agent timeout directly for its argparse default.
+
+
+def _setup_codegen_environment(repo_path: Path) -> None:
+    """Prepare the language-specific codegen environment."""
+    backend = resolve_test_backend()
+    if backend.name != "python":
+        logger.info("Skipping Python venv setup for %s codegen", backend.display_name)
+        return
+
+    try:
+        created_new, venv_path = ensure_dev_venv(repo_path)
+        if created_new:
+            logger.info("Created dev venv at %s", venv_path)
+        ensure_deps_installed(repo_path)
+    except Exception as exc:
+        logger.warning("Venv setup issue (non-fatal): %s", exc)
 
 
 
@@ -608,15 +625,9 @@ def run_batch(
 
     logger.info("Branch: %s (initial_commit=%s)", branch_name, initial_commit[:8] if initial_commit else "none")
 
-    # ── Step 4: Setup venv ───────────────────────────────────────────
+    # ── Step 4: Setup language environment ──────────────────────────
 
-    try:
-        created_new, venv_path = ensure_dev_venv(repo_path)
-        if created_new:
-            logger.info("Created dev venv at %s", venv_path)
-        ensure_deps_installed(repo_path)
-    except Exception as exc:
-        logger.warning("Venv setup issue (non-fatal): %s", exc)
+    _setup_codegen_environment(repo_path)
 
     # ── Step 5: Build prompts ────────────────────────────────────────
 

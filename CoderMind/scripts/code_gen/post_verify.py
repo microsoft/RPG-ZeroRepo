@@ -30,7 +30,8 @@ from code_gen.prompts import is_project_docs_batch
 from code_gen.test_runner import (
     ensure_deps_installed,
     find_related_test_files,
-    run_pytest,
+    resolve_test_backend,
+    run_project_tests,
 )
 
 logger = logging.getLogger(__name__)
@@ -115,17 +116,19 @@ def post_verify(
         test_files if test_files else "all tests",
     )
 
-    # Ensure deps are installed (sub-agent may have added new ones)
-    try:
-        ensure_deps_installed(repo_path)
-    except Exception as exc:
-        logger.warning("ensure_deps_installed failed: %s", exc)
+    backend = resolve_test_backend(valid_files=test_files or None)
+    if backend.name == "python":
+        try:
+            ensure_deps_installed(repo_path)
+        except Exception as exc:
+            logger.warning("ensure_deps_installed failed: %s", exc)
 
-    result = run_pytest(
+    result = run_project_tests(
         repo_path,
         test_files=test_files or None,
         timeout=timeout,
         extra_args=[f"--timeout={DEFAULT_TEST_TIMEOUT}", "--timeout-method=thread"],
+        backend=backend,
     )
 
     # Build summary

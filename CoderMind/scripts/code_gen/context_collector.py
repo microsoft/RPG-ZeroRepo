@@ -21,7 +21,9 @@ from common.import_normalizer import (
     ensure_future_annotations,
     fix_missing_stdlib_imports,
 )
+from common.language_meta import extract_language_metadata
 from common.utils import get_project_background_context
+from decoder_lang import get_backend
 
 if TYPE_CHECKING:
     from common.task_batch import PlannedTask
@@ -69,12 +71,14 @@ def write_interface_skeletons(
         return result
 
     subtrees = interfaces.get("subtrees", {})
+    primary_language, _ = extract_language_metadata(interfaces)
+    backend = get_backend(primary_language)
 
-    # Detect import prefix from file paths in interfaces.json.
-    # If file paths start with "src/", imports should use "src." prefix.
-    import_prefix = detect_project_import_prefix(
-        interfaces_subtrees=subtrees,
-    )
+    import_prefix = ""
+    if backend.name == "python":
+        import_prefix = detect_project_import_prefix(
+            interfaces_subtrees=subtrees,
+        )
 
     for _subtree_name, subtree_data in subtrees.items():
         file_interfaces = subtree_data.get("interfaces", {})
@@ -83,15 +87,12 @@ def write_interface_skeletons(
             if not file_code or not file_code.strip():
                 continue
 
-            # Normalize import prefixes before writing
-            if import_prefix:
+            if backend.name == "python" and import_prefix:
                 file_code = normalize_code(file_code, import_prefix)
 
-            # Add from __future__ import annotations to prevent forward ref errors
-            file_code = ensure_future_annotations(file_code)
-
-            # Fix missing stdlib imports (dataclass, Callable, etc.)
-            file_code = fix_missing_stdlib_imports(file_code)
+            if backend.name == "python":
+                file_code = ensure_future_annotations(file_code)
+                file_code = fix_missing_stdlib_imports(file_code)
 
             full_path = repo_path / file_path
             if full_path.exists():

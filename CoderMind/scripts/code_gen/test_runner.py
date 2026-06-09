@@ -24,6 +24,14 @@ from .test_output_parser import analyze_test_output
 from common.llm_client import LLMClient
 import json as _json
 from common.import_normalizer import normalize_files
+from common.paths import FEATURE_SPEC_FILE, REPO_RPG_FILE
+from decoder_lang import (
+    EnvHandle,
+    LanguageBackend,
+    ToolchainUnavailable,
+    get_backend,
+    resolve_decoder_language,
+)
 
 
 def _set_pdeathsig() -> None:
@@ -402,6 +410,117 @@ def run_pytest(
             success=False,
             return_code=-1,
             output=f"Test execution failed: {str(e)}",
+            test_files=test_files or [],
+        )
+
+
+def _load_json_if_exists(path: Path) -> Any:
+    """Load JSON from ``path`` or return None when unavailable."""
+    if not path.exists():
+        return None
+    try:
+        with open(path, "r", encoding="utf-8") as file:
+            return _json.load(file)
+    except (OSError, _json.JSONDecodeError):
+        return None
+
+
+def resolve_test_backend(valid_files: Optional[List[str]] = None) -> LanguageBackend:
+    """Resolve the backend that should run codegen verification tests."""
+    feature_spec = _load_json_if_exists(FEATURE_SPEC_FILE)
+    rpg_obj = _load_json_if_exists(REPO_RPG_FILE)
+    language = resolve_decoder_language(
+        feature_spec=feature_spec,
+        rpg_obj=rpg_obj,
+        valid_files=valid_files,
+    )
+    return get_backend(language)
+
+
+def run_project_tests(
+    repo_root: Path,
+    test_files: Optional[List[str]] = None,
+    timeout: int = 300,
+    extra_args: Optional[List[str]] = None,
+    env: Optional[Dict[str, str]] = None,
+    backend: Optional[LanguageBackend] = None,
+) -> TestResult:
+    """Run the target language's native project test command."""
+    selected_backend = backend or resolve_test_backend(valid_files=test_files)
+    if selected_backend.name == "python":
+        return run_pytest(
+            repo_root,
+            test_files=test_files,
+            timeout=timeout,
+            extra_args=extra_args,
+            env=env,
+        )
+
+    try:
+        env_handle = selected_backend.detect_env(repo_root) or EnvHandle(
+            project_root=repo_root.resolve(),
+        )
+        cmd = selected_backend.test_command(env_handle)
+    except (ToolchainUnavailable, NotImplementedError, OSError) as exc:
+        return TestResult(
+            success=False,
+            return_code=-1,
+            output=f"{selected_backend.display_name} test command unavailable: {exc}",
+            test_files=test_files or [],
+        )
+
+    run_env = os.environ.copy()
+    if env:
+        run_env.update(env)
+
+    try:
+        proc = subprocess.Popen(
+            cmd,
+            cwd=repo_root,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            env=run_env,
+            start_new_session=True,
+            preexec_fn=_set_pdeathsig,
+        )
+        try:
+            stdout_data, stderr_data = proc.communicate(timeout=timeout)
+        except BaseException:
+            try:
+                os.killpg(os.getpgid(proc.pid), signal.SIGTERM)
+            except Exception:
+                proc.kill()
+            proc.wait()
+            raise
+
+        output = stdout_data
+        if stderr_data:
+            output += "\n\nSTDERR:\n" + stderr_data
+        parsed = selected_backend.parse_test_output(output, proc.returncode)
+        return TestResult(
+            success=parsed.status == "passed",
+            return_code=proc.returncode,
+            output=output,
+            test_files=test_files or [],
+            passed=parsed.passed_count,
+            failed=parsed.failed_count,
+            errors=parsed.error_count,
+            skipped=parsed.skipped_count,
+            duration=parsed.duration_sec,
+        )
+    except subprocess.TimeoutExpired:
+        return TestResult(
+            success=False,
+            return_code=-1,
+            output=f"Test execution timed out after {timeout} seconds",
+            test_files=test_files or [],
+        )
+    except Exception as exc:
+        return TestResult(
+            success=False,
+            return_code=-1,
+            output=f"Test execution failed: {exc}",
             test_files=test_files or [],
         )
 

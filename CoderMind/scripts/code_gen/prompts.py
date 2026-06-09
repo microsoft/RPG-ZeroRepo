@@ -20,6 +20,30 @@ _sys.path.insert(0, str(_Path(__file__).resolve().parent.parent))
 from common.paths import REPO_DIR as _REPO_DIR
 
 
+_FENCE_BY_SUFFIX = {
+    ".py": "python",
+    ".go": "go",
+    ".rs": "rust",
+    ".ts": "typescript",
+    ".tsx": "typescript",
+    ".js": "javascript",
+    ".jsx": "javascript",
+    ".c": "c",
+    ".h": "c",
+    ".cpp": "cpp",
+    ".cc": "cpp",
+    ".cxx": "cpp",
+    ".hpp": "cpp",
+    ".hh": "cpp",
+    ".hxx": "cpp",
+}
+
+
+def _markdown_fence_for_path(file_path: str) -> str:
+    """Return a markdown code fence language for ``file_path``."""
+    return _FENCE_BY_SUFFIX.get(_Path(file_path).suffix.lower(), "text")
+
+
 # ============================================================================
 # Dependency Context Formatter
 # ============================================================================
@@ -68,7 +92,7 @@ def _format_skeleton_context(file_path: str) -> str:
         "signatures, docstrings, type hints) from the design stage. **Your tests MUST\n"
         "target ONLY the classes, methods, and signatures defined below.** Do NOT invent\n"
         "methods or features that are not present in this skeleton.\n\n"
-        f"```python\n{content}\n```\n"
+        f"```{_markdown_fence_for_path(file_path)}\n{content}\n```\n"
     )
 
 
@@ -88,7 +112,7 @@ def _format_current_source_context(file_path: str) -> str:
         "previous step. **Your tests MUST match the real API** (class names, method names,\n"
         "signatures, return types) as shown below. Fix any tests that expect methods or\n"
         "behaviors not present in this implementation.\n\n"
-        f"```python\n{content}\n```\n"
+        f"```{_markdown_fence_for_path(file_path)}\n{content}\n```\n"
     )
 
 
@@ -338,8 +362,8 @@ def init_test_gen_prompt(
             "- Keep tests deterministic, readable, and maintainable.\n"
             "- If the expected behavior is unclear, encode the most reasonable interpretation\n"
             "  and add comments explaining your assumptions.\n"
-            "- **Only import packages available in the environment.** Use Python standard library\n"
-            "  and internal project modules (`src.*`) freely. For third-party packages, only import\n"
+            "- **Only import packages available in the environment.** Use the target language's standard library\n"
+            "  and internal project modules freely. For third-party packages, only import\n"
             "  them if they are already used by existing source files. Never add unused imports.\n"
             "- **CRITICAL: Only test classes, methods, and functions that exist in the skeleton\n"
             "  file below (if provided). Do NOT invent or assume additional methods, features,\n"
@@ -475,8 +499,8 @@ def init_code_gen_prompt(
             "  prefer the same modules and import style (to stay consistent with the codebase).\n"
             "- If you introduce new symbols in this file, also add or update the import statements so that the module can be\n"
             "  imported and executed without NameError or ImportError.\n"
-            "- **Only import packages available in the environment.** Use Python standard library\n"
-            "  and internal project modules (`src.*`) freely. For third-party packages, only import\n"
+            "- **Only import packages available in the environment.** Use the target language's standard library\n"
+            "  and internal project modules freely. For third-party packages, only import\n"
             "  them if they are already used by existing source files. Before adding any import,\n"
             "  verify you actually USE the imported name in your code — never add unused imports.\n"
             "\n**Plan first — output a brief summary** (3–5 sentences) before writing any code:\n"
@@ -501,7 +525,7 @@ def init_code_gen_prompt(
             "- Fix only what is needed to make integration tests pass.\n"
             "- Read the actual source files to understand current implementation before changing.\n"
             "- Do NOT refactor working code. Only fix broken connections.\n"
-            "- Do NOT create main.py \u2014 it will be created in a later task.\n"
+            "- Do NOT create the project entry point \u2014 it will be created in a later task.\n"
             "- Do NOT edit test files at this stage.\n"
         )
     elif task_type == "final_test_docs":
@@ -521,7 +545,7 @@ def init_code_gen_prompt(
             "- Fix only what is needed to make end-to-end tests pass.\n"
             "- Read the actual source files to understand current implementation before changing.\n"
             "- Do NOT refactor working code. Only fix broken connections.\n"
-            "- Do NOT create main.py \u2014 it will be created in the next task.\n"
+            "- Do NOT create the project entry point \u2014 it will be created in the next task.\n"
             "- Do NOT edit test files at this stage.\n"
         )
     else:
@@ -738,7 +762,7 @@ def init_project_file_gen_prompt(
     """Generate prompt for project file generation.
     
     This is used after all core implementation is complete.
-    Project files include: requirements.txt, README.md, main.py, etc.
+    Project files include dependency manifests, README.md, entry points, etc.
     
     Args:
         task: Task description with detailed instructions
@@ -790,11 +814,11 @@ def build_project_file_prompt_from_batch(
 
 
 def is_project_file_batch(batch: "PlannedTask") -> bool:
-    """Check if a batch is for project file generation (requirements, docs, main entry)."""
+    """Check if a batch is for project file generation."""
     return batch.task_type in [
-        "project_requirements",     # requirements.txt (needs import test)
+        "project_requirements",     # language dependency metadata
         "project_docs",             # README.md (no tests)
-        "main_entry",               # main.py (needs run test)
+        "main_entry",               # language entry point (needs run test)
     ]
 
 
@@ -806,7 +830,7 @@ def is_project_docs_batch(batch: "PlannedTask") -> bool:
 def needs_project_file_test(batch: "PlannedTask") -> bool:
     """Check if a project file batch needs testing."""
     return batch.task_type in [
-        "project_requirements",  # import validation
+        "project_requirements",  # dependency/import validation
         "main_entry",            # run test
     ]
 
@@ -891,9 +915,9 @@ def env_fix_prompt(
         f"{test_result}\n\n"
         "Guidelines:\n"
         "- Fix by REMOVING the unused import if the imported name is not actually used in the code,\n"
-        "  OR by replacing the third-party functionality with Python standard library equivalents.\n"
+        "  OR by replacing the third-party functionality with target-language standard library equivalents.\n"
         "- Search the source file for actual usage of the imported name before deciding.\n"
-        "- Do NOT attempt to install packages or modify requirements.txt.\n"
+        "- Do NOT attempt to install packages or modify dependency manifests.\n"
         "- Do NOT modify test files.\n"
         "- Prefer minimal, targeted changes.\n"
         "- Logical test failures may remain — that is acceptable.\n"
