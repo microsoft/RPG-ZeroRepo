@@ -15,6 +15,7 @@ from func_design.base_class_agent import (  # noqa: E402
     validate_data_structures,
 )
 from func_design.interface_agent import validate_interface  # noqa: E402
+from func_design.interface_prompts import SUBTREE_INTERFACE_PROMPT  # noqa: E402
 from plan_tasks import TaskPlanner  # noqa: E402
 
 
@@ -73,6 +74,12 @@ def test_interface_validation_accepts_go_declaration() -> None:
 
     assert ok, error
     assert "struct Task" in info["declarations"]
+
+
+def test_subtree_interface_prompt_is_language_neutral() -> None:
+    assert "with `pass` bodies" not in SUBTREE_INTERFACE_PROMPT
+    assert "All function/method bodies must use `pass`" not in SUBTREE_INTERFACE_PROMPT
+    assert "target-language declaration stubs" in SUBTREE_INTERFACE_PROMPT
 
 
 def test_task_planner_project_tasks_use_go_conventions() -> None:

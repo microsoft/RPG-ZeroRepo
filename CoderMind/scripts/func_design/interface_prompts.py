@@ -15,21 +15,21 @@ The goal is not to write arbitrary APIs, but to define interfaces that integrate
 ## Objective
 For each invocation:
 1. Select exactly one assigned feature, or a small group of closely related features.
-2. Define exactly one public interface for it (either a function or a class).
+2. Define exactly one public target-language interface for it.
 3. Provide the following elements:
    - All required imports:
      - standard library imports
      - external dependency imports
      - internal project imports
    - The interface definition:
-     - function or class signature only
-     - no implementation logic (function and method bodies must contain only `pass`)
-   - A precise docstring documenting:
+     - target-language declaration stubs only
+     - no implementation logic; function and method bodies must use a parseable target-language placeholder
+   - Precise target-language documentation comments or docstrings documenting:
      - purpose and intended usage context within the repository
      - parameters, including names, types, and semantics
      - return type and meaning
      - assumptions, constraints, error conditions, and edge cases
-4. Do not generate placeholder logic or pseudo-implementation. Only define signatures and `pass`.
+4. Do not generate implementation logic or pseudo-implementation.
 5. Interface design is incremental. Each round may define one or a small number of interfaces, but each must be self-contained and justified.
 
 ## Repository Context and Constraints
@@ -41,15 +41,15 @@ All interfaces must:
 5. Avoid speculative abstractions that are unrelated to the repository's direction.
 
 Interfaces should feel like natural extensions of the repository, not isolated standalone utilities.
-## Function vs Class Decision Rules
-A function is appropriate when:
+## Interface Shape Decision Rules
+A function or free operation is appropriate when:
 - the operation is conceptually a single computation or transformation,
 - the logic is stateless,
 - configuration is provided entirely by parameters,
 - the operation does not manage lifecycle or persistent state.
 - Helper functions are permitted, but only when they clearly support higher-level components rather than replacing them.
 
-A class is appropriate when:
+A class, struct, interface, trait, type, or receiver-backed method set is appropriate when:
 - configuration persists across multiple calls,
 - internal state influences behavior,
 - multiple related operations belong together,
@@ -126,9 +126,9 @@ For each interface you design, reason through:
 
 Constraints:
 - One interface per code string, covering one feature or a tight group of related features.
-- The code must define either one top-level function OR one top-level class (with zero or more methods).
-- All function/method bodies must use `pass`.
-- Public functions and classes must have docstrings.
+- The code must define exactly one cohesive target-language declaration group.
+- Function and method bodies must use a parseable target-language placeholder and contain no implementation logic.
+- Public declarations must have target-language documentation comments or docstrings.
 - Prefer explicit, custom containers and typed structures; do not use pandas.DataFrame or other third-party tabular types.
 """.strip()
 
@@ -151,15 +151,15 @@ For each file:
 2. Each interface covers one feature or a small group of closely related features.
 3. For each interface, provide:
    - Required imports (standard library, external, internal project)
-   - The interface definition: function or class signature only, with `pass` bodies (no implementation logic)
-   - A docstring covering: purpose, parameters with types and semantics, return type, and notable constraints or edge cases
+  - The interface definition: target-language declaration stubs with no implementation logic
+  - Target-language documentation comments or docstrings covering: purpose, parameters with types and semantics, return type, and notable constraints or edge cases
 4. You MAY import and reuse symbols from upstream context, base classes, and earlier files in this batch.
 5. **Glue/Orchestration Code**: If you need to create orchestrator classes, manager facades, or data structures that integrate multiple features but don't map to any assigned feature, you MAY create NEW feature paths for them. Simply include these new feature paths in the `features` field. New feature paths should follow the same naming convention as existing ones (e.g., "Subtree Name/category/feature name").
 
 ## Design Guidelines
-### Function vs Class
-Use a **function** for stateless, single-operation computations where all configuration is provided by parameters.
-Use a **class** when state persists across calls, multiple related operations belong together, or subclassing/pluggable behavior is expected.
+### Interface Shape
+Use a free function for stateless, single-operation computations where all configuration is provided by parameters.
+Use a class, struct, interface, trait, type, or receiver-backed method set when state persists across calls, multiple related operations belong together, or pluggable behavior is expected.
 
 ### Cohesion and Grouping
 - Each interface must correspond to a single coherent responsibility.
@@ -229,9 +229,9 @@ For each file in order, reason through:
 
 Constraints:
 - file_path must match exactly one of the file paths specified in the task.
-- One interface per code string: either one top-level function OR one top-level class.
-- All function/method bodies must use `pass`.
-- Public functions and classes must have docstrings.
+- One interface per code string: exactly one cohesive target-language declaration group.
+- Function and method bodies must use a parseable target-language placeholder and contain no implementation logic.
+- Public declarations must have target-language documentation comments or docstrings.
 - For most interfaces, use the assigned feature paths from the task.
 - For glue/orchestration code that doesn't map to any assigned feature, you may create NEW feature paths following the naming convention: "Subtree Name/category/feature name".
 """.strip()

@@ -1212,7 +1212,7 @@ Requirements:
 {features_str}
 - When calling `design_itfs_for_feature`, ONLY use feature paths listed above.
 - Do NOT introduce new/unspecified feature paths.
-- Define interfaces only (imports + signature + docstring + `pass`).
+- Define interfaces only (imports + target-language declaration stubs + target-language documentation).
 - Prefer one function/class per feature or a small group of closely related features.
 - Keep each interface focused and with narrow responsibility.
 - You MAY import and reuse symbols from upstream context and base classes.

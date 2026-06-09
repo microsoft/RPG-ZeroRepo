@@ -825,7 +825,8 @@ class InterfaceDesigner:
         global_registry = result.pop("_global_registry", None)
         import_warnings = result.pop("_import_warnings", [])
         
-        if global_registry and result.get("success"):
+        review_language = primary_language or "python"
+        if global_registry and result.get("success") and review_language == "python":
             self.logger.info("Starting global interface review phase...")
             print("\n" + "=" * 70)
             print("GLOBAL INTERFACE REVIEW")
@@ -972,6 +973,19 @@ class InterfaceDesigner:
         else:
             if not global_registry:
                 self.logger.info("GlobalInterfaceRegistry not available, skipping global review")
+            elif result.get("success") and review_language != "python":
+                self.logger.info(
+                    "Skipping global interface review for target language: %s",
+                    review_language,
+                )
+                result["global_review"] = {
+                    "passed": True,
+                    "skipped": True,
+                    "reason": (
+                        "Global interface review currently supports Python "
+                        "interface repair only."
+                    ),
+                }
         
         # Update trajectory
         if self.trajectory and self._current_step_id:
