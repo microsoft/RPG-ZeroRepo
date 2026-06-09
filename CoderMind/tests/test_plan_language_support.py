@@ -330,3 +330,40 @@ def test_interface_validation_accepts_typescript_declare_function() -> None:
 
     assert ok, error
     assert "function runTasklite" in info["declarations"]
+
+
+def test_interface_validation_accepts_typescript_jsdoc_backticks() -> None:
+    backend = get_backend("typescript")
+    ok, error, info = validate_interface(
+        {
+            "features": [
+                "CLI Application/store file/path selection/select default file",
+                "CLI Application/store file/path selection/select override file",
+            ],
+            "code": """```typescript
+import { homedir } from 'node:os';
+import { join } from 'node:path';
+
+/**
+ * Resolve the filesystem path for the JSON task store.
+ *
+ * When an override path is supplied, it is returned as-is.
+ * Otherwise the default path is computed as `~/.tasklite.json`.
+ * Empty-string values are treated as "no override".
+ *
+ * @param override - Optional explicit path to the store file.
+ * @returns Absolute filesystem path to the JSON store file.
+ */
+export function resolveStorePath(override?: string): string;
+```""",
+        },
+        {
+            "CLI Application/store file/path selection/select default file",
+            "CLI Application/store file/path selection/select override file",
+        },
+        set(),
+        backend=backend,
+    )
+
+    assert ok, error
+    assert "function resolveStorePath" in info["declarations"]

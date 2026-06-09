@@ -32,6 +32,8 @@ _TS_ENUM_RE = re.compile(
 _PLACEHOLDER_RE = re.compile(
     r"(?is)\b(?:TODO|PLACEHOLDER|NOT IMPLEMENTED|throw\s+new\s+Error\s*\()"
 )
+_TS_LINE_COMMENT_RE = re.compile(r"//.*?$", re.MULTILINE)
+_TS_BLOCK_COMMENT_RE = re.compile(r"/\*.*?\*/", re.DOTALL)
 
 
 class TypeScriptBackend:
@@ -77,11 +79,14 @@ class TypeScriptBackend:
         return ok and bool(_PLACEHOLDER_RE.search(code))
 
     def syntax_check(self, code: str, path: str = "<string>") -> tuple[bool, str | None]:
-        return self._parser().validate_syntax(self._parse_path(path), code)
+        return self._parser().validate_syntax(
+            self._parse_path(path),
+            self._parse_source(code),
+        )
 
     def list_code_units(self, code: str, path: str = "<string>") -> list[Any]:
         parse_path = self._parse_path(path)
-        result = self._parse(code, parse_path)
+        result = self._parse(self._parse_source(code), parse_path)
         units = [] if result is None or result.syntax_error else [
             unit for unit in result.units
             if unit.unit_type in {"class", "function", "method"}
@@ -99,7 +104,7 @@ class TypeScriptBackend:
         return " ".join(first.split()) or (getattr(unit, "name", "") or "")
 
     def list_imports(self, code: str, path: str = "<string>") -> list[Any]:
-        result = self._parse(code, path)
+        result = self._parse(self._parse_source(code), path)
         if result is None or result.syntax_error:
             return []
         return [dep for dep in result.dependencies if dep.relation == "imports"]
@@ -300,6 +305,10 @@ Repository purpose: {context.repo_info}
         if path == "<string>" or not (path.endswith(".ts") or path.endswith(".tsx")):
             return "src/index.ts"
         return path
+
+    @staticmethod
+    def _parse_source(code: str) -> str:
+        return _TS_LINE_COMMENT_RE.sub("", _TS_BLOCK_COMMENT_RE.sub("", code))
 
     def _parse(self, code: str, path: str):
         try:
