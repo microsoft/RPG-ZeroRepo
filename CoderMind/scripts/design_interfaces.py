@@ -130,6 +130,32 @@ def collect_rpg_feature_paths(rpg_path: Path) -> set:
     return paths
 
 
+def _reconcile_global_review_after_orphan_review(
+    global_review: dict,
+    orphan_keys: list[str],
+    retained_keys: set[str],
+    pruned_keys: set[str],
+    feature_orphans: list[dict],
+) -> None:
+    """Update global review counts after orphan retain/prune decisions."""
+    resolved_keys = retained_keys | pruned_keys
+    unresolved_keys = sorted(set(orphan_keys) - resolved_keys)
+    unresolved_features = [
+        item for item in feature_orphans
+        if f"{item.get('file_path', '')}::{item.get('unit_name', '')}" in unresolved_keys
+    ]
+
+    global_review["orphan_units_count"] = len(unresolved_keys)
+    global_review["feature_orphans_count"] = len(unresolved_features)
+    global_review["unresolved_orphan_units"] = unresolved_keys
+    global_review["unresolved_orphan_features"] = unresolved_features
+    global_review["passed"] = (
+        len(unresolved_keys) == 0
+        and len(unresolved_features) == 0
+        and global_review.get("unapplied_fixes_count", 0) == 0
+    )
+
+
 def extract_known_classes_and_types(base_classes: Dict[str, Any]) -> tuple:
     """Extract known base class names and type names from base_classes.json.
     
@@ -887,7 +913,8 @@ class InterfaceDesigner:
             # =================================================================
             # First, find orphan units
             orphan_keys = store.find_orphan_units()
-            prune_summary = None  # Initialize to None
+            orphan_review_result = None
+            prune_summary = None
 
             if orphan_keys:
                 print(f"\nFound {len(orphan_keys)} orphan interface units (no call edges)")
@@ -965,6 +992,15 @@ class InterfaceDesigner:
             if rpg_summary.pruned_feature_nodes > 0:
                 result["global_review"]["rpg_pruned_nodes"] = (
                     rpg_summary.pruned_feature_nodes + rpg_summary.pruned_parent_nodes
+                )
+
+            if orphan_review_result is not None:
+                _reconcile_global_review_after_orphan_review(
+                    global_review=result["global_review"],
+                    orphan_keys=orphan_keys,
+                    retained_keys=set(orphan_review_result.keys_to_retain),
+                    pruned_keys=set(orphan_review_result.keys_to_prune),
+                    feature_orphans=review_result.get("final_feature_orphans", []),
                 )
 
             # Update dependency summary

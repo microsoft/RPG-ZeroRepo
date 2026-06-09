@@ -14,7 +14,7 @@ from func_design.base_class_agent import (  # noqa: E402
     validate_base_classes_model,
     validate_data_structures,
 )
-from func_design.interface_agent import validate_interface  # noqa: E402
+from func_design.interface_agent import SubtreeInterfaceAgent, validate_interface  # noqa: E402
 from func_design.interface_prompts import SUBTREE_INTERFACE_PROMPT  # noqa: E402
 from plan_tasks import TaskPlanner  # noqa: E402
 
@@ -76,10 +76,59 @@ def test_interface_validation_accepts_go_declaration() -> None:
     assert "struct Task" in info["declarations"]
 
 
+def test_interface_validation_accepts_python_backend_docstring() -> None:
+    backend = get_backend("python")
+    ok, error, info = validate_interface(
+        {
+            "features": ["Application Infrastructure/server bootstrap/application factory setup"],
+            "code": (
+                "from flask import Flask\n\n"
+                "def create_app() -> Flask:\n"
+                "    \"\"\"Create and configure the Flask application.\"\"\"\n"
+                "    ...\n"
+            ),
+        },
+        {"Application Infrastructure/server bootstrap/application factory setup"},
+        set(),
+        backend=backend,
+    )
+
+    assert ok, error
+    assert "function create_app" in info["declarations"]
+
+
 def test_subtree_interface_prompt_is_language_neutral() -> None:
     assert "with `pass` bodies" not in SUBTREE_INTERFACE_PROMPT
     assert "All function/method bodies must use `pass`" not in SUBTREE_INTERFACE_PROMPT
     assert "target-language declaration stubs" in SUBTREE_INTERFACE_PROMPT
+
+
+def test_typescript_subtree_prompt_omits_python_import_convention() -> None:
+    agent = SubtreeInterfaceAgent(target_language="typescript")
+    prompt = agent._build_subtree_user_prompt(
+        remaining_files=["src/tasklite-cli/cli/main.ts"],
+        file_states={
+            "src/tasklite-cli/cli/main.ts": {
+                "target_features": {"CLI Application/startup/process bootstrap"},
+                "covered_features": set(),
+                "all_code_blocks": [],
+            }
+        },
+        file_info_map={
+            "src/tasklite-cli/cli/main.ts": {
+                "path": "src/tasklite-cli/cli/main.ts",
+                "feature_paths": ["CLI Application/startup/process bootstrap"],
+            }
+        },
+        repo_info="TypeScript CLI task tracker.",
+        data_flow_str="No data flow.",
+        base_classes_str="No base classes.",
+        upstream_context="No upstream interfaces.",
+        last_error="",
+    )
+
+    assert "Import Convention" not in prompt
+    assert "from src.tasklite-cli" not in prompt
 
 
 def test_task_planner_project_tasks_use_go_conventions() -> None:

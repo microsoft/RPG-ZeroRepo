@@ -953,6 +953,17 @@ def check_has_docstring(code: str) -> Tuple[bool, str]:
     return True, ""
 
 
+def _unit_has_docstring(unit: Any) -> bool:
+    """Return whether a parsed Python unit has a docstring."""
+    docstring = getattr(unit, "docstring", None)
+    if docstring:
+        return True
+    node = (getattr(unit, "extra", {}) or {}).get("ast_node")
+    if isinstance(node, (ast.ClassDef, ast.FunctionDef, ast.AsyncFunctionDef)):
+        return bool(ast.get_docstring(node))
+    return False
+
+
 def validate_interface(
     interface: Dict[str, Any],
     target_features: Set[str],
@@ -1018,7 +1029,7 @@ def validate_interface(
 
     if backend.name == "python":
         for unit in interface_units:
-            if not unit.docstring and unit.unit_type in ["function", "class"]:
+            if not _unit_has_docstring(unit) and unit.unit_type in ["function", "class"]:
                 errors.append(
                     f"Missing docstring for {unit.unit_type} '{unit.name}' "
                     f"in features {features}"
@@ -1713,7 +1724,7 @@ class SubtreeInterfaceAgent:
         # Assemble user prompt
         # Detect import convention from file paths
         import_convention = ""
-        if remaining_files:
+        if remaining_files and self.backend.name == "python":
             # Infer prefix from file paths in this subtree
             sample_path = remaining_files[0]
             parts = sample_path.replace("\\", "/").split("/")

@@ -149,6 +149,69 @@ def test_design_interfaces_main_fails_on_incomplete_coverage(
     assert saved["success"] is False
 
 
+def test_global_review_reconciles_retained_orphans() -> None:
+    global_review = {
+        "feature_orphans_count": 1,
+        "orphan_units_count": 1,
+        "unapplied_fixes_count": 0,
+        "passed": False,
+    }
+
+    design_interfaces._reconcile_global_review_after_orphan_review(
+        global_review=global_review,
+        orphan_keys=["src/app.py::function main"],
+        retained_keys={"src/app.py::function main"},
+        pruned_keys=set(),
+        feature_orphans=[
+            {
+                "file_path": "src/app.py",
+                "unit_name": "function main",
+                "features": ["App/run"],
+            }
+        ],
+    )
+
+    assert global_review["passed"] is True
+    assert global_review["orphan_units_count"] == 0
+    assert global_review["feature_orphans_count"] == 0
+
+
+def test_global_review_keeps_unresolved_orphans_failing() -> None:
+    global_review = {
+        "feature_orphans_count": 2,
+        "orphan_units_count": 2,
+        "unapplied_fixes_count": 0,
+        "passed": False,
+    }
+
+    design_interfaces._reconcile_global_review_after_orphan_review(
+        global_review=global_review,
+        orphan_keys=[
+            "src/app.py::function main",
+            "src/app.py::function unused",
+        ],
+        retained_keys={"src/app.py::function main"},
+        pruned_keys=set(),
+        feature_orphans=[
+            {
+                "file_path": "src/app.py",
+                "unit_name": "function main",
+                "features": ["App/run"],
+            },
+            {
+                "file_path": "src/app.py",
+                "unit_name": "function unused",
+                "features": ["App/unused"],
+            },
+        ],
+    )
+
+    assert global_review["passed"] is False
+    assert global_review["orphan_units_count"] == 1
+    assert global_review["feature_orphans_count"] == 1
+    assert global_review["unresolved_orphan_units"] == ["src/app.py::function unused"]
+
+
 def test_restore_completed_subtrees_reuses_only_complete_prefix(tmp_path: Path) -> None:
     output_path = tmp_path / "interfaces.json"
     output_path.write_text(json.dumps({
