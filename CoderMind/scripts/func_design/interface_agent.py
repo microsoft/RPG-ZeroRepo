@@ -1900,6 +1900,11 @@ class InterfaceOrchestrator:
         
         self.logger.info(f"[InterfaceOrchestrator] Processing {len(subtree_order)} subtrees")
         self.logger.info(f"[InterfaceOrchestrator] Subtree order: {subtree_order}")
+        print(
+            f"[InterfaceOrchestrator] Subtrees to process: {len(subtree_order)} "
+            f"({', '.join(subtree_order)})",
+            flush=True,
+        )
         
         # Format base classes and data structures together for prompt context
         base_classes_str = format_base_classes_and_data_structures(
@@ -1929,12 +1934,25 @@ class InterfaceOrchestrator:
             coverage_status=coverage_status,
             global_registry=global_registry,
         )
+        if restored_subtrees:
+            restored_in_order = [name for name in subtree_order if name in restored_subtrees]
+            print(
+                f"[InterfaceOrchestrator] Restored completed subtrees: "
+                f"{len(restored_subtrees)}/{len(subtree_order)} "
+                f"({', '.join(restored_in_order)})",
+                flush=True,
+            )
 
         # Process each subtree
-        for subtree_name in subtree_order:
+        for subtree_index, subtree_name in enumerate(subtree_order, start=1):
             if subtree_name in restored_subtrees:
                 self.logger.info(
                     f"[InterfaceOrchestrator] Reusing completed subtree: {subtree_name}"
+                )
+                self._print_coverage_progress(
+                    coverage_status,
+                    len(all_interfaces),
+                    len(subtree_order),
                 )
                 continue
             self.logger.info(f"[InterfaceOrchestrator] Processing subtree: {subtree_name}")
@@ -1947,6 +1965,12 @@ class InterfaceOrchestrator:
                 continue
             
             self.logger.info(f"[InterfaceOrchestrator] Found {len(file_nodes)} files for {subtree_name}")
+            print(
+                f"[InterfaceOrchestrator] Subtree {subtree_index}/{len(subtree_order)}: "
+                f"{subtree_name} ({len(file_nodes)} files, "
+                f"{self._subtree_feature_count(file_nodes)} features)",
+                flush=True,
+            )
             
             # --- Merge global registry symbols into base_class_files ---
             # This allows DependencyCollector to resolve cross-subtree callees
@@ -2108,6 +2132,11 @@ class InterfaceOrchestrator:
                     coverage_status,
                 )
             )
+            self._print_coverage_progress(
+                coverage_status,
+                len(all_interfaces),
+                len(subtree_order),
+            )
         
         # Compile final result
         final_result = self._build_result(
@@ -2259,6 +2288,31 @@ class InterfaceOrchestrator:
             self.logger.info(f"[InterfaceOrchestrator] Saved interfaces to {output}")
         except Exception as e:
             self.logger.warning(f"[InterfaceOrchestrator] Failed to save interfaces: {e}")
+
+    @staticmethod
+    def _subtree_feature_count(file_nodes: List[Dict[str, Any]]) -> int:
+        """Return the number of distinct feature paths assigned to files."""
+        features: Set[str] = set()
+        for file_node in file_nodes:
+            features.update(file_node.get("feature_paths", []))
+        return len(features)
+
+    @staticmethod
+    def _print_coverage_progress(
+        coverage_status: Dict[str, Any],
+        processed_subtrees: int,
+        total_subtrees: int,
+    ) -> None:
+        """Print compact progress for long-running interface generation."""
+        expected_features = coverage_status.get("expected_features", 0)
+        covered_features = coverage_status.get("covered_features", 0)
+        issue_count = len(coverage_status.get("issues", []) or [])
+        print(
+            f"[InterfaceOrchestrator] Progress: {processed_subtrees}/{total_subtrees} "
+            f"subtrees, {covered_features}/{expected_features} processed features "
+            f"covered, issues={issue_count}",
+            flush=True,
+        )
 
     def _load_existing_interfaces(self) -> Optional[Dict[str, Any]]:
         """Load an existing interfaces file for subtree-level resume."""
