@@ -1001,7 +1001,15 @@ def validate_interface(
 
     interface_units = [
         unit for unit in backend.list_code_units(code, f"temp_interface{backend.file_extension}")
-        if unit.unit_type in ["function", "class", "struct", "interface", "method"]
+        if unit.unit_type in [
+            "function",
+            "class",
+            "struct",
+            "interface",
+            "method",
+            "type",
+            "enum",
+        ]
         and (unit.parent is None or unit.unit_type == "method")
     ]
 
@@ -1021,7 +1029,10 @@ def validate_interface(
     
     # Build parsed info with CodeUnit objects
     functions = [u.name for u in interface_units if u.unit_type in {"function", "method"}]
-    classes = [u.name for u in interface_units if u.unit_type in {"class", "struct", "interface"}]
+    classes = [
+        u.name for u in interface_units
+        if u.unit_type in {"class", "struct", "interface", "type", "enum"}
+    ]
     declarations = [f"{u.unit_type} {u.name}" for u in interface_units]
     
     return True, "", {

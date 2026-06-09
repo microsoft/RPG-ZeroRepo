@@ -14,8 +14,21 @@ from .test_result import EnvHandle, TestFailure, TestRunResult
 
 _TS_SEGMENT_RE = re.compile(r"^[A-Za-z0-9_$-]+$")
 _TS_SEGMENT_INVALID = re.compile(r"[^A-Za-z0-9_$-]")
-_TS_INTERFACE_RE = re.compile(r"^\s*(?:export\s+)?interface\s+([A-Za-z_$][\w$]*)\b")
-_TS_TYPE_RE = re.compile(r"^\s*(?:export\s+)?type\s+([A-Za-z_$][\w$]*)\b")
+_TS_INTERFACE_RE = re.compile(
+    r"^\s*(?:export\s+)?(?:declare\s+)?interface\s+([A-Za-z_$][\w$]*)\b"
+)
+_TS_TYPE_RE = re.compile(
+    r"^\s*(?:export\s+)?(?:declare\s+)?type\s+([A-Za-z_$][\w$]*)\b"
+)
+_TS_DECLARE_FUNCTION_RE = re.compile(
+    r"^\s*(?:export\s+)?declare\s+function\s+([A-Za-z_$][\w$]*)\b"
+)
+_TS_DECLARE_CLASS_RE = re.compile(
+    r"^\s*(?:export\s+)?declare\s+(?:abstract\s+)?class\s+([A-Za-z_$][\w$]*)\b"
+)
+_TS_ENUM_RE = re.compile(
+    r"^\s*(?:export\s+)?(?:declare\s+)?enum\s+([A-Za-z_$][\w$]*)\b"
+)
 _PLACEHOLDER_RE = re.compile(
     r"(?is)\b(?:TODO|PLACEHOLDER|NOT IMPLEMENTED|throw\s+new\s+Error\s*\()"
 )
@@ -73,7 +86,7 @@ class TypeScriptBackend:
             unit for unit in result.units
             if unit.unit_type in {"class", "function", "method"}
         ]
-        units.extend(self._type_units(code, parse_path))
+        units.extend(self._declaration_units(code, parse_path))
         return units
 
     def format_signature(self, unit: Any) -> str:
@@ -294,16 +307,22 @@ Repository purpose: {context.repo_info}
         except Exception:
             return None
 
-    def _type_units(self, code: str, path: str) -> list[Any]:
+    def _declaration_units(self, code: str, path: str) -> list[Any]:
         from lang_parser import LPCodeUnit  # type: ignore
 
         units: list[Any] = []
         lines = code.splitlines()
         for index, line in enumerate(lines):
-            match = _TS_INTERFACE_RE.match(line) or _TS_TYPE_RE.match(line)
+            match = (
+                _TS_INTERFACE_RE.match(line)
+                or _TS_TYPE_RE.match(line)
+                or _TS_DECLARE_FUNCTION_RE.match(line)
+                or _TS_DECLARE_CLASS_RE.match(line)
+                or _TS_ENUM_RE.match(line)
+            )
             if match is None:
                 continue
-            unit_type = "interface" if "interface" in line else "type"
+            unit_type = self._declaration_unit_type(line)
             end = self._declaration_end(lines, index)
             units.append(LPCodeUnit(
                 name=match.group(1),
@@ -317,6 +336,20 @@ Repository purpose: {context.repo_info}
                 extra={"kind": unit_type},
             ))
         return units
+
+    @staticmethod
+    def _declaration_unit_type(line: str) -> str:
+        if "interface" in line:
+            return "interface"
+        if "type" in line:
+            return "type"
+        if "function" in line:
+            return "function"
+        if "class" in line:
+            return "class"
+        if "enum" in line:
+            return "enum"
+        return "declaration"
 
     def _declaration_end(self, lines: list[str], start: int) -> int:
         depth = 0

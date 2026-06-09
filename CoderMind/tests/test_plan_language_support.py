@@ -215,13 +215,22 @@ def test_rust_backend_accepts_basic_declarations() -> None:
 
 def test_typescript_backend_accepts_basic_declarations() -> None:
     backend = get_backend("typescript")
-    code = "export interface Task { title: string }\nexport function run(): void {}\n"
+    code = """
+export interface Task { title: string }
+export type TaskId = number;
+export declare function run(task: Task): void;
+export declare class TaskCli { run(task: Task): void; }
+"""
 
     ok, error = backend.syntax_check(code, "src/index.ts")
     units = backend.list_code_units(code, "src/index.ts")
 
     assert ok, error
-    assert "interface Task" in [f"{unit.unit_type} {unit.name}" for unit in units]
+    declarations = [f"{unit.unit_type} {unit.name}" for unit in units]
+    assert "interface Task" in declarations
+    assert "type TaskId" in declarations
+    assert "function run" in declarations
+    assert "class TaskCli" in declarations
     assert any(unit.name == "run" for unit in units)
     assert backend.prompt_hints().test_framework_name == "npm test"
 
@@ -240,3 +249,19 @@ def test_interface_validation_accepts_typescript_interface() -> None:
 
     assert ok, error
     assert "interface Task" in info["declarations"]
+
+
+def test_interface_validation_accepts_typescript_declare_function() -> None:
+    backend = get_backend("typescript")
+    ok, error, info = validate_interface(
+        {
+            "features": ["CLI Application/startup/process bootstrap/bootstrap main command"],
+            "code": "export declare function runTasklite(argv: readonly string[]): Promise<number>;\n",
+        },
+        {"CLI Application/startup/process bootstrap/bootstrap main command"},
+        set(),
+        backend=backend,
+    )
+
+    assert ok, error
+    assert "function runTasklite" in info["declarations"]
