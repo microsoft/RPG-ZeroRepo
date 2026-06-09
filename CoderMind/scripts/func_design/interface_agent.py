@@ -964,6 +964,12 @@ def _unit_has_docstring(unit: Any) -> bool:
     return False
 
 
+def _strip_markdown_code_fence(code: str) -> str:
+    """Remove a full Markdown code fence around an interface snippet."""
+    match = re.fullmatch(r"\s*```[A-Za-z0-9_+-]*\s*\n(.*?)\n```\s*", code, re.DOTALL)
+    return f"{match.group(1)}\n" if match else code
+
+
 def validate_interface(
     interface: Dict[str, Any],
     target_features: Set[str],
@@ -976,7 +982,8 @@ def validate_interface(
     """
     backend = backend or get_backend("python")
     features = interface.get("features", [])
-    code = interface.get("code", "")
+    code = _strip_markdown_code_fence(interface.get("code", ""))
+    interface["code"] = code
     errors = []
     
     # Check features

@@ -76,6 +76,22 @@ def test_interface_validation_accepts_go_declaration() -> None:
     assert "struct Task" in info["declarations"]
 
 
+def test_interface_validation_strips_markdown_fence() -> None:
+    backend = get_backend("go")
+    ok, error, info = validate_interface(
+        {
+            "features": ["Runtime Architecture Constraints/layout/packages/use fixed package layout"],
+            "code": "```go\npackage app\n\ntype AppLayout struct {\n\tStorePath string\n}\n```",
+        },
+        {"Runtime Architecture Constraints/layout/packages/use fixed package layout"},
+        set(),
+        backend=backend,
+    )
+
+    assert ok, error
+    assert "struct AppLayout" in info["declarations"]
+
+
 def test_interface_validation_accepts_python_backend_docstring() -> None:
     backend = get_backend("python")
     ok, error, info = validate_interface(
