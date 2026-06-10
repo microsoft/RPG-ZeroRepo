@@ -37,6 +37,7 @@ from .backend import (
 from .c_backend import CBackend
 from .cpp_backend import CppBackend
 from .go_backend import GoBackend
+from .javascript_backend import JavaScriptBackend
 from .prompt_directive import language_directive, with_language_directive
 from .prompt_hints import PromptHints
 from .project_tasks import ProjectTaskContext, ProjectTaskTemplates
@@ -53,6 +54,7 @@ register_backend(PythonBackend)
 register_backend(GoBackend)
 register_backend(RustBackend)
 register_backend(TypeScriptBackend)
+register_backend(JavaScriptBackend)
 register_backend(CBackend)
 register_backend(CppBackend)
 
@@ -61,6 +63,7 @@ __all__ = [
     "CBackend",
     "CppBackend",
     "GoBackend",
+    "JavaScriptBackend",
     "LanguageBackend",
     "PromptHints",
     "ProjectTaskContext",
