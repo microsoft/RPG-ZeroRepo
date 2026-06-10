@@ -183,6 +183,14 @@ _GITIGNORE_CMIND_BLOCK = """# CoderMind runtime workspace
 .claude
 """
 
+# Dev-env-only subset of the CoderMind block.  Appended when a pre-existing
+# ``.gitignore`` already carries ``.cmind/`` (so the full block is skipped)
+# but predates the throwaway-venv rules.
+_GITIGNORE_DEV_ENV_BLOCK = """# CoderMind dev environments (created by codegen pipeline)
+.venv_dev/
+.cmind_dev_env/
+"""
+
 # Kept for backward compatibility with any external import — equivalent to
 # the full ``.gitignore`` written for a brand-new project.
 GITIGNORE_CONTENT = _GITIGNORE_PYTHON_BLOCK + "\n" + _GITIGNORE_CMIND_BLOCK
@@ -205,6 +213,23 @@ def _gitignore_has_cmind_block(existing: str) -> bool:
         if not line or line.startswith("#"):
             continue
         if line in (".cmind", ".cmind/", "/.cmind", "/.cmind/"):
+            return True
+    return False
+
+
+def _gitignore_has_dev_env(existing: str) -> bool:
+    """Heuristic: does an existing .gitignore already ignore ``.venv_dev/``?
+
+    The codegen pipeline materializes a throwaway ``.venv_dev/`` virtual
+    environment inside each project.  A fixture- or hand-authored
+    ``.gitignore`` can ship ``.cmind/`` without these dev-env rules, so we
+    detect them independently to avoid committing scratch venvs.
+    """
+    for raw in existing.splitlines():
+        line = raw.strip()
+        if not line or line.startswith("#"):
+            continue
+        if line in (".venv_dev", ".venv_dev/", "/.venv_dev", "/.venv_dev/"):
             return True
     return False
 
@@ -319,8 +344,9 @@ def create_gitignore(repo_path: Path, dry_run: bool = False) -> bool:
 
     has_python = _gitignore_has_python_block(existing)
     has_cmind = _gitignore_has_cmind_block(existing)
+    has_dev_env = _gitignore_has_dev_env(existing)
 
-    if has_python and has_cmind:
+    if has_python and has_cmind and has_dev_env:
         return False  # Already fully configured
 
     additions = ""
@@ -331,6 +357,14 @@ def create_gitignore(repo_path: Path, dry_run: bool = False) -> bool:
         if additions:
             additions += "\n"
         additions += _GITIGNORE_CMIND_BLOCK
+    elif not has_dev_env:
+        # The CoderMind block is present but predates the dev-env rules
+        # (e.g. a fixture-shipped .gitignore that only carried ``.cmind/``).
+        # Append just the dev-env venv ignores so codegen scratch venvs are
+        # never committed.
+        if additions:
+            additions += "\n"
+        additions += _GITIGNORE_DEV_ENV_BLOCK
 
     if not additions:
         return False
