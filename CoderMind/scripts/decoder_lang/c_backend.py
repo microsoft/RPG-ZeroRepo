@@ -130,7 +130,16 @@ class CBackend:
         if not cc:
             raise ToolchainUnavailable("C compiler is not available on PATH")
         sources = sorted(str(path) for path in env.project_root.rglob("*.c"))
-        return [cc, "-std=c99", "-Wall", "-Wextra", "-fsyntax-only", *sources]
+        return [
+            cc,
+            "-std=c99",
+            "-I",
+            str(env.project_root),
+            "-Wall",
+            "-Wextra",
+            "-fsyntax-only",
+            *sources,
+        ]
 
     def install_deps_command(self, env: EnvHandle, deps: list[str]) -> list[str] | None:
         return None

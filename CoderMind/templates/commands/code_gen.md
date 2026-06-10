@@ -184,6 +184,9 @@ cmind script run_batch.py --retry <batch_id> --json
 # Run a specific batch by ID
 cmind script run_batch.py --batch-id <id> --json
 
+# Run a bounded smoke sample of the next N batches
+cmind script run_batch.py --loop --max-batches <N> --json
+
 # Repo validation (pytest + smoke)
 cmind script run_batch.py --final-test --json
 

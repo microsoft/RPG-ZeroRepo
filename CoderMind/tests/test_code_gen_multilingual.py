@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import sys
 from pathlib import Path
+from types import SimpleNamespace
 
 
 SCRIPTS_DIR = Path(__file__).resolve().parents[1] / "scripts"
@@ -15,7 +16,7 @@ from code_gen import static_checks  # noqa: E402
 from code_gen import test_runner  # noqa: E402
 from common.execution_state import BatchExecutionState  # noqa: E402
 from common.task_batch import PlannedTask  # noqa: E402
-from decoder_lang import EnvHandle, TestRunResult as BackendTestRunResult  # noqa: E402
+from decoder_lang import EnvHandle, TestRunResult as BackendTestRunResult, get_backend  # noqa: E402
 import run_batch  # noqa: E402
 
 
@@ -161,6 +162,38 @@ def test_static_completeness_uses_c_backend(monkeypatch, tmp_path: Path) -> None
     assert issues == ["PLACEHOLDER: src/task.c contains placeholder code"]
 
 
+def test_c_backend_syntax_command_includes_repo_root(tmp_path: Path) -> None:
+    source = tmp_path / "src" / "task.c"
+    source.parent.mkdir()
+    source.write_text('#include "src/task.h"\nint task_count(void) { return 0; }\n', encoding="utf-8")
+    (tmp_path / "src" / "task.h").write_text("int task_count(void);\n", encoding="utf-8")
+    env = EnvHandle(project_root=tmp_path, extra={"cc": "cc"})
+
+    command = get_backend("c").test_command(env)
+
+    assert command[:4] == ["cc", "-std=c99", "-I", str(tmp_path)]
+    assert str(source) in command
+
+
+def test_cpp_backend_syntax_command_includes_repo_root(tmp_path: Path) -> None:
+    source = tmp_path / "configs" / "repository_layout.cpp"
+    source.parent.mkdir()
+    source.write_text(
+        '#include "configs/repository_layout.hpp"\nint layout_count() { return 0; }\n',
+        encoding="utf-8",
+    )
+    (tmp_path / "configs" / "repository_layout.hpp").write_text(
+        "int layout_count();\n",
+        encoding="utf-8",
+    )
+    env = EnvHandle(project_root=tmp_path, extra={"cxx": "c++"})
+
+    command = get_backend("cpp").test_command(env)
+
+    assert command[:4] == ["c++", "-std=c++17", "-I", str(tmp_path)]
+    assert str(source) in command
+
+
 def test_write_interface_skeletons_keeps_c_code_unchanged(tmp_path: Path) -> None:
     interfaces_path = tmp_path / "interfaces.json"
     interfaces_path.write_text(
@@ -226,3 +259,30 @@ def test_run_batch_keeps_python_env_setup(monkeypatch, tmp_path: Path) -> None:
     run_batch._setup_codegen_environment(tmp_path)
 
     assert calls == ["venv", "deps"]
+
+
+def test_run_batch_loop_honors_max_batches(monkeypatch) -> None:
+    calls: list[int] = []
+
+    def fake_run_batch(**_kwargs):
+        calls.append(len(calls) + 1)
+        return {
+            "success": True,
+            "type": "batch_complete",
+            "batch_id": f"batch-{len(calls)}",
+            "attempts_used": 1,
+            "total_duration": 0,
+            "stats": {"completed": len(calls), "total": 10, "failed": 0},
+        }
+
+    monkeypatch.setattr(run_batch, "run_batch", fake_run_batch)
+    args = SimpleNamespace(
+        merge_file=False,
+        max_units=0,
+        agent_timeout=1,
+        max_batches=2,
+        json=True,
+    )
+
+    assert run_batch._run_loop(args) == 0
+    assert calls == [1, 2]

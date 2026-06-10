@@ -144,7 +144,16 @@ class CppBackend:
             str(path) for ext in ("*.cpp", "*.cc", "*.cxx")
             for path in env.project_root.rglob(ext)
         )
-        return [cxx, "-std=c++17", "-Wall", "-Wextra", "-fsyntax-only", *sources]
+        return [
+            cxx,
+            "-std=c++17",
+            "-I",
+            str(env.project_root),
+            "-Wall",
+            "-Wextra",
+            "-fsyntax-only",
+            *sources,
+        ]
 
     def install_deps_command(self, env: EnvHandle, deps: list[str]) -> list[str] | None:
         return None

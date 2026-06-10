@@ -986,6 +986,8 @@ def main() -> int:
                         help="Max units per merged batch (0 = no limit)")
     parser.add_argument("--agent-timeout", type=int, default=DEFAULT_AGENT_TIMEOUT,
                         help=f"Sub-agent timeout in seconds (default: {DEFAULT_AGENT_TIMEOUT})")
+    parser.add_argument("--max-batches", type=int, default=0,
+                        help="Stop --loop after this many batches (0 = no limit)")
     parser.add_argument("--review-iterations", type=int, default=10,
                         help="Max iterations for global review (default: 10)")
     parser.add_argument("--json", action="store_true", help="Output as JSON")
@@ -1100,11 +1102,20 @@ def _run_loop(args) -> int:
     total_passed = 0
     total_failed = 0
     start_time = time.time()
+    max_batches = max(0, int(args.max_batches or 0))
 
     print("\n  [START] Starting batch loop (Ctrl+C to stop after current batch)\n")
 
     try:
         while True:
+            if max_batches and batch_num >= max_batches:
+                elapsed = time.time() - start_time
+                print(f"\n  [STOP] Reached max-batches={max_batches} "
+                      f"({total_passed} passed, {total_failed} failed, "
+                      f"{elapsed/60:.1f} min)")
+                logger.info("Loop stopped after max-batches=%d", max_batches)
+                return 0 if total_failed == 0 else 1
+
             batch_num += 1
 
             result = run_batch(
