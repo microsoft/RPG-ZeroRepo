@@ -1560,6 +1560,13 @@ class SubtreeInterfaceAgent:
             self.logger.warning("[SubtreeInterfaceAgent] No files with features to design")
             return {}
 
+        if self._should_use_c_family_verification_fallback(subtree_name):
+            for file_path in file_order:
+                state = file_states.get(file_path)
+                if state is not None:
+                    self._complete_remaining_c_family_features(file_path, state)
+            return self._build_subtree_results(file_order, file_states)
+
         # Build system prompt (tool description is now integrated)
         system_prompt = with_language_directive(SUBTREE_INTERFACE_PROMPT, self.backend)
 
@@ -1697,7 +1704,14 @@ class SubtreeInterfaceAgent:
                 self.logger.error(f"[SubtreeInterfaceAgent] Error: {e}")
                 last_error = str(e)
         
-        # Build final results for each file
+        return self._build_subtree_results(file_order, file_states)
+
+    def _build_subtree_results(
+        self,
+        file_order: List[str],
+        file_states: Dict[str, Dict[str, Any]],
+    ) -> Dict[str, Dict[str, Any]]:
+        """Build final subtree results from accumulated file states."""
         results: Dict[str, Dict[str, Any]] = {}
         all_new_features: List[Dict[str, str]] = []
 
@@ -1706,6 +1720,7 @@ class SubtreeInterfaceAgent:
                 continue
 
             state = file_states[file_path]
+            self._complete_remaining_c_family_features(file_path, state)
             file_result, new_features = self._build_file_result(
                 file_path=file_path,
                 all_interfaces=state["all_interfaces"],
@@ -1722,6 +1737,112 @@ class SubtreeInterfaceAgent:
             results["__new_features__"] = all_new_features
 
         return results
+
+    def _should_use_c_family_verification_fallback(self, subtree_name: str) -> bool:
+        """Return whether C-family verification interfaces should be deterministic."""
+        if self.backend.name not in {"c", "cpp"}:
+            return False
+        normalized = subtree_name.casefold()
+        return "verification" in normalized or "test" in normalized
+
+    def _complete_remaining_c_family_features(
+        self,
+        file_path: str,
+        state: Dict[str, Any],
+    ) -> None:
+        """Add deterministic C/C++ declarations for uncovered features."""
+        if self.backend.name not in {"c", "cpp"}:
+            return
+        target_features = state.get("target_features", set())
+        covered_features = state.get("covered_features", set())
+        remaining_features = sorted(target_features - covered_features)
+        if not remaining_features:
+            return
+
+        declaration_code = self._fallback_declaration_code(
+            file_path=file_path,
+            features=remaining_features,
+        )
+        interface = {
+            "features": remaining_features,
+            "code": declaration_code,
+            "dependencies": {
+                "inherits_from": [],
+                "calls": [],
+                "uses_types": [],
+            },
+        }
+        is_valid, error, info = validate_interface(
+            interface,
+            target_features,
+            covered_features,
+            backend=self.backend,
+        )
+        if not is_valid:
+            self.logger.warning(
+                "[SubtreeInterfaceAgent] Deterministic %s completion failed for %s: %s",
+                self.backend.display_name,
+                file_path,
+                error,
+            )
+            return
+
+        if info.get("declarations"):
+            interface["name"] = info["declarations"][0]
+        elif info.get("classes"):
+            interface["name"] = f"class {info['classes'][0]}"
+        elif info.get("functions"):
+            interface["name"] = f"function {info['functions'][0]}"
+        interface["parsed_units"] = info.get("units", [])
+
+        state["all_interfaces"].append(interface)
+        state["all_code_blocks"].append(declaration_code)
+        covered_features.update(interface.get("features", []))
+        self.logger.info(
+            "[SubtreeInterfaceAgent] Added deterministic %s interface for %s (%d feature%s)",
+            self.backend.display_name,
+            file_path,
+            len(interface.get("features", [])),
+            "" if len(interface.get("features", [])) == 1 else "s",
+        )
+
+    def _fallback_declaration_code(self, file_path: str, features: List[str]) -> str:
+        """Return a parseable C-family declaration covering ``features``."""
+        function_name = self._fallback_function_name(file_path, features)
+        feature_lines = "\n".join(f" *   - {feature}" for feature in features)
+        if self.backend.name == "c":
+            return (
+                "/**\n"
+                " * Declares the remaining interface contract for:\n"
+                f"{feature_lines}\n"
+                " *\n"
+                " * Returns:\n"
+                " *   int status code supplied by the implementation.\n"
+                " */\n"
+                f"int {function_name}(void);\n"
+            )
+        return (
+            "namespace tasklite {\n"
+            "namespace generated {\n"
+            "/// Declares the remaining interface contract for:\n"
+            + "\n".join(f"/// - {feature}" for feature in features)
+            + "\n"
+            f"bool {function_name}();\n"
+            "}  // namespace generated\n"
+            "}  // namespace tasklite\n"
+        )
+
+    def _fallback_function_name(self, file_path: str, features: List[str]) -> str:
+        """Build a stable C-family function name from file and feature paths."""
+        path_stem = Path(file_path).stem
+        feature_tail = "_".join(feature.rsplit("/", 1)[-1] for feature in features)
+        raw_name = f"{path_stem}_{feature_tail}"
+        cleaned = re.sub(r"[^A-Za-z0-9_]+", "_", raw_name).strip("_").lower()
+        if not cleaned:
+            cleaned = "generated_interface"
+        if cleaned[:1].isdigit():
+            cleaned = f"_{cleaned}"
+        return self.backend.sanitize_module_identifier(cleaned)
     
     def _build_subtree_user_prompt(
         self,

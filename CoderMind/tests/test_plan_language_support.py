@@ -123,6 +123,101 @@ def test_interface_validation_filters_non_target_and_duplicate_features() -> Non
     assert "function task_record_init" in info["declarations"]
 
 
+def test_subtree_agent_adds_c_fallback_for_remaining_features() -> None:
+    agent = SubtreeInterfaceAgent(target_language="c")
+    feature = "Task Domain Model/task schema/status representation/encode completion flag"
+    state = {
+        "target_features": {feature},
+        "covered_features": set(),
+        "all_interfaces": [],
+        "all_code_blocks": [],
+    }
+
+    agent._complete_remaining_c_family_features("src/tasklite_cli/task/task.c", state)
+    result, _new_features = agent._build_file_result(
+        file_path="src/tasklite_cli/task/task.c",
+        all_interfaces=state["all_interfaces"],
+        all_code_blocks=state["all_code_blocks"],
+        target_features=state["target_features"],
+        covered_features=state["covered_features"],
+    )
+
+    assert result["success"]
+    assert feature in next(iter(result["units_to_features"].values()))
+    assert "int task" in result["file_code"]
+
+
+def test_subtree_agent_adds_cpp_fallback_for_empty_file_result() -> None:
+    agent = SubtreeInterfaceAgent(target_language="cpp")
+    features = {
+        "CLI Entry and Dispatch/storage/options/use local tasks file",
+        "CLI Entry and Dispatch/storage/options/resolve store path",
+    }
+    state = {
+        "target_features": features,
+        "covered_features": set(),
+        "all_interfaces": [],
+        "all_code_blocks": [],
+    }
+
+    agent._complete_remaining_c_family_features(
+        "src/tasklite_cli/cli/store_path_options.cpp",
+        state,
+    )
+    result, _new_features = agent._build_file_result(
+        file_path="src/tasklite_cli/cli/store_path_options.cpp",
+        all_interfaces=state["all_interfaces"],
+        all_code_blocks=state["all_code_blocks"],
+        target_features=state["target_features"],
+        covered_features=state["covered_features"],
+    )
+
+    assert result["success"]
+    assert set(next(iter(result["units_to_features"].values()))) == features
+    assert "namespace tasklite" in result["file_code"]
+
+
+def test_subtree_agent_uses_cpp_fallback_for_verification_subtree() -> None:
+    class FailingLLM:
+        def call_structured(self, **_kwargs):
+            raise AssertionError("LLM should not run for C++ verification fallback")
+
+    agent = SubtreeInterfaceAgent(
+        llm_client=FailingLLM(),
+        target_language="cpp",
+    )
+    files = [
+        {
+            "path": "tests/store_test.cpp",
+            "feature_paths": [
+                "Verification and Test Isolation/store/loading coverage/verify missing file loading",
+                "Verification and Test Isolation/store/corruption coverage/verify corrupt json handling",
+            ],
+        },
+        {
+            "path": "tests/cli_test.cpp",
+            "feature_paths": [
+                "Verification and Test Isolation/cli/list coverage/verify task list output",
+            ],
+        },
+    ]
+
+    result = agent.design_subtree_interfaces(
+        file_nodes=files,
+        file_order=["tests/store_test.cpp", "tests/cli_test.cpp"],
+        repo_info="TaskLite C++ CLI",
+        data_flow_str="",
+        base_classes_str="",
+        upstream_context="",
+        subtree_name="Verification and Test Isolation",
+    )
+
+    assert result["tests/store_test.cpp"]["success"]
+    assert result["tests/cli_test.cpp"]["success"]
+    assert len(result["tests/store_test.cpp"]["units"]) == 1
+    assert len(result["tests/cli_test.cpp"]["units"]) == 1
+
+
 def test_interface_validation_strips_markdown_fence() -> None:
     backend = get_backend("go")
     ok, error, info = validate_interface(
