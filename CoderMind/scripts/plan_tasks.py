@@ -266,6 +266,61 @@ def _extract_imported_modules(file_code: str, current_file: str) -> Set[str]:
     return imported_modules
 
 
+def _extract_imported_stems_via_parser(file_path: str, file_code: str) -> Set[str]:
+    """Extract imported file stems for non-Python languages via ``lang_parser``.
+
+    Python intra-subtree ordering uses dotted-module matching
+    (:func:`_extract_imported_modules`).  Other languages express imports very
+    differently (Go import paths, Rust ``use`` paths, JS/TS ``from './x.js'``,
+    C/C++ ``#include "x.h"``), so an ``ast.parse`` of their source just yields
+    nothing and the topo-sort silently degrades to the LLM's raw order.
+
+    Here we let ``lang_parser`` (which understands all supported languages)
+    extract the import targets, then reduce each to its basename stem so the
+    caller can match it against the basenames of the subtree's own files. This
+    is intentionally conservative: it only links files whose import target
+    shares a basename with a sibling file, which is the common intra-module
+    case and never raises across languages.
+    """
+    if not file_code.strip():
+        return set()
+    try:
+        from lang_parser import get_parser_for_file
+    except ImportError:
+        return set()
+    parser = get_parser_for_file(file_path)
+    if parser is None:
+        return set()
+    try:
+        result = parser.parse_file(file_path, file_code)
+    except Exception:
+        return set()
+
+    stems: Set[str] = set()
+    for dep in getattr(result, "dependencies", []) or []:
+        if getattr(dep, "relation", None) != "imports":
+            continue
+        target = (getattr(dep, "dst", None) or getattr(dep, "symbol", None) or "")
+        if not isinstance(target, str) or not target.strip():
+            continue
+        # Reduce an import target to a comparable basename stem:
+        #   "./store.js" -> "store",  "tasklite/internal/store" -> "store",
+        #   "crate::store::Task" -> "store" (last path-ish segment),
+        #   "store.h" -> "store".
+        token = target.replace("\\", "/").strip().strip('"').strip("'")
+        token = token.split("/")[-1]
+        token = token.split("::")[-1]
+        token = token.rsplit(".", 1)[0] if "." in token else token
+        if token:
+            stems.add(token)
+    return stems
+
+
+def _file_basename_stem(file_path: str) -> str:
+    """Return the lowercase basename without extension for cross-language matching."""
+    return Path(file_path).stem.lower()
+
+
 def _load_dependency_source_code(file_path: str, interface_file_code: str) -> str:
     """Load source code for dependency analysis, combining repo and interface inputs."""
     code_parts: List[str] = []
@@ -330,6 +385,7 @@ def correct_intra_subtree_file_order(
     files_order: List[str],
     subtree_interfaces: Dict[str, Dict[str, Any]],
     logger: Optional[logging.Logger] = None,
+    language: Optional[str] = None,
 ) -> tuple[List[str], Dict[str, Any]]:
     """Correct file order using imports declared in interface skeleton code."""
     logger = logger or logging.getLogger(__name__)
@@ -343,10 +399,18 @@ def correct_intra_subtree_file_order(
             "reason": "single_file_or_empty_subtree",
         }
 
+    # Python matches imports by dotted module path; other languages match by
+    # file basename stem (Go/Rust/TS/JS/C/C++ import syntaxes differ too much
+    # for a single dotted-path scheme).
+    is_python = (language or "python").lower() == "python"
+
     module_to_file = {
         _file_path_to_module_name(file_path): file_path
         for file_path in available_files
     }
+    stem_to_file: Dict[str, str] = {}
+    for file_path in available_files:
+        stem_to_file.setdefault(_file_basename_stem(file_path), file_path)
     dependency_edges: Dict[str, Set[str]] = defaultdict(set)
     dependency_pairs: List[Dict[str, str]] = []
     seen_dependency_pairs: Set[tuple[str, str, str]] = set()
@@ -356,10 +420,15 @@ def correct_intra_subtree_file_order(
             file_path=file_path,
             interface_file_code=subtree_interfaces[file_path].get("file_code", ""),
         )
-        imported_modules = _extract_imported_modules(file_code, file_path)
+        if is_python:
+            imported = sorted(_extract_imported_modules(file_code, file_path))
+            resolve = module_to_file.get
+        else:
+            imported = sorted(_extract_imported_stems_via_parser(file_path, file_code))
+            resolve = lambda stem: stem_to_file.get(stem)  # noqa: E731
 
-        for module_name in sorted(imported_modules):
-            dependency_file = module_to_file.get(module_name)
+        for module_name in imported:
+            dependency_file = resolve(module_name)
             if not dependency_file or dependency_file == file_path:
                 continue
             dependency_edges[dependency_file].add(file_path)
@@ -400,7 +469,7 @@ def correct_intra_subtree_file_order(
         "corrected_files_order": list(corrected_order),
         "changed": changed,
         "dependency_edges": dependency_pairs,
-        "reason": "ast_import_toposort",
+        "reason": "import_toposort" if is_python else "import_toposort_by_stem",
     }
 
 
@@ -801,6 +870,7 @@ class TaskPlanner:
                 files_order=files_order,
                 subtree_interfaces=subtree_interfaces,
                 logger=self.logger,
+                language=self.primary_language,
             )
             self.file_order_diagnostics[subtree] = order_diagnostics
             

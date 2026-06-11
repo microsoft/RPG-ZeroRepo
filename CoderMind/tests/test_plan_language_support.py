@@ -509,3 +509,48 @@ export function resolveStorePath(override?: string): string;
 
     assert ok, error
     assert "function resolveStorePath" in info["declarations"]
+
+
+def test_file_ordering_uses_imports_for_go() -> None:
+    # Regression: non-Python file ordering previously degraded to the raw LLM
+    # order because dependency extraction used Python AST only. Go imports must
+    # now drive the topological sort (store before its cli importer).
+    from plan_tasks import correct_intra_subtree_file_order
+
+    interfaces = {
+        "internal/store/store.go": {
+            "file_code": "package store\n\ntype Store struct{}\nfunc New() *Store { return &Store{} }\n",
+        },
+        "cmd/app/cli.go": {
+            "file_code": "package main\n\nimport \"tasklite/internal/store\"\n\nfunc main(){ _ = store.New() }\n",
+        },
+    }
+    corrected, diag = correct_intra_subtree_file_order(
+        subtree_name="Core",
+        files_order=["cmd/app/cli.go", "internal/store/store.go"],
+        subtree_interfaces=interfaces,
+        language="go",
+    )
+
+    assert corrected == ["internal/store/store.go", "cmd/app/cli.go"]
+    assert diag["changed"] is True
+    assert diag["reason"] == "import_toposort_by_stem"
+
+
+def test_file_ordering_keeps_python_dotted_module_path() -> None:
+    from plan_tasks import correct_intra_subtree_file_order
+
+    interfaces = {
+        "src/app/store.py": {"file_code": "class Store:\n    pass\n"},
+        "src/app/cli.py": {"file_code": "from app.store import Store\n"},
+    }
+    corrected, diag = correct_intra_subtree_file_order(
+        subtree_name="Core",
+        files_order=["src/app/cli.py", "src/app/store.py"],
+        subtree_interfaces=interfaces,
+        language="python",
+    )
+
+    assert corrected == ["src/app/store.py", "src/app/cli.py"]
+    assert diag["reason"] == "import_toposort"
+
