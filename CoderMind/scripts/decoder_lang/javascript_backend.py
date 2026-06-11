@@ -106,6 +106,12 @@ class JavaScriptBackend:
             return []
         return [dep for dep in result.dependencies if dep.relation == "imports"]
 
+    def list_inheritance(self, code: str, path: str = "<string>") -> list[Any]:
+        result = self._parse(self._parse_source(code), path)
+        if result is None or result.syntax_error:
+            return []
+        return [dep for dep in result.dependencies if dep.relation == "inherits"]
+
     def detect_env(self, repo_root: Path) -> EnvHandle | None:
         npm = shutil.which("npm")
         node = shutil.which("node")

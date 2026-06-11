@@ -1,8 +1,9 @@
 """Tests for PythonBackend code-structure helpers.
 
 The suite covers ``list_code_units``, ``format_signature``,
-``list_imports``, and ``find_main_block_lineno``. Assertions focus on
-the shapes consumed by ``func_design`` and code-generation prompts.
+``list_imports``, ``list_inheritance``, and ``find_main_block_lineno``.
+Assertions focus on the shapes consumed by ``func_design`` and
+code-generation prompts.
 """
 from __future__ import annotations
 
@@ -211,6 +212,40 @@ class ListImportsTests(unittest.TestCase):
         self.assertEqual(self.backend.list_imports("import"), [])
 
 
+class ListInheritanceTests(unittest.TestCase):
+    """``list_inheritance`` yields uniform ``inherits`` edges per language."""
+
+    def test_python_derives_edges_from_class_bases(self) -> None:
+        backend = get_backend("python")
+        code = (
+            "class Base:\n    pass\n\n"
+            "class Mixin:\n    pass\n\n"
+            "class Child(Base, Mixin):\n    pass\n"
+        )
+        edges = backend.list_inheritance(code, "m.py")
+        pairs = {(d.src, d.symbol) for d in edges}
+        self.assertEqual(pairs, {("Child", "Base"), ("Child", "Mixin")})
+        for dep in edges:
+            self.assertEqual(dep.relation, "inherits")
+
+    def test_python_empty_on_syntax_error(self) -> None:
+        self.assertEqual(get_backend("python").list_inheritance("class"), [])
+
+    def test_rust_trait_impl_is_inheritance(self) -> None:
+        backend = get_backend("rust")
+        code = "struct Store;\ntrait Repo {}\nimpl Repo for Store {}\n"
+        edges = backend.list_inheritance(code, "m.rs")
+        pairs = {(d.src, d.symbol) for d in edges}
+        self.assertIn(("Store", "Repo"), pairs)
+        for dep in edges:
+            self.assertEqual(dep.relation, "inherits")
+
+    def test_go_without_inheritance_is_empty(self) -> None:
+        backend = get_backend("go")
+        code = "package m\n\ntype S struct{}\n"
+        self.assertEqual(backend.list_inheritance(code, "m.go"), [])
+
+
 class FindMainBlockLinenoTests(unittest.TestCase):
     """``find_main_block_lineno`` is the Python-only hook
     ``interface_review`` will call (others get None via getattr)."""
@@ -299,6 +334,9 @@ func (s *Server) Handle() {
 
     def test_list_imports_empty_on_syntax_error(self) -> None:
         self.assertEqual(self.backend.list_imports("func broken(\n", "bad.go"), [])
+
+    def test_list_inheritance_empty_for_plain_struct(self) -> None:
+        self.assertEqual(self.backend.list_inheritance(self.SAMPLE_GO, "server.go"), [])
 
 
 if __name__ == "__main__":

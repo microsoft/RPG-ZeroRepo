@@ -212,10 +212,8 @@ class PythonBackend:
         signature. Falls back to ``unit.name`` for non-function units
         or when the AST node is unavailable.
 
-        Behaviour preserves the formatting from
-        :func:`func_design.interface_agent.GlobalInterfaceRegistry._format_func_signature`
-        — same param truncation (``> 4`` → ``..., ...``), same return-
-        annotation rendering.
+        Truncates parameter lists longer than four entries (``..., ...``)
+        and renders the return annotation when present.
         """
         if unit is None:
             return ""
@@ -300,6 +298,51 @@ class PythonBackend:
                             "alias": alias.asname,
                         },
                     ))
+        return deps
+
+    def list_inheritance(
+        self,
+        code: str,
+        path: str = "<string>",
+    ) -> list[Any]:
+        """Extract inheritance edges (``class Child(Base)``) as
+        :class:`LPDependency` records with ``relation="inherits"``.
+
+        ``src`` is the child class name and ``symbol``/``dst`` the base
+        name, mirroring the ``inherits`` shape emitted by the
+        tree-sitter backends so consumers treat every language alike.
+        """
+        from lang_parser import LPDependency as _LPDependency  # type: ignore
+
+        try:
+            tree = ast.parse(code, filename=path)
+        except (SyntaxError, ValueError):
+            return []
+
+        def _base_name(node: ast.expr) -> str | None:
+            if isinstance(node, ast.Name):
+                return node.id
+            if isinstance(node, ast.Attribute):
+                return node.attr
+            return None
+
+        deps: list[Any] = []
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.ClassDef):
+                continue
+            for base in node.bases or []:
+                parent = _base_name(base)
+                if not parent:
+                    continue
+                deps.append(_LPDependency(
+                    src=node.name,
+                    dst=parent,
+                    relation="inherits",
+                    symbol=parent,
+                    line=getattr(node, "lineno", None),
+                    confidence="high",
+                    extra={"language": self.name, "child": node.name, "parent": parent},
+                ))
         return deps
 
     def find_main_block_lineno(self, code: str) -> int | None:

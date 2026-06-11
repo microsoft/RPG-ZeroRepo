@@ -103,6 +103,12 @@ class CppBackend:
             return []
         return [dep for dep in result.dependencies if dep.relation == "imports"]
 
+    def list_inheritance(self, code: str, path: str = "<string>") -> list[Any]:
+        result = self._parse(code, path)
+        if result is None or result.syntax_error:
+            return []
+        return [dep for dep in result.dependencies if dep.relation == "inherits"]
+
     def detect_env(self, repo_root: Path) -> EnvHandle | None:
         cxx = self._find_compiler()
         make = shutil.which("make")

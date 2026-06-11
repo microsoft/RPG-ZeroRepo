@@ -161,6 +161,22 @@ class LanguageBackend(Protocol):
         """Return :class:`lang_parser.LPDependency` records for every
         import statement in ``code``. On syntax error returns ``[]``."""
 
+    def list_inheritance(
+        self,
+        code: str,
+        path: str = "<string>",
+    ) -> list[Any]:
+        """Return :class:`lang_parser.LPDependency` records (one per
+        inheritance edge) for class/type declarations in ``code``.
+
+        Each record carries ``src`` = the deriving type name and
+        ``symbol`` (and ``dst``) = the base/parent name, so consumers
+        can resolve inheritance uniformly across languages. Backends
+        whose parser does not model inheritance (or on syntax error)
+        return ``[]``; that inheritance is then supplied by the
+        LLM-declared dependencies instead.
+        """
+
     # --- 3. Build / test environment ------------------------------------
 
     def detect_env(self, repo_root: Path) -> EnvHandle | None:
