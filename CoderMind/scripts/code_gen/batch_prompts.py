@@ -505,7 +505,7 @@ def _test_timeout_rule(backend: LanguageBackend) -> str:
 def _build_language_context(backend: LanguageBackend, test_command: str) -> str:
     """Build the target-language prompt section."""
     hints = backend.prompt_hints()
-    return (
+    context = (
         "## ── Target Language ─────────────────────────────────────\n"
         f"- Language: {hints.display_name}\n"
         f"- Source extension: `{hints.file_extension}`\n"
@@ -514,8 +514,28 @@ def _build_language_context(backend: LanguageBackend, test_command: str) -> str:
         f"- Test framework/tool: {hints.test_framework_name}\n"
         f"- Module naming: {hints.module_naming_rule}\n"
         f"- Style: {hints.style_directive}\n"
-        "- Do NOT introduce Python-specific files, packages, or pytest conventions unless this is a Python project.\n"
     )
+    if backend.name != "python":
+        # The decoder's defaults are Python-centric; without an explicit
+        # prohibition the sub-agent tends to add Python helpers (a main.py
+        # launcher wrapper, a pytest conftest.py to drive native tests, a
+        # requirements.txt). Forbid them outright so the generated repo stays
+        # a pure single-language project.
+        context += (
+            f"- **This is a {hints.display_name} project, NOT Python.** Every source and test "
+            f"file you create MUST use `{hints.file_extension}` (or the language's own test "
+            "suffix). Do NOT create ANY `.py` file.\n"
+            "- Specifically FORBIDDEN: `main.py` or any Python launcher/wrapper, `conftest.py`, "
+            "`pytest.ini`, `setup.py`, `pyproject.toml`, `requirements.txt`, `__init__.py`, or a "
+            "`.venv`/pip workflow.\n"
+            f"- Run tests ONLY with `{test_command}` ({hints.test_framework_name}). Do NOT wrap, "
+            "re-implement, or drive the test suite through pytest or any Python script.\n"
+        )
+    else:
+        context += (
+            "- Do NOT introduce Python-specific files, packages, or pytest conventions unless this is a Python project.\n"
+        )
+    return context
 
 def build_batch_pytest_cmd(
     test_files: List[str],
@@ -759,6 +779,10 @@ def build_tdd_prompt(
         test_files = find_related_test_files(task.file_path, repo_path)
     pytest_cmd = _build_backend_test_cmd(backend, repo_path, test_files, venv_python)
 
+    # Language-aware entry point reference so testing-batch guidance never
+    # plants a Python file name (e.g. "main.py") in a non-Python project.
+    entry_point = backend.prompt_hints().entrypoint_example or "the main entry point"
+
     # For testing batches, allow fixing genuine integration bugs
     if task.task_type in ("integration_test", "final_test_docs"):
         code_instructions = (
@@ -771,7 +795,7 @@ def build_tdd_prompt(
             "- Data format mismatch at a module boundary\n\n"
             "Do NOT modify production code solely to make a poorly-written test pass.\n"
             "The test should reflect correct behavior; the code should implement it.\n"
-            "Do NOT create main.py — it will be created in a later task.\n\n"
+            f"Do NOT create the entry point ({entry_point}) — it will be created in a later task.\n\n"
             "**Testing strategy for efficiency:**\n"
             "- After the first full test-command run, use the native tool's "
             "focused rerun option when available. This saves time.\n"

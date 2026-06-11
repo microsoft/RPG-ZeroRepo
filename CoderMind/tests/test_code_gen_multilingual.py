@@ -79,7 +79,10 @@ def test_go_codegen_prompt_uses_go_test(monkeypatch, tmp_path: Path) -> None:
     assert "Read `go.mod`" in prompt
     assert "go get <module>" in prompt
     assert "python3 -m pytest" not in prompt
-    assert "requirements.txt" not in prompt
+    # Go must not be instructed to manage Python deps. requirements.txt may now
+    # appear only inside the explicit FORBIDDEN list, never as an instruction.
+    assert "Append the package to `requirements.txt`" not in prompt
+    assert "Update `requirements.txt`" not in prompt
 
 
 def test_cpp_codegen_prompt_injects_cpp_context(monkeypatch, tmp_path: Path) -> None:
@@ -91,7 +94,42 @@ def test_cpp_codegen_prompt_injects_cpp_context(monkeypatch, tmp_path: Path) -> 
     assert "Language: C++" in prompt
     assert "Source extension: `.cpp`" in prompt
     assert "C++17" in prompt
-    assert "Do NOT introduce Python-specific files" in prompt
+    # Non-Python projects get the strengthened prohibition, not the legacy line.
+    assert "NOT Python" in prompt
+    assert "Do NOT create ANY `.py` file" in prompt
+    assert "conftest.py" in prompt
+    assert "python3 -m pytest" not in prompt
+
+
+def test_non_python_integration_prompt_uses_native_entry_point(monkeypatch, tmp_path: Path) -> None:
+    # Regression for the bug where every language was told "Do NOT create
+    # main.py", planting a Python file name into Go/JS/C projects.
+    _set_language(monkeypatch, tmp_path, "go")
+    task = PlannedTask(
+        task="Add the cross-module integration tests.",
+        file_path="<INTEGRATION_TEST>",
+        units_key=["Core_integration_tests"],
+        unit_to_code={"Core_integration_tests": ""},
+        unit_to_features={"Core_integration_tests": ["Feature/path"]},
+        subtree="Core",
+        task_type="integration_test",
+    )
+
+    prompt = batch_prompts.build_tdd_prompt(_state(task), task, tmp_path)
+
+    assert "main.go" in prompt          # native entry point referenced
+    assert "create main.py" not in prompt  # no Python file name planted
+
+
+def test_javascript_codegen_prompt_forbids_python_files(monkeypatch, tmp_path: Path) -> None:
+    _set_language(monkeypatch, tmp_path, "javascript")
+    task = _task("src/store.js")
+
+    prompt = batch_prompts.build_tdd_prompt(_state(task), task, tmp_path)
+
+    assert "Language: JavaScript" in prompt
+    assert "npm test" in prompt
+    assert "Do NOT create ANY `.py` file" in prompt
     assert "python3 -m pytest" not in prompt
 
 
