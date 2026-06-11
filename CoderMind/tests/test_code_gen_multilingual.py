@@ -133,6 +133,31 @@ def test_javascript_codegen_prompt_forbids_python_files(monkeypatch, tmp_path: P
     assert "python3 -m pytest" not in prompt
 
 
+def test_api_summary_uses_backend_for_non_python(monkeypatch, tmp_path: Path) -> None:
+    # Regression: _build_api_summary previously hardcoded the Python backend,
+    # so a Go/Rust/TS project's API signatures (used by test-writing batches)
+    # came back empty. It must resolve the project backend and render via
+    # backend.format_signature for non-Python.
+    _set_language(monkeypatch, tmp_path, "go")
+    (tmp_path / "internal").mkdir()
+    (tmp_path / "internal" / "store.go").write_text(
+        "package store\n\n"
+        "type Store struct{ path string }\n\n"
+        "func NewStore(path string) *Store { return &Store{path: path} }\n\n"
+        "func (s *Store) Save(id int) error { return nil }\n",
+        encoding="utf-8",
+    )
+
+    summary = batch_prompts._build_api_summary(tmp_path, ["internal/store.go"])
+
+    assert "internal/store.go" in summary
+    # Go declarations surface (not an empty Python-parsed result).
+    assert "Store" in summary
+    assert "NewStore" in summary
+    # No Python "def " rendering leaked in.
+    assert "def NewStore" not in summary
+
+
 def test_run_project_tests_uses_backend_command(monkeypatch, tmp_path: Path) -> None:
     seen: dict[str, object] = {}
 

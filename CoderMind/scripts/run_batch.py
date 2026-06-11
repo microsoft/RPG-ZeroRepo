@@ -451,18 +451,22 @@ def _refresh_dep_graph_safe(
 
         # ── Incremental path: codegen knows exactly which file changed ──
         if changed_files:
-            # Filter to .py only — sync_from_file_list assumes Python.
-            py_files = [f for f in changed_files if f.endswith(".py")]
-            if not py_files:
-                # No .py touched (e.g. only docs/config edits) — skip.
-                logger.info("dep_graph: no .py files in batch, skipping refresh")
+            # Keep only files lang_parser can build dep edges for. This spans
+            # every supported language (py/go/rs/ts/js/c/cpp), so non-Python
+            # projects keep an up-to-date dep_graph across batches too.
+            from lang_parser import is_supported_source
+
+            source_files = [f for f in changed_files if is_supported_source(f)]
+            if not source_files:
+                # No analysable source touched (e.g. only docs/config edits).
+                logger.info("dep_graph: no supported source files in batch, skipping refresh")
                 svc.save(str(rpg_path))
                 return
 
             # ``save_path=None``: dep_graph rides inside rpg.json. The
             # subsequent ``svc.save(rpg_path)`` embeds it.
             result = svc.sync_from_file_list(
-                file_paths=py_files,
+                file_paths=source_files,
                 code_dir=str(repo_path),
                 workspace_root=str(WORKSPACE_ROOT),
             )

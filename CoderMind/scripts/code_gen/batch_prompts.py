@@ -589,14 +589,15 @@ def _build_api_summary(repo_path: Path, source_files: List[str], max_chars: int 
     Returns:
         Formatted string of file → class/function signatures.
     """
-    # Declaration discovery routes through the Python backend. This
-    # formatter still reads raw AST nodes for per-argument names because
-    # the prompt format uses bare argument names rather than the
-    # annotated rendering from ``backend.format_signature``.
+    # Resolve the project's actual backend so signatures are extracted from
+    # the right language. Python keeps a precise AST rendering (bare argument
+    # names + return annotation); every other language uses the backend's own
+    # one-line ``format_signature`` so non-Python test-writing batches still
+    # receive real API context instead of nothing.
     import ast as _ast  # local import; only used for unparse(returns)
-    from decoder_lang import get_backend
 
-    backend = get_backend("python")
+    backend = _resolve_codegen_backend()
+    is_python = backend.name == "python"
     summaries = []
     for filepath in sorted(source_files):
         full_path = repo_path / filepath
@@ -625,13 +626,18 @@ def _build_api_summary(repo_path: Path, source_files: List[str], max_chars: int 
                 methods_str = ', '.join(methods) if methods else '(dataclass)'
                 file_sigs.append(f"  class {unit.name}: {methods_str}")
             elif unit.unit_type == 'function':
-                node = (unit.extra or {}).get('ast_node')
-                if node is None:
-                    continue
-                args = [a.arg for a in node.args.args if a.arg != 'self']
-                ret = _ast.unparse(node.returns) if node.returns else ''
-                ret_str = f" -> {ret}" if ret else ""
-                file_sigs.append(f"  def {unit.name}({', '.join(args)}){ret_str}")
+                if is_python:
+                    node = (unit.extra or {}).get('ast_node')
+                    if node is None:
+                        continue
+                    args = [a.arg for a in node.args.args if a.arg != 'self']
+                    ret = _ast.unparse(node.returns) if node.returns else ''
+                    ret_str = f" -> {ret}" if ret else ""
+                    file_sigs.append(f"  def {unit.name}({', '.join(args)}){ret_str}")
+                else:
+                    # Non-Python: use the backend's own signature renderer.
+                    sig = backend.format_signature(unit) or unit.name
+                    file_sigs.append(f"  {sig}")
 
         if file_sigs:
             summaries.append(f"# {filepath}\n" + "\n".join(file_sigs))
