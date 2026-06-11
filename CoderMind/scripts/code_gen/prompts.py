@@ -165,19 +165,23 @@ def _format_dependency_context(ctx: Optional[Dict[str, Any]]) -> str:
             subs = bc.get("subclasses", {})
             if not code:
                 continue
-            # Extract class and method names through the Python backend.
-            # Syntax errors yield an empty unit list, so malformed base
-            # class snippets simply contribute no class summary here.
+            # Extract class and method names through the target-language
+            # backend resolved from the file's extension (defaults to
+            # Python). Syntax errors yield an empty unit list, so malformed
+            # base class snippets simply contribute no class summary here.
             from decoder_lang import get_backend as _get_backend
-            backend = _get_backend("python")
+            from lang_parser import detect_language as _detect_language
+            backend = _get_backend(_detect_language(fp) or "python")
+            class_like = {"class", "struct", "interface", "type", "enum"}
+            units = backend.list_code_units(code, fp)
             classes = [
-                u for u in backend.list_code_units(code, fp)
-                if u.unit_type == "class" and u.parent is None
+                u for u in units
+                if u.unit_type in class_like and u.parent is None
             ]
             if classes:
                 first_class = classes[0]
                 methods = [
-                    u.name for u in backend.list_code_units(code, fp)
+                    u.name for u in units
                     if u.unit_type == "method" and u.parent == first_class.name
                 ]
                 parts.append(

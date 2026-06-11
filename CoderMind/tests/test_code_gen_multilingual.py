@@ -158,6 +158,37 @@ def test_api_summary_uses_backend_for_non_python(monkeypatch, tmp_path: Path) ->
     assert "def NewStore" not in summary
 
 
+def test_dependency_context_base_class_summary_uses_backend(tmp_path: Path) -> None:
+    # Regression: _format_dependency_context previously parsed base-class code
+    # with the Python backend, so a Go/Rust base class surfaced as a
+    # "parse error — read file directly" line instead of its real
+    # struct/method summary. The backend must be resolved from the file path.
+    from code_gen import prompts  # noqa: PLC0415
+
+    ctx = {
+        "base_classes": {
+            "base_classes": [
+                {
+                    "file_path": "internal/base.go",
+                    "code": (
+                        "package store\n\n"
+                        "type Store struct{ path string }\n\n"
+                        "func (s *Store) Save(id int) error { return nil }\n"
+                    ),
+                    "subclasses": {},
+                }
+            ]
+        }
+    }
+
+    summary = prompts._format_dependency_context(ctx)
+
+    assert "`Store` in `internal/base.go`" in summary
+    assert "Save" in summary
+    # The Python-backend fallback line must not appear for valid Go code.
+    assert "parse error" not in summary
+
+
 def test_run_project_tests_uses_backend_command(monkeypatch, tmp_path: Path) -> None:
     seen: dict[str, object] = {}
 
