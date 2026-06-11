@@ -852,7 +852,25 @@ class InterfaceDesigner:
         import_warnings = result.pop("_import_warnings", [])
         
         review_language = primary_language or "python"
-        if global_registry and result.get("success") and review_language == "python":
+        # The global interface review (entry-point identification, wiring
+        # checks, and auto-insertion of missing interface stubs) is currently
+        # Python-only: its review prompts and the stub-synthesis path
+        # (interface_review._insert_unit_into_file_code) assume Python syntax.
+        # Non-Python projects skip this phase — their designed interfaces are
+        # kept as-is and downstream codegen still runs. Generalizing the review
+        # to other languages is tracked as a separate effort.
+        review_enabled = (
+            bool(global_registry)
+            and result.get("success")
+            and review_language == "python"
+        )
+        if global_registry and result.get("success") and not review_enabled:
+            self.logger.info(
+                "Global interface review skipped for non-Python project "
+                "(language=%s); review + auto-fix is currently Python-only.",
+                review_language,
+            )
+        if review_enabled:
             self.logger.info("Starting global interface review phase...")
             print("\n" + "=" * 70)
             print("GLOBAL INTERFACE REVIEW")
