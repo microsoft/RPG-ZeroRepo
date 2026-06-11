@@ -91,9 +91,11 @@ def _needs_llm_review(subtree_files: List[str], repo_path: Path) -> bool:
     Returns:
         True if LLM review is recommended, False if safe to skip.
     """
+    from lang_parser import is_supported_source
+
     for filepath in subtree_files:
         full_path = repo_path / filepath
-        if not full_path.exists() or full_path.suffix != '.py':
+        if not full_path.exists() or not is_supported_source(filepath):
             continue
         try:
             content = full_path.read_text(encoding='utf-8', errors='replace')
@@ -227,7 +229,7 @@ Think from the END USER's perspective, not the developer's.
 {skeleton_only_files}
 
 ## Test Command
-{pytest_cmd}
+{test_cmd}
 
 ## Output
 Last line MUST be one of:
@@ -246,7 +248,7 @@ def _build_review_prompt(
     tasks_path: Path,
     repo_path: Path,
     project_background: str = "",
-    pytest_cmd: str = "",
+    test_cmd: str = "",
 ) -> str:
     """Construct the review prompt for an LLM sub-agent."""
     all_tasks = load_tasks_from_tasks_json(tasks_path)
@@ -283,7 +285,7 @@ def _build_review_prompt(
         static_check_results=static_check_results or "All static checks passed.",
         completed_modules_from_other_subtrees=other_list,
         skeleton_only_files=skel_list,
-        pytest_cmd=pytest_cmd or "python3 -m pytest tests/ -x --tb=short -q --timeout=30",
+        test_cmd=test_cmd or "the project's native test command",
     )
 
     # Append cross-subtree connection check if there are completed dependencies
@@ -428,14 +430,12 @@ def run_subtree_review(
         )
         return result
 
-    # 3. Build pytest command
-    from code_gen.test_runner import get_dev_python
+    # 3. Build the target language's native test command for the review prompt
+    from code_gen.test_runner import get_dev_python, resolve_test_backend
+    from code_gen.batch_prompts import _build_backend_test_cmd
     venv_python = get_dev_python(repo_path) or "python3"
-    pytest_cmd = (
-        f"{venv_python} -m pytest tests/ -x --tb=short -q "
-        f"--timeout=30 --timeout-method=signal "
-        f"-W ignore::DeprecationWarning"
-    )
+    backend = resolve_test_backend(valid_files=subtree_files)
+    test_cmd = _build_backend_test_cmd(backend, repo_path, [], venv_python)
 
     # 4. Build review prompt
     prompt = _build_review_prompt(
@@ -447,7 +447,7 @@ def run_subtree_review(
         tasks_path=tasks_path,
         repo_path=repo_path,
         project_background=project_background,
-        pytest_cmd=pytest_cmd,
+        test_cmd=test_cmd,
     )
 
     # 5. Setup review branch
@@ -496,15 +496,16 @@ def run_subtree_review(
         # 8. Post-verify if review made changes
         if result.status in ("FIXED", "ALL_COMPLETE"):
             # Run pytest to verify no regressions
-            from code_gen.test_runner import run_pytest, ensure_deps_installed
+            from code_gen.test_runner import run_project_tests, ensure_deps_installed
             try:
                 ensure_deps_installed(repo_path)
             except Exception:
                 pass
-            verify_result = run_pytest(
+            verify_result = run_project_tests(
                 repo_path,
                 timeout=180,
                 extra_args=["--timeout=30", "--timeout-method=signal"],
+                backend=backend,
             )
             verify_passed = verify_result.success
             if verify_passed:
