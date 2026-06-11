@@ -15,12 +15,54 @@ from func_design.base_class_agent import (  # noqa: E402
     validate_data_structures,
 )
 from func_design.interface_agent import (  # noqa: E402
+    DependencyCollector,
     SubtreeInterfaceAgent,
     SubtreeInterfaceOutput,
     validate_interface,
 )
 from func_design.interface_prompts import SUBTREE_INTERFACE_PROMPT  # noqa: E402
 from plan_tasks import TaskPlanner  # noqa: E402
+
+
+def test_dependency_collector_extracts_rust_inheritance() -> None:
+    # Regression for G3: non-Python inheritance edges must be extracted via
+    # the backend's list_inheritance (Rust trait impls emit `inherits`),
+    # not the Python-only AST path that silently produced nothing before.
+    collector = DependencyCollector(
+        known_base_classes={"Repo"},
+        known_types=set(),
+        target_language="rust",
+    )
+    code = "struct Store;\ntrait Repo {}\nimpl Repo for Store {}\n"
+    collector.analyze_code_dependencies(
+        code=code,
+        file_path="src/store.rs",
+        base_class_files={"Repo": "src/repo.rs"},
+    )
+    assert any(
+        e["child"] == "Store" and e["parent"] == "Repo"
+        and e["parent_file"] == "src/repo.rs"
+        for e in collector.inheritance_edges
+    ), collector.inheritance_edges
+
+
+def test_dependency_collector_python_inheritance_still_works() -> None:
+    # The Python AST-derived path keeps producing inheritance edges.
+    collector = DependencyCollector(
+        known_base_classes={"Base"},
+        known_types=set(),
+        target_language="python",
+    )
+    code = "class Base:\n    pass\n\nclass Child(Base):\n    pass\n"
+    collector.analyze_code_dependencies(
+        code=code,
+        file_path="pkg/child.py",
+        base_class_files={"Base": "pkg/base.py"},
+    )
+    assert any(
+        e["child"] == "Child" and e["parent"] == "Base"
+        for e in collector.inheritance_edges
+    ), collector.inheritance_edges
 
 
 def test_base_class_validation_accepts_go_source() -> None:

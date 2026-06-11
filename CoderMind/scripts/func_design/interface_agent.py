@@ -277,52 +277,62 @@ class DependencyCollector:
         file_path: str,
         base_class_files: Dict[str, str]
     ):
-        """Analyze code to extract dependencies via AST parsing.
-        
-        Extracts:
-        - Inheritance relationships (class X(BaseClass))
-        - Type references in annotations
-        
+        """Extract code-level dependency edges from interface code.
+
+        Inheritance is resolved uniformly across languages through the
+        backend's :meth:`list_inheritance` (Python derives it from class
+        bases; tree-sitter backends emit ``inherits`` edges). Type
+        references from annotations are a Python-specific enrichment;
+        other languages supply equivalent ``uses_types`` information via
+        the LLM-declared dependencies (see :meth:`process_llm_dependencies`).
+
         Args:
-            code: Python source code to analyze
-            file_path: Path of the file containing this code
-            base_class_files: Mapping of class names to their file paths
+            code: Interface source code to analyze.
+            file_path: Path of the file containing this code.
+            base_class_files: Mapping of class/type names to file paths.
         """
-        units = self.backend.list_code_units(code, file_path)
-        # Invalid interface code yields no dependency edges here.
-        for unit in units:
+        # Inheritance — language-agnostic via the backend.
+        for dep in self.backend.list_inheritance(code, file_path):
+            child = dep.src
+            parent = dep.symbol or dep.dst
+            if child and parent and parent in self.known_base_classes:
+                parent_file = base_class_files.get(parent)
+                self.add_inheritance(child, parent, file_path, parent_file)
+
+        # Type references from annotations — Python-specific rich
+        # extraction. Other languages cover this via LLM ``uses_types``.
+        if self.backend.name == "python":
+            self._analyze_python_type_references(code, file_path, base_class_files)
+
+    def _analyze_python_type_references(
+        self,
+        code: str,
+        file_path: str,
+        base_class_files: Dict[str, str]
+    ):
+        """Add reference edges for Python parameter/return type annotations."""
+        for unit in self.backend.list_code_units(code, file_path):
+            if unit.unit_type not in ("function", "method"):
+                continue
             node = (unit.extra or {}).get("ast_node")
             if node is None:
                 continue
-
-            # Extract inheritance from class declarations
-            if unit.unit_type == "class":
-                child_class = unit.name
-                for base in getattr(node, "bases", []) or []:
-                    parent_name = _extract_name_from_node(base)
-                    if parent_name and parent_name in self.known_base_classes:
-                        parent_file = base_class_files.get(parent_name)
-                        self.add_inheritance(child_class, parent_name, file_path, parent_file)
-
-            # Process both top-level functions and class methods so
-            # annotations inside classes contribute dependency edges.
-            if unit.unit_type in ("function", "method"):
-                func_name = unit.name
-                for arg in getattr(node.args, "args", []):
-                    if arg.annotation is not None:
-                        for t in _extract_type_names(arg.annotation):
-                            if t in self.known_types:
-                                type_file = base_class_files.get(t)
-                                self.add_reference(
-                                    f"function {func_name}", t, file_path, type_file,
-                                )
-                if getattr(node, "returns", None) is not None:
-                    for t in _extract_type_names(node.returns):
+            func_name = unit.name
+            for arg in getattr(node.args, "args", []):
+                if arg.annotation is not None:
+                    for t in _extract_type_names(arg.annotation):
                         if t in self.known_types:
                             type_file = base_class_files.get(t)
                             self.add_reference(
                                 f"function {func_name}", t, file_path, type_file,
                             )
+            if getattr(node, "returns", None) is not None:
+                for t in _extract_type_names(node.returns):
+                    if t in self.known_types:
+                        type_file = base_class_files.get(t)
+                        self.add_reference(
+                            f"function {func_name}", t, file_path, type_file,
+                        )
     
     def process_llm_dependencies(
         self,
@@ -856,29 +866,6 @@ class GlobalInterfaceRegistry:
             return f"{bare_name}{bases_str} [{', '.join(methods[:5])}]"
         return f"{bare_name}{bases_str}"
 
-    @staticmethod
-    def _format_func_signature(node) -> str:
-        """Format a function/method AST node into a concise signature string.
-
-        Compatibility shim for callers that still pass raw AST nodes.
-        Prefer :meth:`PythonBackend.format_signature` when an
-        :class:`LPCodeUnit` is already available.
-        """
-        from lang_parser import LPCodeUnit  # local import to avoid top-level dep
-
-        unit = LPCodeUnit(
-            name=getattr(node, "name", ""),
-            unit_type="function",
-            file_path="<inline>",
-            parent=None,
-            line_start=getattr(node, "lineno", None),
-            line_end=getattr(node, "end_lineno", getattr(node, "lineno", None)),
-            code="",
-            language="python",
-            extra={"ast_node": node, "node_type": type(node).__name__},
-        )
-        return get_backend("python").format_signature(unit)
-
 
 # ============================================================================
 # Import Cross-Validation (A2)
@@ -958,44 +945,6 @@ def cross_validate_imports_vs_calls(
 # ============================================================================
 # Validation Functions
 # ============================================================================
-
-def extract_top_level_definitions(code: str) -> Tuple[List[str], List[str]]:
-    """Extract top-level function and class names from code."""
-    functions = []
-    classes = []
-    # Only inspect direct module children (parent is None).
-    for unit in get_backend("python").list_code_units(code):
-        if unit.parent is not None:
-            continue
-        if unit.unit_type == "function":
-            functions.append(unit.name)
-        elif unit.unit_type == "class":
-            classes.append(unit.name)
-    return functions, classes
-
-
-def check_has_docstring(code: str) -> Tuple[bool, str]:
-    """Check if top-level functions/classes have docstrings."""
-    errors = []
-    # Docstring inspection needs the raw AST node for
-    # ``ast.get_docstring``. Only inspect direct module children.
-    for unit in get_backend("python").list_code_units(code):
-        if unit.parent is not None:
-            continue
-        if unit.unit_type not in ("class", "function"):
-            continue
-        node = (unit.extra or {}).get("ast_node")
-        if node is None:
-            continue
-        if not ast.get_docstring(node):
-            errors.append(
-                f"{type(node).__name__} '{unit.name}' is missing a docstring"
-            )
-
-    if errors:
-        return False, "; ".join(errors)
-    return True, ""
-
 
 def _unit_has_docstring(unit: Any) -> bool:
     """Return whether a parsed Python unit has a docstring."""
