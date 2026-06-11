@@ -547,7 +547,10 @@ class GlobalInterfaceRegistry:
     enabling accurate cross-subtree dependency edges.
     """
     
-    def __init__(self):
+    def __init__(self, backend: Optional[LanguageBackend] = None):
+        # Target-language backend for declaration/signature parsing.
+        # Defaults to Python so standalone/legacy callers keep working.
+        self.backend = backend or get_backend("python")
         # unit_name -> {file_path, subtree_name, unit_type, signature_summary, features}
         self.units: Dict[str, Dict[str, Any]] = {}
         # class_name -> file_path (for quick lookup)
@@ -621,7 +624,9 @@ class GlobalInterfaceRegistry:
                     bare_name = unit_name
                 
                 # Extract a signature summary from the code (first non-import, non-blank line)
-                signature_summary = self._extract_signature_summary(code, unit_type, bare_name)
+                signature_summary = self._extract_signature_summary(
+                    code, unit_type, bare_name, self.backend
+                )
                 
                 unit_info = {
                     "file_path": file_path,
@@ -797,18 +802,19 @@ class GlobalInterfaceRegistry:
         return "\n\n".join(listings)
     
     @staticmethod
-    def _extract_signature_summary(code: str, unit_type: str, bare_name: str) -> str:
+    def _extract_signature_summary(
+        code: str, unit_type: str, bare_name: str, backend: LanguageBackend
+    ) -> str:
         """Extract a concise signature summary from interface code.
 
-        Declaration discovery routes through ``PythonBackend.list_code_units``
-        and ``format_signature``. Class summaries still need direct
-        base-class names, so they read the preserved ``ClassDef`` from
-        ``unit.extra['ast_node']``.
+        Declaration discovery routes through ``backend.list_code_units``
+        and ``format_signature``. For Python, class summaries additionally
+        read direct base-class names from the preserved ``ClassDef`` in
+        ``unit.extra['ast_node']``; other backends omit bases gracefully.
         """
         if not code:
             return bare_name
 
-        backend = get_backend("python")
         units = backend.list_code_units(code, "<signature>")
         if not units:
             return bare_name
@@ -882,7 +888,8 @@ def cross_validate_imports_vs_calls(
     code: str,
     file_path: str,
     declared_calls: List[str],
-    global_registry: GlobalInterfaceRegistry
+    global_registry: GlobalInterfaceRegistry,
+    backend: LanguageBackend,
 ) -> List[Dict[str, str]]:
     """Parse import statements in interface code and cross-validate against declared calls. Identifies symbols that are imported from modules in the global registry but not declared as call dependencies.
     
@@ -900,11 +907,11 @@ def cross_validate_imports_vs_calls(
     warnings = []
     declared_set = set(declared_calls)
 
-    # Import discovery routes through the Python backend. ``list_imports``
-    # returns one LPDependency per imported symbol; ``extra["module"]``
-    # holds the source module and ``extra["imported"]`` is present for
-    # ``from X import Y`` statements. Syntax errors yield an empty list.
-    backend = get_backend("python")
+    # Import discovery routes through the target language backend.
+    # ``list_imports`` returns one LPDependency per imported symbol;
+    # ``extra["module"]`` holds the source module and ``extra["imported"]``
+    # is present for ``from X import Y`` statements. Backends whose imports
+    # do not populate these fields simply yield no warnings.
     for dep in backend.list_imports(code, file_path):
         extra = dep.extra or {}
         module = extra.get("module") or ""
@@ -2115,7 +2122,7 @@ class InterfaceOrchestrator:
         )
         
         # --- Initialize GlobalInterfaceRegistry ---
-        global_registry = GlobalInterfaceRegistry()
+        global_registry = GlobalInterfaceRegistry(backend=self.backend)
 
         # Track state across subtrees
         all_interfaces = {}
@@ -2274,14 +2281,13 @@ class InterfaceOrchestrator:
                         if edge.get("caller_file") == file_path:
                             declared_calls.add(edge.get("callee", ""))
                 
-                warnings = []
-                if self.backend.name == "python":
-                    warnings = cross_validate_imports_vs_calls(
-                        code=file_code,
-                        file_path=file_path,
-                        declared_calls=list(declared_calls),
-                        global_registry=global_registry,
-                    )
+                warnings = cross_validate_imports_vs_calls(
+                    code=file_code,
+                    file_path=file_path,
+                    declared_calls=list(declared_calls),
+                    global_registry=global_registry,
+                    backend=self.backend,
+                )
                 if warnings:
                     all_import_warnings.extend(warnings)
                     for w in warnings:
@@ -2629,10 +2635,10 @@ class InterfaceOrchestrator:
             if not file_path or not code:
                 continue
             
-            # Parse code through the Python backend so declaration
+            # Parse code through the target-language backend so declaration
             # discovery is shared with other interface-analysis paths.
             # Syntax errors yield an empty unit list.
-            for unit in get_backend("python").list_code_units(code, file_path):
+            for unit in self.backend.list_code_units(code, file_path):
                 if unit.unit_type == "class":
                     mapping[unit.name] = file_path
                 elif unit.unit_type in ("function", "method"):
@@ -2649,10 +2655,10 @@ class InterfaceOrchestrator:
                 if not file_path or not code:
                     continue
                 
-                # Parse through PythonBackend to share class discovery
-                # with interface dependency analysis. Syntax errors
-                # yield an empty unit list.
-                for unit in get_backend("python").list_code_units(code, file_path):
+                # Parse through the target-language backend to share class
+                # discovery with interface dependency analysis. Syntax
+                # errors yield an empty unit list.
+                for unit in self.backend.list_code_units(code, file_path):
                     if unit.unit_type == "class":
                         mapping[unit.name] = file_path
                 
