@@ -497,10 +497,11 @@ def run_subtree_review(
         if result.status in ("FIXED", "ALL_COMPLETE"):
             # Run pytest to verify no regressions
             from code_gen.test_runner import run_project_tests, ensure_deps_installed
-            try:
-                ensure_deps_installed(repo_path)
-            except Exception:
-                pass
+            if backend.name == "python":
+                try:
+                    ensure_deps_installed(repo_path)
+                except Exception:
+                    pass
             verify_result = run_project_tests(
                 repo_path,
                 timeout=180,

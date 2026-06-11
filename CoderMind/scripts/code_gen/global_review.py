@@ -1130,11 +1130,12 @@ def global_review(
         except Exception:
             pass
 
-        # 1. Pre-check: run pytest to know current state
-        try:
-            ensure_deps_installed(repo_path)
-        except Exception:
-            pass
+        # 1. Pre-check: run the project's tests to know current state
+        if backend.name == "python":
+            try:
+                ensure_deps_installed(repo_path)
+            except Exception:
+                pass
         pre_pytest = run_project_tests(
             repo_path,
             timeout=DEFAULT_PYTEST_OVERALL_TIMEOUT,
