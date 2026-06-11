@@ -27,6 +27,7 @@ from common import LLMClient
 # ``find_main_block_lineno`` helper so entry-point splicing shares the
 # same parser abstraction as the rest of interface design.
 from decoder_lang import get_backend
+from decoder_lang.prompt_directive import with_language_directive
 
 from .interface_agent import (
     GlobalInterfaceRegistry,
@@ -474,11 +475,17 @@ class InterfaceReviewer:
         llm_client: Optional[LLMClient] = None,
         trajectory: Optional[Any] = None,
         step_id: Optional[int] = None,
+        target_language: Optional[str] = None,
     ):
         if llm_client is None:
             self.llm = LLMClient(trajectory=trajectory, step_id=step_id)
         else:
             self.llm = llm_client
+        # Target-language backend. Structural checks and dependency-edge
+        # fixes are language-agnostic; only interface-stub synthesis
+        # (``add_interface``) is Python-specific and is skipped for other
+        # languages. Defaults to Python so standalone callers are unaffected.
+        self.backend = get_backend(target_language or "python")
         self.logger = logging.getLogger(__name__)
     
     def review_and_fix(
@@ -783,7 +790,26 @@ accept that aspect of the design as-is.
 Please perform the review tasks and return the JSON result.
 """.strip()
         
-        combined_prompt = f"{GLOBAL_INTERFACE_REVIEW_PROMPT}\n\n{user_prompt}"
+        # Non-Python projects cannot use the add_interface auto-handler
+        # (stub synthesis is Python-only). Steer the LLM toward the
+        # language-agnostic actions so it does not waste a fix slot on a
+        # request that will be skipped.
+        language_note = ""
+        if self.backend.name != "python":
+            hints = self.backend.prompt_hints()
+            language_note = (
+                f"\n\n## Target Language: {hints.display_name}\n"
+                f"This is a {hints.display_name} project, NOT Python. When "
+                "recommending fixes, use `add_dependency` (wire an existing "
+                "callee) or `modify_interface` (describe a manual change). "
+                "Do NOT use `add_interface`: automatic interface-stub "
+                "synthesis is only available for Python and will be skipped."
+            )
+
+        combined_prompt = (
+            with_language_directive(GLOBAL_INTERFACE_REVIEW_PROMPT, self.backend)
+            + f"{language_note}\n\n{user_prompt}"
+        )
         
         try:
             response = self.llm.generate(
@@ -936,6 +962,19 @@ Please perform the review tasks and return the JSON result.
                 # else: empty calls_to_add — silently ignore (LLM bug, not actionable)
 
             elif action == "add_interface":
+                # Interface-stub synthesis is Python-only: it emits a
+                # ``def/class`` body with a docstring + ``pass``. For other
+                # languages we cannot materialise a syntactically valid stub,
+                # so skip the request without counting it as an unresolved
+                # blocker (the review still passes on structural grounds).
+                if self.backend.name != "python":
+                    self.logger.info(
+                        "[InterfaceReviewer] Skipping add_interface for "
+                        "%s project (stub synthesis is Python-only): "
+                        "%s::%s",
+                        self.backend.name, file_path, unit_name,
+                    )
+                    continue
                 ok, reason, edges_added = self._apply_add_interface(
                     fix=fix,
                     interfaces_data=interfaces_data,

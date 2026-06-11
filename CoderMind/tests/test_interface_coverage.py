@@ -12,6 +12,7 @@ if str(_SCRIPTS) not in sys.path:
     sys.path.insert(0, str(_SCRIPTS))
 
 from func_design.interface_agent import GlobalInterfaceRegistry, InterfaceOrchestrator
+from decoder_lang import get_backend as get_backend_for
 
 _SPEC = importlib.util.spec_from_file_location(
     "design_interfaces_script",
@@ -284,3 +285,114 @@ def test_subtree_complete_allows_cross_file_feature_mapping() -> None:
         file_nodes,
         file_container,
     )
+
+
+# ---------------------------------------------------------------------------
+# Global interface review — multilingual (G4 stage 1)
+# ---------------------------------------------------------------------------
+
+class _StubLLM:
+    """Minimal LLMClient stand-in (review fixes are applied directly)."""
+
+
+def _make_reviewer(language: str):
+    from func_design.interface_review import InterfaceReviewer
+
+    return InterfaceReviewer(llm_client=_StubLLM(), target_language=language)
+
+
+def test_apply_fixes_add_dependency_is_language_agnostic() -> None:
+    reviewer = _make_reviewer("go")
+    enhanced_data_flow: dict = {"invocation_edges": []}
+    registry = GlobalInterfaceRegistry(backend=get_backend_for("go"))
+
+    stats = reviewer._apply_fixes(
+        fixes=[{
+            "action": "add_dependency",
+            "file_path": "internal/cli.go",
+            "unit_name": "function Run",
+            "calls_to_add": [
+                {"callee": "NewStore", "callee_file": "internal/store.go"},
+            ],
+        }],
+        interfaces_data={"subtrees": {}},
+        enhanced_data_flow=enhanced_data_flow,
+        global_registry=registry,
+    )
+
+    assert stats["applied_edges"] == 1
+    assert stats["unapplied"] == []
+    assert enhanced_data_flow["invocation_edges"][0]["callee"] == "NewStore"
+
+
+def test_apply_fixes_skips_add_interface_for_non_python() -> None:
+    reviewer = _make_reviewer("go")
+    registry = GlobalInterfaceRegistry(backend=get_backend_for("go"))
+    interfaces_data = {
+        "subtrees": {
+            "Core": {
+                "interfaces": {
+                    "internal/cli.go": {"units": [], "units_to_features": {}, "file_code": ""},
+                }
+            }
+        }
+    }
+
+    stats = reviewer._apply_fixes(
+        fixes=[{
+            "action": "add_interface",
+            "file_path": "internal/cli.go",
+            "unit_name": "function Run",
+            "signature": "func Run() error",
+            "docstring": "Run the CLI.",
+            "feature_path": "CLI/run",
+        }],
+        interfaces_data=interfaces_data,
+        enhanced_data_flow={"invocation_edges": []},
+        global_registry=registry,
+        skeleton_features={"CLI/run"},
+        rpg_features={"CLI/run"},
+    )
+
+    # add_interface is skipped for non-Python and NOT counted as unapplied,
+    # so the review can still pass on structural grounds.
+    assert stats["applied_fixes"] == 0
+    assert stats["applied_edges"] == 0
+    assert stats["unapplied"] == []
+    # No Go stub was injected into the interface file.
+    cli = interfaces_data["subtrees"]["Core"]["interfaces"]["internal/cli.go"]
+    assert cli["units"] == []
+
+
+def test_apply_fixes_applies_add_interface_for_python() -> None:
+    reviewer = _make_reviewer("python")
+    registry = GlobalInterfaceRegistry(backend=get_backend_for("python"))
+    interfaces_data = {
+        "subtrees": {
+            "Core": {
+                "interfaces": {
+                    "src/cli.py": {"units": [], "units_to_features": {}, "file_code": ""},
+                }
+            }
+        }
+    }
+
+    stats = reviewer._apply_fixes(
+        fixes=[{
+            "action": "add_interface",
+            "file_path": "src/cli.py",
+            "unit_name": "function run",
+            "signature": "def run() -> None:",
+            "docstring": "Run the CLI.",
+            "feature_path": "CLI/run",
+        }],
+        interfaces_data=interfaces_data,
+        enhanced_data_flow={"invocation_edges": []},
+        global_registry=registry,
+        skeleton_features={"CLI/run"},
+        rpg_features={"CLI/run"},
+    )
+
+    assert stats["applied_fixes"] == 1
+    cli = interfaces_data["subtrees"]["Core"]["interfaces"]["src/cli.py"]
+    assert "function run" in cli["units"]
