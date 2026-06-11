@@ -44,7 +44,7 @@ logger = logging.getLogger(__name__)
 # ============================================================================
 
 GLOBAL_INTERFACE_REVIEW_PROMPT = """
-You are a senior software engineer reviewing the COMPLETE set of interfaces for an entire Python repository.
+You are a senior software engineer reviewing the COMPLETE set of interfaces for an entire repository.
 
 All subtrees have been designed. Your task is to review the interfaces holistically,
 focusing on CROSS-MODULE integration — not individual interface quality.
@@ -69,8 +69,8 @@ role in the architecture means they don't need an internal caller. This includes
   This explicitly includes (do not omit these):
   * HTTP route handlers (Flask `@route` / FastAPI / Django view functions) —
     even if not decorated in the signature, any unit whose role is "respond
-    to an HTTP request" is invoked by the web framework, not by other Python
-    code. Always mark these as entry_points.
+    to an HTTP request" is invoked by the web framework, not by other code
+    in the project. Always mark these as entry_points.
   * CLI subcommand handlers (click commands, argparse callbacks).
   * Event / signal subscribers, background workers, scheduled job entry
     functions, message-queue consumers.
@@ -422,7 +422,11 @@ _SIGNATURE_RE = __import__("re").compile(r"^(def |class )[A-Za-z_]\w*\s*\(.*\)\s
 
 
 def _insert_unit_into_file_code(file_code: str, stub: str) -> str:
-    """Insert ``stub`` into ``file_code`` at a safe location.
+    """Insert a Python ``stub`` into ``file_code`` at a safe location.
+
+    Only reached for Python projects: ``_apply_fixes`` skips the
+    ``add_interface`` action (the sole caller) for non-Python backends,
+    because stub synthesis emits Python ``def``/``class`` syntax.
 
     Preferred insertion point is **immediately before** any top-level
     ``if __name__ == "__main__":`` block, so handler-added units do not
@@ -439,9 +443,9 @@ def _insert_unit_into_file_code(file_code: str, stub: str) -> str:
     if not file_code.strip():
         return stub
 
-    # Use the backend hook when the language has an explicit main-block
-    # concept. Backends without such a hook fall through to the append
-    # branch, which keeps the splice safe for non-Python projects.
+    # Locate the module's main guard via the Python backend so a handler-
+    # added unit is spliced before it. A missing guard (or a parse error)
+    # falls through to the append branch below.
     backend = get_backend("python")
     find_main = getattr(backend, "find_main_block_lineno", None)
     main_lineno = find_main(file_code) if find_main is not None else None
