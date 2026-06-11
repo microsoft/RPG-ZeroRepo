@@ -123,13 +123,13 @@ def test_refresh_dep_graph_safe_without_files_falls_back_to_full(codegen_workspa
 
 
 def test_refresh_dep_graph_safe_skips_non_py_files(codegen_workspace, caplog):
-    """If the batch only edited non-Python files, the function should short-circuit without scanning the AST."""
+    """If the batch only edited non-source files, the function should short-circuit without scanning the AST."""
     ws, code, _, _, _, run_batch = codegen_workspace
     import logging
     with caplog.at_level(logging.INFO, logger="run_batch"):
         run_batch._refresh_dep_graph_safe(code, changed_files=["README.md"])
     assert any(
-        "no .py files" in record.getMessage() for record in caplog.records
+        "no supported source files" in record.getMessage() for record in caplog.records
     ), "expected the short-circuit log line"
 
 

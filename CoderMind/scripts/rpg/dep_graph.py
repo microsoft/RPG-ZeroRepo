@@ -237,6 +237,9 @@ class DependencyGraph:
     _TS_JS_IMPORT_EXTENSIONS = (".ts", ".tsx", ".js", ".jsx")
     # File extensions belonging to the C-family for include-graph heuristics.
     _C_FAMILY_EXTENSIONS = frozenset({".c", ".h", ".cpp", ".cc", ".cxx", ".hpp", ".hh", ".hxx"})
+    # C-family header extensions. A function call resolves to its definition in
+    # an implementation file, not a prototype/declaration in a header.
+    _C_HEADER_EXTENSIONS = frozenset({".h", ".hpp", ".hh", ".hxx"})
     # File extensions belonging to Rust crates.
     _RUST_EXTENSIONS = frozenset({".rs"})
 
@@ -2547,6 +2550,16 @@ class DependencyGraph:
                 matches.append(node_id)
         if len(matches) == 1:
             return matches[0]
+        # A function declared in a header (prototype) and defined in an
+        # implementation file yields two same-named nodes. The call target is
+        # the definition, so prefer implementation-file matches over headers.
+        impl_matches = [
+            node_id for node_id in matches
+            if PurePosixPath(node_id.split(":", 1)[0]).suffix.lower()
+            not in self._C_HEADER_EXTENSIONS
+        ]
+        if len(impl_matches) == 1:
+            return impl_matches[0]
         return None
 
     def _node_parent_dir(self, node_id: str) -> str:
