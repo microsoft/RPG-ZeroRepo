@@ -35,6 +35,7 @@ from common.utils import (
     is_test_file,
     get_node_range_robust,
     extract_source_by_lines,
+    path_has_skip_dir,
 )
 
 logger = logging.getLogger(__name__)
@@ -67,13 +68,8 @@ def _exclude_irrelevant_for_build(file_id: str) -> bool:
         ".mp3", ".mp4", ".zip", ".tar", ".gz",
         ".pdf", ".docx", ".xlsx", ".pptx",
         ".exe", ".dll", ".so", ".o", ".a",
+        ".rlib", ".rmeta",
         ".log",
-    }
-
-    PATH_BLACKLIST = {
-        ".git", "__pycache__", "node_modules",
-        ".venv", "venv", ".idea", ".vscode",
-        ".pytest_cache", ".mypy_cache", "build", "dist",
     }
 
     FILE_BLACKLIST = {
@@ -88,7 +84,7 @@ def _exclude_irrelevant_for_build(file_id: str) -> bool:
     if path_obj.suffix.lower() in EXT_BLACKLIST:
         return False
 
-    if any(part in PATH_BLACKLIST for part in path_obj.parts):
+    if path_has_skip_dir(file_id):
         return False
 
     if path_obj.name in FILE_BLACKLIST:

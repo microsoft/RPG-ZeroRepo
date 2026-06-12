@@ -27,6 +27,51 @@ from collections import defaultdict
 logger = logging.getLogger(__name__)
 
 
+# Directory names repository scanners never descend into: version control,
+# editor metadata, virtualenvs, dependency installs, and the build-output
+# trees of every language the decoder targets (Rust ``target``, CMake build
+# dirs, ``build``/``dist``, JS framework caches). Centralized so dep_graph and
+# the RPG encoder share one definition instead of each keeping its own list.
+#
+# Note: any dot-prefixed directory (``.git``, ``.github``, ``.cmind``,
+# ``.venv``, ...) is also skipped via :func:`is_skip_dir`; the explicit
+# entries below cover the non-dotted build/dependency dirs plus a few common
+# dot-dirs kept for readability.
+SCAN_SKIP_DIRS = frozenset({
+    ".git", ".hg", ".svn",
+    ".github", ".cmind",
+    "__pycache__", ".pytest_cache", ".mypy_cache",
+    ".idea", ".vscode",
+    ".venv", "venv", "env",
+    "node_modules", ".next", ".nuxt",
+    "target",
+    "build", "dist",
+    "cmake-build-debug", "cmake-build-release",
+})
+
+
+def is_skip_dir(name: str) -> bool:
+    """Return True if a directory ``name`` should never be scanned.
+
+    Skips every dot-prefixed directory (``.git``, ``.github``, ``.cmind``,
+    editor/tooling state, virtualenvs) plus the explicit build/dependency
+    dirs in :data:`SCAN_SKIP_DIRS`. Centralizes the rule so ``os.walk``
+    scanners and the dependency-graph path filter stay consistent.
+    """
+    return name.startswith(".") or name in SCAN_SKIP_DIRS
+
+
+def path_has_skip_dir(path: str) -> bool:
+    """Return True if any parent directory of ``path`` is a skip dir.
+
+    Used by path-string filters (e.g. the dependency-graph build filter)
+    that receive a relative path rather than walking a tree.
+    """
+    parts = PurePosixPath(str(path).replace("\\", "/")).parts
+    # The last part is the file name; only directory parts gate inclusion.
+    return any(is_skip_dir(part) for part in parts[:-1])
+
+
 # ============================================================================
 # Repository Info Functions
 # ============================================================================

@@ -33,6 +33,7 @@ from common.llm_types import (
 )
 from common.rpg_io import atomic_write_rpg
 from common.utils import (
+    is_skip_dir,
     exclude_files,
     normalize_path,
     parse_code_blocks,
@@ -121,14 +122,7 @@ class RPGParser:
 
         for root, dirs, files in os.walk(self.repo_dir):
             # Skip hidden dirs and common non-essential dirs
-            dirs[:] = [
-                d for d in dirs
-                if not d.startswith(".")
-                and d not in {
-                    "__pycache__", "node_modules", ".git",
-                    ".venv", "venv", "env",
-                }
-            ]
+            dirs[:] = [d for d in dirs if not is_skip_dir(d)]
             dirs.sort()
 
             rel_root = os.path.relpath(root, self.repo_dir)

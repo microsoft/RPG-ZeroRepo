@@ -615,17 +615,10 @@ class TestRPGEvolutionProcessDiff:
     def test_no_changes_detected(self, simple_rpg):
         """When diff detects no changes, RPG should be returned unchanged."""
         with patch(
-            "rpg_encoder.rpg_evolution.RPGParser",
-        ) as MockParser, \
-             patch(
                  "rpg_encoder.rpg_evolution.generate_detailed_diff",
                  return_value={"added": {}, "deleted": {}, "modified": {}},
              ), \
              patch.object(RPG, "parse_dep_graph"):
-
-            mock_instance = MagicMock()
-            mock_instance.exclude_irrelevant_files.return_value = []
-            MockParser.return_value = mock_instance
 
             result = RPGEvolution.process_diff(
                 repo_name="test",
@@ -649,16 +642,9 @@ class TestRPGEvolutionProcessDiff:
         }
 
         with patch(
-            "rpg_encoder.rpg_evolution.RPGParser",
-        ) as MockParser, \
-             patch(
                  "rpg_encoder.rpg_evolution.generate_detailed_diff",
                  return_value=diff_result,
              ):
-
-            mock_instance = MagicMock()
-            mock_instance.exclude_irrelevant_files.return_value = []
-            MockParser.return_value = mock_instance
 
             result = RPGEvolution.process_diff(
                 repo_name="test",
@@ -686,16 +672,9 @@ class TestRPGEvolutionProcessDiff:
             }
 
             with patch(
-                "rpg_encoder.rpg_evolution.RPGParser",
-            ) as MockParser, \
-                 patch(
                      "rpg_encoder.rpg_evolution.generate_detailed_diff",
                      return_value=diff_result,
                  ):
-
-                mock_instance = MagicMock()
-                mock_instance.exclude_irrelevant_files.return_value = []
-                MockParser.return_value = mock_instance
 
                 RPGEvolution.process_diff(
                     repo_name="test",

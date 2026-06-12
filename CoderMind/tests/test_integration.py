@@ -585,16 +585,9 @@ class TestEvolutionToRPGUpdate:
     def test_evolution_process_diff_no_changes(self, rpg_with_structure):
         """process_diff with no changes returns the RPG unchanged."""
         with patch(
-            "rpg_encoder.rpg_evolution.RPGParser",
-        ) as MockParser, \
-             patch(
                  "rpg_encoder.rpg_evolution.generate_detailed_diff",
                  return_value={"added": {}, "deleted": {}, "modified": {}},
              ):
-            mock_instance = MagicMock()
-            mock_instance.exclude_irrelevant_files.return_value = []
-            MockParser.return_value = mock_instance
-
             result = RPGEvolution.process_diff(
                 repo_name="test_project",
                 repo_info="test",

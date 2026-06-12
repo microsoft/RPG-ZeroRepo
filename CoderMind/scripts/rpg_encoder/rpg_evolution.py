@@ -29,6 +29,7 @@ import time
 from typing import Any, Dict, List, Optional, Tuple, Union
 
 from common.utils import (
+    is_skip_dir,
     exclude_files,
     filter_excluded_files,
     normalize_path,
@@ -38,7 +39,6 @@ from rpg.code_unit import CodeSnippetBuilder, CodeUnit, ParsedFile
 from rpg import NodeType, RPG
 
 from .refactor_tree import RefactorTree
-from .rpg_encoding import RPGParser
 from .semantic_parsing import ParseFeatures
 
 logger = logging.getLogger(__name__)
@@ -86,14 +86,7 @@ def _load_skeleton_from_repo(
     valid_files: List[str] = []
 
     for root, dirs, files in os.walk(repo_dir):
-        dirs[:] = [
-            d for d in dirs
-            if not d.startswith(".")
-            and d not in {
-                "__pycache__", "node_modules", ".git",
-                ".venv", "venv", "env",
-            }
-        ]
+        dirs[:] = [d for d in dirs if not is_skip_dir(d)]
         dirs.sort()
 
         rel_root = os.path.relpath(root, repo_dir)
@@ -666,7 +659,7 @@ class RPGEvolution:
                 behaviour and will log a warning.
 
         Pipeline:
-        1. Exclude irrelevant files
+        1. Carry forward deterministic exclusions (no per-commit LLM vote)
         2. Compute detailed diff (``generate_detailed_diff``)
         3. Process additions / deletions / modifications
         4. Update dependency graph index
@@ -705,21 +698,22 @@ class RPGEvolution:
 
         last_excluded_files = last_rpg.excluded_files if last_rpg else []
 
-        # Exclude irrelevant files in current repo
-        rpg_parser = RPGParser(
-            repo_dir=cur_repo_dir,
-            repo_name=repo_name,
-            logger=logger,
+        # Incremental updates run on every commit (post-commit hook). Exclusion
+        # is fully deterministic here — no per-commit LLM vote (it cost ~30
+        # round-trips per generation and only re-derived paths the rules below
+        # already cover). ``generate_detailed_diff`` loads both snapshots via
+        # ``_load_skeleton_from_repo`` (which prunes skip-dirs and keeps only
+        # supported, non-test source) and re-applies the ``exclude_files``
+        # prefix rules itself, so the only thing to carry forward is the
+        # encode-time exclusion list — which may include LLM-identified
+        # vendored / third-party paths the prefix rules can't infer.
+        all_exclude_files = sorted(set(last_excluded_files))
+        logger.info(
+            "Carrying forward %d excluded path(s) from the encode baseline.",
+            len(all_exclude_files),
         )
 
-        cur_exclude_files = rpg_parser.exclude_irrelevant_files(
-            repo_info=repo_info,
-            max_votes=max_exclude_votes,
-        )
-        all_exclude_files = sorted(set(last_excluded_files + cur_exclude_files))
-        logger.info("Excluded files for current repo: %d", len(all_exclude_files))
-
-        # Compute detailed diff
+        # Compute detailed diff (re-applies deterministic exclusion internally)
         all_diff = generate_detailed_diff(
             last_repo_dir=last_repo_dir,
             cur_repo_dir=cur_repo_dir,
