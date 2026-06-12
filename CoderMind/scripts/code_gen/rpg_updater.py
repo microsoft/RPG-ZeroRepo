@@ -116,6 +116,12 @@ class CodeDependencyAnalyzer:
             file_path: Path to the file
             code: Source code content
         """
+        # Python-AST based: dependencies for other languages come from the
+        # tree-sitter dependency graph. Skip non-Python sources quietly rather
+        # than emitting a misleading "SyntaxError parsing" warning on every
+        # generated .rs/.js/.go/... file.
+        if Path(file_path).suffix.lower() != ".py":
+            return
         try:
             tree = ast.parse(code)
         except SyntaxError as e:

@@ -149,10 +149,16 @@ def _reconcile_global_review_after_orphan_review(
     global_review["feature_orphans_count"] = len(unresolved_features)
     global_review["unresolved_orphan_units"] = unresolved_keys
     global_review["unresolved_orphan_features"] = unresolved_features
+    # Advisory ``modify_interface`` requests never gate the verdict; only
+    # genuinely-unapplied wiring (``blocking_unapplied_fixes_count``) does.
+    blocking_unapplied = global_review.get(
+        "blocking_unapplied_fixes_count",
+        global_review.get("unapplied_fixes_count", 0),
+    )
     global_review["passed"] = (
         len(unresolved_keys) == 0
         and len(unresolved_features) == 0
-        and global_review.get("unapplied_fixes_count", 0) == 0
+        and blocking_unapplied == 0
     )
 
 
@@ -879,7 +885,11 @@ class InterfaceDesigner:
                 import_warnings=import_warnings,
                 data_flow_edges=data_flow.get("data_flow", []),
                 dependency_collector=dependency_collector,
-                max_fix_iterations=2,
+                # Three review-fix cycles give coverage gaps (LLM under-listing
+                # a unit's ``features``) an extra chance to converge before the
+                # gate reports a feature-orphan WARN; two was often too few for
+                # web projects with many fine-grained presentation features.
+                max_fix_iterations=3,
                 skeleton_features=collect_skeleton_features(skeleton),
                 rpg_features=collect_rpg_feature_paths(REPO_RPG_FILE),
             )
@@ -893,6 +903,8 @@ class InterfaceDesigner:
                 "feature_orphans_count": len(review_result.get("final_feature_orphans", [])),
                 "orphan_units_count": len(review_result.get("final_orphan_units", [])),
                 "unapplied_fixes_count": len(review_result.get("unapplied_fixes", [])),
+                "advisory_fixes_count": len(review_result.get("advisory_fixes", [])),
+                "blocking_unapplied_fixes_count": len(review_result.get("blocking_unapplied_fixes", [])),
                 "unapplied_fixes": review_result.get("unapplied_fixes", []),
                 "iterations_run": review_result.get("iterations_run", 0),
                 "passed": review_result.get("passed", False),
@@ -1198,9 +1210,16 @@ class InterfaceDesigner:
             orphan_units = global_review.get("orphan_units_count", 0)
             orphan_features = global_review.get("feature_orphans_count", 0)
             unapplied_count = global_review.get("unapplied_fixes_count", 0)
+            advisory_count = global_review.get("advisory_fixes_count", 0)
+            blocking_count = global_review.get(
+                "blocking_unapplied_fixes_count", unapplied_count
+            )
             print(f"  Orphan units (no incoming edges): {orphan_units}")
             print(f"  Orphan features (no unit reachable from entry): {orphan_features}")
-            print(f"  Unapplied fix requests: {unapplied_count}")
+            print(
+                f"  Unapplied fix requests: {unapplied_count} "
+                f"({blocking_count} blocking, {advisory_count} advisory)"
+            )
             for u in global_review.get("unapplied_fixes", [])[:3]:
                 print(f"    - [{u.get('action','?')}] "
                       f"{u.get('file_path','?')}::{u.get('unit_name','?')}"

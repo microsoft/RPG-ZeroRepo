@@ -339,9 +339,11 @@ def run_single_attempt(
     if not agent_passed:
         result["failure_reason"] = agent_reason
         logger.info("Sub-agent self-reported FAIL: %s", agent_reason)
-    elif agent_summary is None:
-        # PASS without the required PYTEST_SUMMARY line is suspicious;
-        # log it so post_verify_failure analysis is easier.
+    elif agent_summary is None and not is_project_docs_batch(task):
+        # PASS without the required PYTEST_SUMMARY line is suspicious for a
+        # test-bearing task; log it so post_verify_failure analysis is easier.
+        # Docs/entry batches (README, requirements) run no tests and are
+        # post-verified by skip, so a missing summary is expected there.
         logger.warning(
             "Sub-agent reported PASS but did not provide PYTEST_SUMMARY line"
         )

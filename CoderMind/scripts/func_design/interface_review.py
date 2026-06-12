@@ -183,9 +183,10 @@ Rules for `add_interface` (auto-applied when valid):
   immediately be reported as orphan).
 
 Rules for `modify_interface`:
-- This action has no auto-handler. Use it sparingly and only for true
-  architectural issues (e.g. breaking a circular import). Each such request
-  will be recorded as `unapplied_fixes` and will block `passed=true`.
+- This action has no auto-handler: it is recorded as an advisory
+  `unapplied_fix` for manual follow-up and does NOT block `passed`. Use it
+  sparingly and only for true architectural issues (e.g. breaking a
+  circular import).
 - Do NOT use modify_interface for cases solvable by add_dependency or
   add_interface.
 
@@ -652,15 +653,25 @@ class InterfaceReviewer:
                 f"{len(final_feature_orphans)} orphan feature(s)"
             )
 
-        # Collect unapplied fixes from every iteration (modify_interface /
-        # add_interface requests that have no auto-handler). These block
-        # passed=true because they represent acknowledged-but-unresolved
-        # architectural issues.
+        # Collect unapplied fixes from every iteration and classify them:
+        #   * advisory  — ``modify_interface`` requests, which by design have
+        #     no auto-handler. They are architectural suggestions for manual
+        #     follow-up and do NOT gate the verdict.
+        #   * blocking  — an ``add_dependency`` with unresolved callees or a
+        #     rejected ``add_interface``: wiring the pipeline could not
+        #     install. These gate ``passed``.
         unapplied_fixes: List[Dict[str, Any]] = []
         for entry in review_history:
             stats = entry.get("fix_stats") or {}
             for u in stats.get("unapplied", []):
                 unapplied_fixes.append({**u, "iteration": entry.get("iteration")})
+
+        advisory_fixes = [
+            u for u in unapplied_fixes if u.get("action") == "modify_interface"
+        ]
+        blocking_unapplied_fixes = [
+            u for u in unapplied_fixes if u.get("action") != "modify_interface"
+        ]
 
         last_llm_pass = (
             review_history[-1]["llm_review"].get("pass", False)
@@ -669,7 +680,7 @@ class InterfaceReviewer:
         code_passed = (
             len(final_orphan_units) == 0
             and len(final_feature_orphans) == 0
-            and len(unapplied_fixes) == 0
+            and len(blocking_unapplied_fixes) == 0
         )
 
         final_result = {
@@ -678,6 +689,8 @@ class InterfaceReviewer:
             "final_feature_orphans": final_feature_orphans,
             "final_orphan_units": final_orphan_units,
             "unapplied_fixes": unapplied_fixes,
+            "advisory_fixes": advisory_fixes,
+            "blocking_unapplied_fixes": blocking_unapplied_fixes,
             "iterations_run": len(review_history),
             # ``last_llm_pass`` is a snapshot taken BEFORE the LLM's own
             # iteration-N fixes are applied, so it can read FAIL even when
