@@ -48,12 +48,17 @@ from code_gen._constants import (  # noqa: E402
 def final_test(
     repo_path: Optional[Path] = None,
     state_path: Path = STATE_FILE,
+    max_repair_iters: int = 2,
 ) -> Dict[str, Any]:
     """Run the full test suite against the completed repo.
 
     Args:
         repo_path: Project repo path.
         state_path: Path to state file.
+        max_repair_iters: Bound on repair sub-agent passes when the full
+            suite fails. Cross-batch inconsistencies (e.g. a test asserting the
+            README documents a symbol another batch produced) only surface here,
+            where no per-batch TDD loop can catch them.
 
     Returns:
         Result dict with test statistics.
@@ -86,6 +91,60 @@ def final_test(
         backend=backend,
     )
 
+    # Repair loop for full-suite failures. The per-batch TDD loop only sees one
+    # file's tests at a time, so cross-file consistency gaps (a test asserting
+    # the README / an example module documents a specific symbol or section that
+    # a different batch generated independently) survive to here. Dispatch a
+    # bounded repair pass that reconciles the repo against the EXISTING tests
+    # rather than letting one such gap fail the whole stage with no recovery.
+    repair_attempts = 0
+    while not result.success and repair_attempts < max_repair_iters:
+        repair_attempts += 1
+        from code_gen.batch_prompts import build_batch_pytest_cmd
+
+        venv_python = get_dev_python(repo_path) or "python3"
+        repair_pytest_cmd = build_batch_pytest_cmd([], venv_python)
+        failure_tail = "\n".join(result.output.splitlines()[-80:])
+        repair_prompt = (
+            "The full test suite failed after every batch completed. Reconcile "
+            "the repository so the EXISTING tests pass. These failures are "
+            "usually cross-file consistency gaps — for example a test asserts "
+            "that the README or an example module documents a specific symbol "
+            "or section, but a different batch generated those files "
+            "independently.\n\n"
+            f"Failing test output (tail):\n{failure_tail}\n\n"
+            "Rules:\n"
+            "- Fix production code, documentation, or example files so the "
+            "existing tests pass. Do NOT delete, skip, or weaken any test.\n"
+            "- Do NOT create new test files.\n\n"
+            f"Verify with:\n```\n{repair_pytest_cmd}\n```\n\n"
+            "When the suite is green, commit:\n"
+            "```\ngit add -A && git commit -m "
+            '"fix: reconcile final test failures"\n```\n'
+            "Then output: BATCH_RESULT: PASS"
+        )
+        logger.info(
+            "Final test failed; dispatching repair agent (attempt %d/%d)",
+            repair_attempts, max_repair_iters,
+        )
+        response, error = dispatch_sub_agent(
+            repair_prompt, repo_path, timeout=1800,
+            purpose="final_test_repair",
+        )
+        if not response:
+            logger.warning("Final-test repair agent failed: %s", error)
+            break
+        ensure_on_main(git)
+        result = run_project_tests(
+            repo_path,
+            timeout=DEFAULT_PYTEST_OVERALL_TIMEOUT,
+            extra_args=[
+                "-v", "--tb=short",
+                f"--timeout={DEFAULT_TEST_TIMEOUT}", "--timeout-method=thread",
+            ],
+            backend=backend,
+        )
+
     result_dict = {
         "success": result.success,
         "type": "final_test",
@@ -102,6 +161,9 @@ def final_test(
             f"Review the output above and fix remaining issues."
         ),
     }
+    if repair_attempts:
+        result_dict["final_test_repair_attempts"] = repair_attempts
+        result_dict["final_test_repaired"] = result.success
 
     # After pytest passes, run smoke test and attempt repair if issues found
     if result.success:
