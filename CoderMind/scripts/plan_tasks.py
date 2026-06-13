@@ -1330,8 +1330,23 @@ class TaskPlanner:
                 repo_name=self.repo_name,
                 repo_info=self.repo_info,
                 package_name=self._package_slug(separator="-"),
+                entry_point_path=self._reconciled_entry_point_path(),
             )
         )
+
+    def _reconciled_entry_point_path(self) -> Optional[str]:
+        """Resolve the program entry path from already-designed interfaces.
+
+        Reuses an existing language-appropriate entry file (e.g. Go's
+        ``cmd/<name>/main.go``) when the skeleton already placed one, so
+        the synthetic MAIN_ENTRY task does not generate a second entry
+        (which on Go produced two ``func main()`` packages). Returns
+        ``None`` for languages / layouts with no special reconciliation,
+        letting the backend use its canonical path.
+        """
+        if self.backend.name == "go":
+            return self._resolve_go_command_path()
+        return None
     
     def _build_requirements_task(self) -> str:
         """Build task description for dependency metadata generation."""
@@ -1443,8 +1458,7 @@ package3>=3.0.0  # For feature X
             return templates.main_entry
 
         if self.backend.name == "go":
-            module_name = self._go_module_name()
-            command_path = f"cmd/{module_name}/main.go"
+            command_path = self._resolve_go_command_path()
             return f"""Create the Go command entry point for the repository: {self.repo_name}
 Repository purpose: {self.repo_info}
 
@@ -1458,6 +1472,7 @@ Repository purpose: {self.repo_info}
 - Every import must reference real packages and symbols from this module.
 - Use idiomatic Go error handling with explicit non-zero exits on user-facing failures.
 - Keep output plain text unless the requirements explicitly ask otherwise.
+- This is the ONLY `package main` / `func main()` in the repository. If `{command_path}` already exists, extend it in place — do NOT create a second command package.
 
 **Requirements:**
 1. Use `package main` and a `main()` function.
@@ -1605,6 +1620,18 @@ if __name__ == "__main__":
 - Reference ONLY actual module names, classes, and functions from the codebase
 - Provide meaningful default behaviors so `python main.py` does something useful
 - The entry point should feel like a finished product, not a scaffold
+- **Make `python main.py` work from a clean checkout.** If the package lives
+  under `src/` (e.g. `src/{package_name}/`), a bare `python main.py` will raise
+  `ModuleNotFoundError` because `src/` is not on `sys.path`. You MUST make the
+  import resolvable by ONE of:
+    1. Adding a `pyproject.toml` with `[tool.setuptools] packages` discovery
+       under `src` (`package-dir = {{"" = "src"}}`), so an editable/normal
+       install exposes the package; OR
+    2. Inserting a path bridge at the very top of `main.py`, before importing
+       the package:
+       `import sys, pathlib; sys.path.insert(0, str(pathlib.Path(__file__).parent / "src"))`
+  Prefer (1) for installable projects; (2) is the minimal always-works bridge.
+  Do NOT rely on the caller exporting `PYTHONPATH`.
 - **Read the `docs/` directory first** — it contains the user's original requirements
   and feature specifications. Make sure the entry point faithfully exposes
   all requested features and does NOT deviate from the intended purpose.
@@ -1670,6 +1697,32 @@ if __name__ == "__main__":
         candidate = raw.lower().replace(" ", "-").replace("_", "-")
         candidate = _re.sub(r"[^a-z0-9-]+", "-", candidate).strip("-")
         return candidate or "project"
+
+    def _resolve_go_command_path(self) -> str:
+        """Return the Go entry-point path, reusing the skeleton's own if present.
+
+        The skeleton frequently already places the program entry under
+        ``cmd/<name>/main.go`` (e.g. ``cmd/todo/main.go``). Generating a
+        second ``cmd/<repo-slug>/main.go`` from the synthetic MAIN_ENTRY
+        task then yields two ``func main()`` packages. To keep a single
+        entry source, reuse an existing ``cmd/*/main.go`` discovered in
+        the planned interfaces; only fall back to the backend's canonical
+        ``cmd/<module>/main.go`` when the skeleton declared no command
+        package.
+        """
+        subtrees_data = self.interfaces.get("subtrees", {})
+        for st_data in subtrees_data.values():
+            container = st_data.get("interfaces", st_data.get("files", {}))
+            for fpath in container:
+                norm = str(fpath).replace("\\", "/")
+                parts = norm.split("/")
+                if (
+                    len(parts) == 3
+                    and parts[0] == "cmd"
+                    and parts[2] == "main.go"
+                ):
+                    return norm
+        return self.backend.entry_point_path(self._go_module_name())
 
     def _package_slug(self, separator: str = "-") -> str:
         """Infer a compact package name from repository metadata."""

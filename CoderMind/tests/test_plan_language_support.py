@@ -450,6 +450,53 @@ def test_task_planner_special_tasks_are_language_neutral() -> None:
     assert "styles.py" not in text
 
 
+def test_go_main_entry_reuses_existing_command_package() -> None:
+    # The skeleton already placed the entry under cmd/todo/main.go. The
+    # MAIN_ENTRY task must reuse that path, not generate a second
+    # cmd/<repo-slug>/main.go (which would yield two func main()).
+    interfaces = {
+        "meta": {"primary_language": "go", "target_languages": ["go"]},
+        "subtrees": {
+            "Server": {
+                "interfaces": {
+                    "cmd/todo/main.go": {"units": ["function main"]},
+                    "internal/store/store.go": {"units": ["struct Store"]},
+                }
+            }
+        },
+    }
+    planner = TaskPlanner(
+        interfaces=interfaces,
+        data_flow={"meta": {"primary_language": "go", "target_languages": ["go"]}},
+        repo_name="demo-go-web-todo",
+        repo_info="Go web todo.",
+    )
+
+    assert planner._resolve_go_command_path() == "cmd/todo/main.go"
+    main_entry = planner._build_main_entry_task()
+    assert "cmd/todo/main.go" in main_entry
+    assert "cmd/demo-go-web-todo/main.go" not in main_entry
+
+
+def test_go_main_entry_falls_back_when_no_command_package() -> None:
+    # No cmd/*/main.go in the skeleton → fall back to the canonical
+    # cmd/<module>/main.go from the backend.
+    interfaces = {
+        "meta": {"primary_language": "go", "target_languages": ["go"]},
+        "subtrees": {
+            "Core": {"interfaces": {"internal/store/store.go": {"units": ["struct Store"]}}}
+        },
+    }
+    planner = TaskPlanner(
+        interfaces=interfaces,
+        data_flow={"meta": {"primary_language": "go", "target_languages": ["go"]}},
+        repo_name="tasklite",
+        repo_info="Go CLI.",
+    )
+
+    assert planner._resolve_go_command_path() == "cmd/tasklite/main.go"
+
+
 def test_rust_backend_accepts_basic_declarations() -> None:
     backend = get_backend("rust")
     code = "pub struct Task {\n    pub title: String,\n}\n\npub fn run() {}\n"
