@@ -15,7 +15,7 @@ import json
 import logging
 from collections import defaultdict, deque
 from dataclasses import dataclass, field
-from typing import Dict, List, Optional, Tuple, Any, Set
+from typing import Callable, Dict, List, Optional, Tuple, Any, Set
 
 import sys
 from pathlib import Path
@@ -312,11 +312,25 @@ def build_call_graph(
 def check_call_graph_connectivity(
     interfaces_data: Dict[str, Any],
     enhanced_data_flow: Dict[str, Any],
-    entry_points: List[Dict[str, Any]]
+    entry_points: List[Dict[str, Any]],
+    is_callable: Optional[Callable[[str], bool]] = None,
 ) -> Dict[str, Any]:
     """Build a directed graph of all invocation edges and check connectivity.
 
-    Identifies orphan units (non-entry-point units with no incoming edges).
+    Identifies orphan units: *callable* units (functions / methods /
+    classes) that are completely isolated — no incoming AND no outgoing
+    edges — and are not entry points.
+
+    ``is_callable`` is a per-language predicate (``backend.is_callable_unit``).
+    When supplied, type-like units (struct / enum / interface / ...) are
+    excluded from orphan candidacy: a data structure legitimately has no
+    incoming *invocation* edge, so flagging it is a false positive.
+    When ``None`` (legacy callers / tests) every unit is treated as
+    callable, preserving the previous behaviour.
+
+    Requiring "no outgoing" as well mirrors
+    :meth:`InterfacesStore.find_orphan_units` so the convergence gate and
+    the pruning detector share one definition of "orphan".
 
     Returns:
         Dict with keys: orphan_units, total_units, entry_point_count
@@ -342,10 +356,16 @@ def check_call_graph_connectivity(
 
     non_entry_units = all_units - entry_point_keys
 
-    # Units with no incoming edges (excluding entry points)
+    # Orphan = callable + completely isolated (no incoming, no outgoing).
     orphan_units = []
     for unit_key in non_entry_units:
-        if unit_key not in incoming or len(incoming[unit_key]) == 0:
+        if is_callable is not None:
+            unit_name = unit_key.split("::", 1)[1] if "::" in unit_key else unit_key
+            if not is_callable(unit_name):
+                continue
+        has_incoming = unit_key in incoming and len(incoming[unit_key]) > 0
+        has_outgoing = unit_key in outgoing and len(outgoing[unit_key]) > 0
+        if not has_incoming and not has_outgoing:
             orphan_units.append({
                 "unit_key": unit_key,
                 "file_path": unit_to_file.get(unit_key, ""),
@@ -361,10 +381,18 @@ def check_call_graph_connectivity(
 def check_feature_dependency_coverage(
     interfaces_data: Dict[str, Any],
     enhanced_data_flow: Dict[str, Any],
-    entry_points: List[Dict[str, Any]]
+    entry_points: List[Dict[str, Any]],
+    is_callable: Optional[Callable[[str], bool]] = None,
 ) -> List[Dict[str, Any]]:
     """Check that every feature-bearing unit is either an entry point or has at least one incoming dependency edge.
-    
+
+    ``is_callable`` is a per-language predicate (``backend.is_callable_unit``).
+    When supplied, type-like feature-bearing units (struct / enum / ...)
+    are excluded: a data structure that carries a feature is "used" by
+    being referenced, not invoked, so a missing incoming *invocation*
+    edge is not a coverage gap. When ``None`` every unit is checked
+    (legacy behaviour).
+
     Returns: list of orphan features (feature paths without incoming edges
              and not in entry points)
     """
@@ -395,7 +423,11 @@ def check_feature_dependency_coverage(
                 # Skip entry points
                 if unit_key in entry_point_keys:
                     continue
-                
+
+                # Skip type-like units: they are referenced, not invoked.
+                if is_callable is not None and not is_callable(unit_name):
+                    continue
+
                 # Check if has any incoming edge
                 if unit_key not in incoming or len(incoming[unit_key]) == 0:
                     orphan_features.append({
@@ -567,10 +599,12 @@ class InterfaceReviewer:
             
             # Step 2: Code-based structural checks
             connectivity = check_call_graph_connectivity(
-                interfaces_data, enhanced_data_flow, entry_points
+                interfaces_data, enhanced_data_flow, entry_points,
+                is_callable=self.backend.is_callable_unit,
             )
             feature_orphans = check_feature_dependency_coverage(
-                interfaces_data, enhanced_data_flow, entry_points
+                interfaces_data, enhanced_data_flow, entry_points,
+                is_callable=self.backend.is_callable_unit,
             )
 
             self.logger.info(
@@ -641,10 +675,12 @@ class InterfaceReviewer:
         final_feature_orphans: List[Any] = []
         if review_history:
             final_connectivity = check_call_graph_connectivity(
-                interfaces_data, enhanced_data_flow, final_entry_points
+                interfaces_data, enhanced_data_flow, final_entry_points,
+                is_callable=self.backend.is_callable_unit,
             )
             final_feature_orphans = check_feature_dependency_coverage(
-                interfaces_data, enhanced_data_flow, final_entry_points
+                interfaces_data, enhanced_data_flow, final_entry_points,
+                is_callable=self.backend.is_callable_unit,
             )
             final_orphan_units = final_connectivity["orphan_units"]
             self.logger.info(

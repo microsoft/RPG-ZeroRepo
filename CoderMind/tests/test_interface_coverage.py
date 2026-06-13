@@ -150,26 +150,39 @@ def test_design_interfaces_main_fails_on_incomplete_coverage(
     assert saved["success"] is False
 
 
+def _callable_by_prefix(unit_name: str) -> bool:
+    return unit_name.split(" ", 1)[0] in {"function", "method", "class"}
+
+
 def test_global_review_reconciles_retained_orphans() -> None:
+    # A single isolated callable unit (no edges) that the orphan review
+    # explicitly RETAINED must not fail the verdict.
+    interfaces_data = {
+        "subtrees": {
+            "App": {
+                "interfaces": {
+                    "src/app.py": {
+                        "units": ["function main"],
+                        "units_to_features": {"function main": ["App/run"]},
+                    }
+                }
+            }
+        }
+    }
     global_review = {
         "feature_orphans_count": 1,
         "orphan_units_count": 1,
-        "unapplied_fixes_count": 0,
+        "blocking_unapplied_fixes_count": 0,
         "passed": False,
     }
 
-    design_interfaces._reconcile_global_review_after_orphan_review(
+    design_interfaces._finalize_global_review_verdict(
         global_review=global_review,
-        orphan_keys=["src/app.py::function main"],
+        interfaces_data=interfaces_data,
+        enhanced_data_flow={"invocation_edges": []},
+        entry_points=[],
+        is_callable=_callable_by_prefix,
         retained_keys={"src/app.py::function main"},
-        pruned_keys=set(),
-        feature_orphans=[
-            {
-                "file_path": "src/app.py",
-                "unit_name": "function main",
-                "features": ["App/run"],
-            }
-        ],
     )
 
     assert global_review["passed"] is True
@@ -178,39 +191,121 @@ def test_global_review_reconciles_retained_orphans() -> None:
 
 
 def test_global_review_keeps_unresolved_orphans_failing() -> None:
+    # Two isolated callable units; only one is retained, so the other
+    # remains an orphan and the verdict stays failing.
+    interfaces_data = {
+        "subtrees": {
+            "App": {
+                "interfaces": {
+                    "src/app.py": {
+                        "units": ["function main", "function unused"],
+                        "units_to_features": {
+                            "function main": ["App/run"],
+                            "function unused": ["App/unused"],
+                        },
+                    }
+                }
+            }
+        }
+    }
     global_review = {
         "feature_orphans_count": 2,
         "orphan_units_count": 2,
-        "unapplied_fixes_count": 0,
+        "blocking_unapplied_fixes_count": 0,
         "passed": False,
     }
 
-    design_interfaces._reconcile_global_review_after_orphan_review(
+    design_interfaces._finalize_global_review_verdict(
         global_review=global_review,
-        orphan_keys=[
-            "src/app.py::function main",
-            "src/app.py::function unused",
-        ],
+        interfaces_data=interfaces_data,
+        enhanced_data_flow={"invocation_edges": []},
+        entry_points=[],
+        is_callable=_callable_by_prefix,
         retained_keys={"src/app.py::function main"},
-        pruned_keys=set(),
-        feature_orphans=[
-            {
-                "file_path": "src/app.py",
-                "unit_name": "function main",
-                "features": ["App/run"],
-            },
-            {
-                "file_path": "src/app.py",
-                "unit_name": "function unused",
-                "features": ["App/unused"],
-            },
-        ],
     )
 
     assert global_review["passed"] is False
     assert global_review["orphan_units_count"] == 1
+    assert global_review["orphan_units_count"] == 1
     assert global_review["feature_orphans_count"] == 1
     assert global_review["unresolved_orphan_units"] == ["src/app.py::function unused"]
+
+
+def _store_skeleton_and_interfaces():
+    """A skeleton feature missing from interfaces, plus its file block."""
+    skeleton = {
+        "root": {
+            "type": "directory",
+            "name": "root",
+            "path": ".",
+            "children": [
+                {
+                    "type": "file",
+                    "name": "schema.js",
+                    "path": "src/store/schema.js",
+                    "feature_paths": [
+                        "Data/schema/define store structure",
+                        "Data/schema/define todo object schema",
+                    ],
+                }
+            ],
+        }
+    }
+    interfaces = {
+        "subtrees": {
+            "Data": {
+                "interfaces": {
+                    "src/store/schema.js": {
+                        "units": ["function parseTodoRecord"],
+                        "units_to_features": {
+                            "function parseTodoRecord": [
+                                "Data/schema/define store structure"
+                            ]
+                        },
+                    }
+                }
+            }
+        }
+    }
+    return skeleton, interfaces
+
+
+def test_backfill_attributes_missing_feature() -> None:
+    skeleton, interfaces = _store_skeleton_and_interfaces()
+    audit = design_interfaces.backfill_uncovered_features(skeleton, interfaces)
+
+    # The orphan feature is attributed to the file's existing unit.
+    assert len(audit["backfilled"]) == 1
+    assert audit["backfilled"][0]["feature"] == "Data/schema/define todo object schema"
+    assert audit["backfilled"][0]["file_path"] == "src/store/schema.js"
+    assert audit["unbackfilled"] == []
+
+    covered = design_interfaces._collect_interface_features(interfaces)
+    assert "Data/schema/define todo object schema" in covered
+    # Coverage now equals the skeleton (the bench consistency gate passes).
+    assert design_interfaces.collect_skeleton_features(skeleton) - covered == set()
+
+
+def test_backfill_noop_when_fully_covered() -> None:
+    skeleton, interfaces = _store_skeleton_and_interfaces()
+    # Pre-attribute the missing feature so nothing is uncovered.
+    u2f = interfaces["subtrees"]["Data"]["interfaces"]["src/store/schema.js"]["units_to_features"]
+    u2f["function parseTodoRecord"].append("Data/schema/define todo object schema")
+
+    audit = design_interfaces.backfill_uncovered_features(skeleton, interfaces)
+    assert audit["backfilled"] == []
+    assert audit["unbackfilled"] == []
+
+
+def test_backfill_reports_unbackfillable_when_file_absent() -> None:
+    skeleton, interfaces = _store_skeleton_and_interfaces()
+    # Remove the interface file block so the feature has nowhere to attach.
+    interfaces["subtrees"]["Data"]["interfaces"] = {}
+
+    audit = design_interfaces.backfill_uncovered_features(skeleton, interfaces)
+    assert audit["backfilled"] == []
+    reasons = {item["reason"] for item in audit["unbackfilled"]}
+    assert reasons == {"file not in interfaces"}
 
 
 def test_restore_completed_subtrees_reuses_only_complete_prefix(tmp_path: Path) -> None:

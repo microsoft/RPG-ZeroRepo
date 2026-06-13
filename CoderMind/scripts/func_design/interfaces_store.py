@@ -17,6 +17,8 @@ from dataclasses import dataclass, field, asdict
 from pathlib import Path
 from typing import Dict, List, Optional, Set, Any, Union, Tuple
 
+from decoder_lang.unit_kind import classify_unit_kind
+
 logger = logging.getLogger(__name__)
 
 
@@ -574,6 +576,12 @@ class InterfacesStore:
                 continue
             if unit.handler_added:
                 continue  # protected: handler-added is treated as required
+            # Type-like units (struct / enum / interface / ...) are
+            # referenced, not invoked, so a missing edge is not "dead
+            # code". Excluding them keeps the pruning detector aligned
+            # with the convergence gate (check_call_graph_connectivity).
+            if classify_unit_kind(unit.name) != "callable":
+                continue
             has_outgoing = key in outgoing and len(outgoing[key]) > 0
             has_incoming = key in incoming and len(incoming[key]) > 0
             if not has_outgoing and not has_incoming:
