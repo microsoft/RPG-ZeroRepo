@@ -17,6 +17,7 @@ from typing import Any
 from .backend import ToolchainUnavailable
 from .prompt_hints import PromptHints
 from .project_tasks import ProjectTaskContext, ProjectTaskTemplates
+from .unit_kind import classify_unit_kind
 from .test_result import EnvHandle, TestFailure, TestRunResult
 
 _JS_SEGMENT_RE = re.compile(r"^[A-Za-z0-9_$-]+$")
@@ -111,6 +112,22 @@ class JavaScriptBackend:
         if result is None or result.syntax_error:
             return []
         return [dep for dep in result.dependencies if dep.relation == "inherits"]
+
+    def unit_kind(self, unit_name: str) -> str:
+        return classify_unit_kind(unit_name)
+
+    def is_callable_unit(self, unit_name: str) -> bool:
+        return classify_unit_kind(unit_name) == "callable"
+
+    def entry_point_path(self, module: str) -> str:
+        return "src/index.js"
+
+    def entry_run_command(self, repo_root: Path, entry: str) -> list[str] | None:
+        if (repo_root / "package.json").is_file():
+            return ["npm", "start", "--", "--help"]
+        if (repo_root / entry).is_file():
+            return ["node", entry, "--help"]
+        return None
 
     def detect_env(self, repo_root: Path) -> EnvHandle | None:
         npm = shutil.which("npm")

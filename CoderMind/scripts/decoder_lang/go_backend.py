@@ -10,6 +10,7 @@ from typing import Any
 from .backend import ToolchainUnavailable
 from .prompt_hints import PromptHints
 from .project_tasks import ProjectTaskContext, ProjectTaskTemplates
+from .unit_kind import classify_unit_kind
 from .test_result import EnvHandle, TestFailure, TestRunResult
 
 logger = logging.getLogger(__name__)
@@ -152,6 +153,22 @@ class GoBackend:
         if result is None or result.syntax_error:
             return []
         return [dep for dep in result.dependencies if dep.relation == "inherits"]
+
+    def unit_kind(self, unit_name: str) -> str:
+        return classify_unit_kind(unit_name)
+
+    def is_callable_unit(self, unit_name: str) -> bool:
+        return classify_unit_kind(unit_name) == "callable"
+
+    def entry_point_path(self, module: str) -> str:
+        slug = self.sanitize_module_identifier(module) if module else "app"
+        return f"cmd/{slug}/main.go"
+
+    def entry_run_command(self, repo_root: Path, entry: str) -> list[str] | None:
+        if not (repo_root / entry).is_file():
+            return None
+        pkg_dir = str(Path(entry).parent).replace("\\", "/")
+        return ["go", "run", f"./{pkg_dir}", "--help"]
 
     # ------------------------------------------------------------------
     # 3. Build / test environment
@@ -320,7 +337,12 @@ class GoBackend:
 
     def project_task_templates(self, context: ProjectTaskContext) -> ProjectTaskTemplates:
         module_name = context.package_name
-        command_path = f"cmd/{module_name}/main.go"
+        # Reuse the planner-reconciled entry path when provided (avoids a
+        # second command package); else fall back to the canonical path.
+        command_path = context.entry_point_path or f"cmd/{module_name}/main.go"
+        # Directory passed to ``go run ./<dir>`` — derived from the actual
+        # command path so docs and verify steps match the real entry.
+        command_dir = command_path.rsplit("/", 1)[0] if "/" in command_path else "."
         return ProjectTaskTemplates(
             dependencies=f"""Generate or update Go module dependency files for the repository: {context.repo_name}
 
@@ -352,13 +374,11 @@ Repository purpose: {context.repo_info}
 - Every import must reference real packages and symbols from this module.
 - Use idiomatic Go error handling with explicit non-zero exits on user-facing failures.
 - Keep output plain text unless the requirements explicitly ask otherwise.
-
-**Requirements:**
-1. Use `package main` and a `main()` function.
+- This is the ONLY `package main` / `func main()` in the repository. If `{command_path}` already exists, extend it in place — do NOT create a second command package.
 2. Provide `--help` output and subcommands/options that expose all major CLI features.
 3. Delegate to implemented internal packages for task storage and task lifecycle behavior.
 4. Handle invalid commands, invalid ids, missing arguments, and runtime errors clearly.
-5. Verify with `go run ./{command_path.rsplit('/', 1)[0]} --help` and `go test ./...`.
+5. Verify with `go run ./{command_dir} --help` and `go test ./...`.
 
 **Important:**
 - Read `docs/` first and faithfully expose the requested behavior.
@@ -381,7 +401,7 @@ Repository purpose: {context.repo_info}
 - Module setup using `go mod tidy` when needed
 
 ## 3. Usage
-- How to run the CLI with `go run ./cmd/{module_name} --help`
+- How to run the CLI with `go run ./{command_dir} --help`
 - Common command examples with expected plain-text output
 - Data file options and local persistence behavior if applicable
 
@@ -396,7 +416,7 @@ Repository purpose: {context.repo_info}
 **Instructions:**
 1. Read the `docs/` directory for the original requirements.
 2. Explore the actual Go codebase to understand what was implemented.
-3. Run `go run ./cmd/{module_name} --help` if the command exists.
+3. Run `go run ./{command_dir} --help` if the command exists.
 4. Reference actual package names, types, and functions.
 
 **Important:**

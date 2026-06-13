@@ -119,6 +119,33 @@ class LanguageBackend(Protocol):
         component, e.g. replacing hyphens with underscores for Python.
         Idempotent: ``sanitize(sanitize(s)) == sanitize(s)``."""
 
+    def entry_point_path(self, module: str) -> str:
+        """Return the canonical program entry-point file path for this
+        language (``main.py`` for Python, ``cmd/{module}/main.go`` for
+        Go, ``src/index.js`` for JavaScript, ``src/main.rs`` for Rust,
+        ``src/main.cpp`` for C/C++).
+
+        ``module`` is the sanitized project / command name (used by Go's
+        ``cmd/<name>/`` convention; ignored by languages with a fixed
+        entry path). Consumed by the planner (to avoid generating a
+        second entry when the skeleton already placed one) and by
+        ``check_code_gen`` / smoke tests (to locate the entry without a
+        hard-coded ``main.py``)."""
+
+    def entry_run_command(
+        self, repo_root: Path, entry: str
+    ) -> list[str] | None:
+        """Return the ``subprocess`` argv that runs the entry point in a
+        *clean* checkout (no PYTHONPATH/path bridging injected), suitable
+        for a smoke "does it start?" probe — e.g.
+        ``["python", "main.py", "--help"]``,
+        ``["go", "run", "./cmd/app"]``, ``["node", "src/index.js"]``,
+        ``["./calc", "--help"]``, ``["cargo", "run", "--", "--help"]``.
+
+        Returns ``None`` when the language has no meaningful run probe or
+        the entry cannot be located; callers treat ``None`` as "skip"
+        (non-fatal), never as failure."""
+
     # --- 2. Code structure (delegates to lang_parser) -------------------
 
     def has_placeholder(self, code: str, path: str = "<string>") -> bool:
@@ -176,6 +203,30 @@ class LanguageBackend(Protocol):
         return ``[]``; that inheritance is then supplied by the
         LLM-declared dependencies instead.
         """
+
+    def unit_kind(self, unit_name: str) -> str:
+        """Classify an interface unit name as ``"callable"`` /
+        ``"type"`` / ``"unknown"``.
+
+        ``unit_name`` carries a leading kind token written by the
+        interface designer (``"function parse"``, ``"method serve"``,
+        ``"struct Store"``, ``"class Parser"``). Callers use this to
+        decide whether the orphan heuristic ("no incoming invocation
+        edge => dead code") applies: it is meaningful for ``"callable"``
+        units but produces false positives for ``"type"`` units (a data
+        structure legitimately has no incoming *invocation* edge).
+
+        Implementations delegate to
+        :func:`decoder_lang.unit_kind.classify_unit_kind` with their own
+        prefix sets, so a language with an unusual callable keyword can
+        override classification without touching call sites."""
+
+    def is_callable_unit(self, unit_name: str) -> bool:
+        """Return True when :meth:`unit_kind` is ``"callable"``.
+
+        Convenience wrapper for orphan-detection call sites; type-like
+        and unrecognised units return False so they are excluded from
+        the "dead code" heuristic (the false-positive-reducing side)."""
 
     # --- 3. Build / test environment ------------------------------------
 

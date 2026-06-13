@@ -20,6 +20,7 @@ from typing import Any
 from .backend import ToolchainUnavailable
 from .prompt_hints import PromptHints
 from .project_tasks import ProjectTaskContext, ProjectTaskTemplates
+from .unit_kind import classify_unit_kind
 from .test_result import EnvHandle, TestRunResult
 
 logger = logging.getLogger(__name__)
@@ -344,6 +345,20 @@ class PythonBackend:
                     extra={"language": self.name, "child": node.name, "parent": parent},
                 ))
         return deps
+
+    def unit_kind(self, unit_name: str) -> str:
+        return classify_unit_kind(unit_name)
+
+    def is_callable_unit(self, unit_name: str) -> bool:
+        return classify_unit_kind(unit_name) == "callable"
+
+    def entry_point_path(self, module: str) -> str:
+        return "main.py"
+
+    def entry_run_command(self, repo_root: Path, entry: str) -> list[str] | None:
+        if not (repo_root / entry).is_file():
+            return None
+        return ["python", entry, "--help"]
 
     def find_main_block_lineno(self, code: str) -> int | None:
         """Return the 1-based line number of the top-level
