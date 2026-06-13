@@ -20,7 +20,7 @@ import logging
 from pathlib import Path
 from typing import List, Optional, Tuple
 
-from common.git_utils import GitRunner
+from common.git_utils import GitRunner, sanitize_branch_component
 
 logger = logging.getLogger(__name__)
 
@@ -70,7 +70,7 @@ def setup_batch_branch(
     """
     ensure_on_main(git)
 
-    safe_id = batch_id.replace("/", "_").replace("\\", "_")[:50]
+    safe_id = sanitize_branch_component(batch_id, max_len=50, fallback="batch")
     branch_name = f"batch/{safe_id}"
 
     if git.branch_exists(branch_name):

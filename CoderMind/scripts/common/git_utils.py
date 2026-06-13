@@ -10,10 +10,54 @@ during the code generation phase:
 """
 
 import logging
+import re
 import subprocess
 from pathlib import Path
 from typing import Optional, Tuple, List, Dict
 from dataclasses import dataclass
+
+
+_INVALID_REF_CHARS = re.compile(r"[^A-Za-z0-9._-]+")
+
+
+def sanitize_branch_component(
+    component: str,
+    max_len: int = 50,
+    fallback: str = "x",
+) -> str:
+    """Normalize a dynamic string into a git-safe branch path component.
+
+    The result is safe to embed as ``<prefix>/<component>`` in a branch name.
+    It replaces characters git rejects in refs (spaces, ``~^:?*[`` and
+    backslash, control chars) with ``_``, collapses ``..`` and repeated
+    separators, strips leading/trailing separators, caps length, and avoids a
+    trailing ``.`` or ``.lock`` suffix. Always returns a non-empty token so
+    callers can build a valid ref for any language's task identifiers.
+
+    Args:
+        component: Raw dynamic text (task id, subtree name, ...).
+        max_len: Maximum length of the returned component.
+        fallback: Token returned when sanitization yields an empty string.
+
+    Returns:
+        A git-ref-safe, non-empty component string.
+    """
+    raw = (component or "").strip()
+    if not raw:
+        return fallback
+
+    safe = _INVALID_REF_CHARS.sub("_", raw.replace("\\", "/").replace("/", "_"))
+    safe = safe.replace("..", "_")
+    safe = re.sub(r"[._-]{2,}", "_", safe)
+    safe = safe.strip("._-")
+    if not safe:
+        return fallback
+
+    safe = safe[:max_len].rstrip("._-")
+    if safe.endswith(".lock"):
+        safe = safe[: -len(".lock")].rstrip("._-")
+
+    return safe or fallback
 
 
 @dataclass
@@ -769,7 +813,7 @@ def create_task_branch(
     git = GitRunner(repo_path)
     
     # Create sanitized branch name
-    safe_id = batch_id.replace("/", "_").replace("\\", "_")[:50]
+    safe_id = sanitize_branch_component(batch_id, max_len=50, fallback="task")
     branch_name = f"task/{safe_id}"
     
     # Handle uncommitted changes

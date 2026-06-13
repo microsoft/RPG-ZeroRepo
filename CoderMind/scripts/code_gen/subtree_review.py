@@ -451,10 +451,10 @@ def run_subtree_review(
     )
 
     # 5. Setup review branch
-    from common.git_utils import GitRunner
+    from common.git_utils import GitRunner, sanitize_branch_component
     git = GitRunner(str(repo_path))
 
-    safe_name = subtree_name.lower().replace(" ", "_").replace("/", "_")[:40]
+    safe_name = sanitize_branch_component(subtree_name.lower(), max_len=40, fallback="review")
     branch_name = f"review/{safe_name}"
 
     # Ensure on main first
