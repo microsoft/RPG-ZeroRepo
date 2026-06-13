@@ -97,8 +97,8 @@ Your task is to assign each feature to a target-language source file path that:
 2. Names should reflect functional purpose without redundancy. Avoid repeating folder context in filenames when it is obvious.
 3. Avoid vague or purely placeholder names such as `module_part1` or `other_module`.
 4. Utility-style modules are allowed when they are clearly scoped. Examples:
-   - `vector_utils.py`, `io_utils.py`, or `text_utils.py` inside appropriately named folders,
-   - `util.py` or `utils.py` within a well-defined domain folder, where the utility code is narrowly focused on that domain.
+   - `vector_utils`, `io_utils`, or `text_utils` (with the target language's file extension) inside appropriately named folders,
+   - a `util`/`utils` module within a well-defined domain folder, where the utility code is narrowly focused on that domain.
    These should not become unbounded catch-all modules.
 5. It is acceptable to place features originating from multiple original subtrees into the same file if they form a coherent functional unit in the repository architecture.
 
@@ -179,7 +179,7 @@ GROUP_SKELETON_REVIEW_PROMPT = """You are a senior software architect reviewing 
 - The folder hierarchy should reflect clean separations of concern and meaningful domain boundaries.
 - Introduce subfolders when a directory becomes crowded or mixes distinct types of functionality.
 - Avoid excessively flat or deeply nested layouts.
-- Detect filename clusters with shared prefixes and organize them into subfolders; avoid redundant naming (e.g., `nlp/nlp_tokenizer.py`).
+- Detect filename clusters with shared prefixes and organize them into subfolders; avoid redundant naming (e.g., a `nlp/` folder whose files repeat the `nlp_` prefix).
 
 ### 3. Modularity & Cohesion
 - Modules should exhibit strong internal cohesion and minimal coupling.

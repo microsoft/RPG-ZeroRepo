@@ -216,7 +216,7 @@ runner cross-check your claim against an independent re-run.
 
 [OK] You CAN:
 - Read/write any file under `src/`, `tests/`, `static/`, `templates/`, and `examples/`
-  (Python, HTML, CSS, JavaScript, JSON, YAML, config files, etc.)
+  (source files in the target language, plus HTML, CSS, JSON, YAML, config files, etc.)
 - Create new directories and files if needed (e.g., `static/css/`, `templates/`)
 - Read any file in the repo for context
 - Run: `{pytest_cmd}` (this exact command only)
@@ -238,20 +238,23 @@ runner cross-check your claim against an independent re-run.
 2. **Do not manually run a different test command** — the provided command
     already targets the correct test scope for this batch.
 3. If a test times out or hangs, the test is wrong. Fix the test:
-   - Remove infinite loops, blocking I/O, or `time.sleep()` calls
+   - Remove infinite loops, blocking I/O, or real-time sleeps/waits
    - Mock any external resources (network, filesystem, GPU)
    - Ensure all fixtures have finite setup/teardown
 4. **Do not write tests that depend on timing** (real-time waits).
-   Use mocks or `unittest.mock.patch` for time-dependent behavior.
+   Mock time-dependent behavior with your target language's test/mocking
+   framework (see the Target Language section below).
 5. **Do not write tests that spawn subprocesses or servers.**
-6. **Output control:** Use `-x` (stop at first failure) and `--tb=short`
-   to keep output manageable. Focus on the FIRST failure.
+6. **Output control:** prefer fail-fast and concise tracebacks so the
+   FIRST failure stays the focus; follow the exact test command provided.
 
 ## ── Test Quality Rules ───────────────────────────────────
 
-- Use `MagicMock(spec=RealClass)` or `create_autospec()`, never bare `MagicMock()`.
-- For numeric/math operations: use real values (`np.array(...)`, `4.0`), not mocks.
-- Mock at boundaries (I/O, external deps), not internal implementation.
+- Use spec'd / auto-generated mocks bound to a real type, never an
+  unconstrained stand-in, and mock at boundaries (I/O, external deps),
+  not internal implementation. Use your target language's idiomatic
+  mocking facility.
+- For numeric/math operations: use real values, not mocks.
 - Keep tests deterministic — no random data without fixed seeds.
 - Test count: proportional to task complexity. Small task = 3–8 tests.
   Do NOT over-engineer with 20+ tests for a simple class.
