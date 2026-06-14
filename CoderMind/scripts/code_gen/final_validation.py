@@ -91,6 +91,45 @@ def final_test(
         backend=backend,
     )
 
+    # Guard against a no-op "pass": a verification gate that executed zero
+    # tests is not a pass, it is a non-result (e.g. ``go test ./...`` matching
+    # no packages, or the runner invoked before sources were in the tree).
+    # The backend already reports this as a non-success "errored" status; here
+    # we make the final gate fail loudly with a precise diagnostic instead of
+    # dispatching a code-repair agent that cannot fix a "no tests ran" state.
+    executed = result.passed + result.failed + result.errors + result.skipped
+    if not result.success and executed == 0:
+        logger.error(
+            "Final test executed zero tests for %s backend — treating as a "
+            "verification failure, not a pass.", backend.name,
+        )
+        no_test_result = {
+            "success": False,
+            "type": "final_test",
+            "passed": 0,
+            "failed": 0,
+            "errors": 0,
+            "skipped": 0,
+            "duration": result.duration,
+            "output": result.output[:5000],
+            "no_tests_executed": True,
+            "next_action": (
+                f"Final test ran the {backend.display_name} test command but "
+                "no tests executed (zero collected). This is a verification "
+                "no-op, not a pass: confirm the generated test suite is present "
+                "on the main branch and the test command discovers it."
+            ),
+        }
+        save_stage_result("final_test", {
+            "success": False,
+            "passed": 0,
+            "failed": 0,
+            "errors": 0,
+            "no_tests_executed": True,
+            "output_tail": "\n".join(result.output.splitlines()[-40:]),
+        })
+        return no_test_result
+
     # Repair loop for full-suite failures. The per-batch TDD loop only sees one
     # file's tests at a time, so cross-file consistency gaps (a test asserting
     # the README / an example module documents a specific symbol or section that

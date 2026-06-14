@@ -10,7 +10,7 @@ from .backend import ToolchainUnavailable
 from .prompt_hints import PromptHints
 from .project_tasks import ProjectTaskContext, ProjectTaskTemplates
 from .unit_kind import classify_unit_kind
-from .test_result import EnvHandle, TestFailure, TestRunResult
+from .test_result import EnvHandle, TestFailure, TestRunResult, ran_no_tests
 
 _RUST_IDENT_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 _RUST_IDENT_INVALID = re.compile(r"[^A-Za-z0-9_]")
@@ -156,8 +156,27 @@ class RustBackend:
         return [env.runtime_executable or "cargo", "add", *deps]
 
     def parse_test_output(self, raw: str, exit_code: int) -> TestRunResult:
-        status = "passed" if exit_code == 0 else "failed"
-        failures = [] if exit_code == 0 else [TestFailure(
+        # cargo prints "test result: ok. N passed; M failed; K ignored" per
+        # test binary. Summing across binaries tells a real run from a no-op
+        # exit-0 (which must not pass a gate).
+        totals = re.findall(
+            r"test result:\s*\w+\.\s*(\d+)\s+passed;\s*(\d+)\s+failed"
+            r"(?:;\s*(\d+)\s+ignored)?",
+            raw,
+        )
+        if totals:
+            passed = sum(int(p) for p, _f, _i in totals)
+            failed = sum(int(f) for _p, f, _i in totals)
+            ignored = sum(int(i or 0) for _p, _f, i in totals)
+            observed: int | None = passed + failed + ignored
+        else:
+            passed = failed = ignored = 0
+            observed = None
+        if ran_no_tests(exit_code, raw, observed_tests=observed):
+            status = "errored"
+        else:
+            status = "passed" if exit_code == 0 else "failed"
+        failures = [] if status != "failed" else [TestFailure(
             test_id="cargo test",
             short_message="cargo test failed",
             long_message=raw,
@@ -165,10 +184,10 @@ class RustBackend:
         return TestRunResult(
             status=status,
             exit_code=exit_code,
-            passed_count=0,
-            failed_count=0 if exit_code == 0 else 1,
+            passed_count=passed,
+            failed_count=failed if failed else (1 if status == "failed" else 0),
             error_count=0,
-            skipped_count=0,
+            skipped_count=ignored,
             duration_sec=0.0,
             failures=failures,
             raw_output=raw,

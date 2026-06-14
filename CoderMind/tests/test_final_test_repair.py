@@ -87,6 +87,35 @@ def test_final_test_repairs_failing_suite(monkeypatch, tmp_path):
     assert "Do NOT delete, skip, or weaken any test." in dispatched["prompt"]
 
 
+def test_final_test_fails_loudly_on_zero_tests_executed(monkeypatch, tmp_path):
+    # A no-op final test (the go-test-found-no-packages case): exit-0 but zero
+    # tests executed. It must fail with a clear diagnostic and must NOT dispatch
+    # a code-repair agent (which cannot fix a "no tests ran" state).
+    _patch_common(monkeypatch, tmp_path)
+
+    def fake_run_tests(*_a, **_k):
+        return _TestResult(
+            success=False, return_code=0, output="",
+            test_files=[], passed=0, failed=0,
+        )
+
+    dispatched = {"n": 0}
+
+    def fake_dispatch(*_a, **_k):
+        dispatched["n"] += 1
+        return "BATCH_RESULT: PASS", None
+
+    monkeypatch.setattr(fv, "run_project_tests", fake_run_tests)
+    monkeypatch.setattr(fv, "dispatch_sub_agent", fake_dispatch)
+    monkeypatch.setattr(fv, "save_stage_result", lambda *_a, **_k: None)
+
+    out = fv.final_test(repo_path=tmp_path, max_repair_iters=2)
+
+    assert out["success"] is False
+    assert out["no_tests_executed"] is True
+    assert dispatched["n"] == 0
+
+
 def test_final_test_repair_bounded_when_still_failing(monkeypatch, tmp_path):
     _patch_common(monkeypatch, tmp_path)
 

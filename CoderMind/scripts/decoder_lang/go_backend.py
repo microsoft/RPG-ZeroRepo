@@ -11,7 +11,7 @@ from .backend import ToolchainUnavailable
 from .prompt_hints import PromptHints
 from .project_tasks import ProjectTaskContext, ProjectTaskTemplates
 from .unit_kind import classify_unit_kind
-from .test_result import EnvHandle, TestFailure, TestRunResult
+from .test_result import EnvHandle, TestFailure, TestRunResult, ran_no_tests
 
 logger = logging.getLogger(__name__)
 
@@ -277,7 +277,18 @@ class GoBackend:
                 output_by_test.setdefault(current_test, []).append(line)
 
         if exit_code == 0:
-            status = "passed"
+            # ``go test ./...`` exits 0 even when it matched no packages
+            # (empty output) — a no-op that must not pass a gate. A real run
+            # always emits output, so the empty-output signal catches the
+            # no-op. Only trust a POSITIVE parsed count as proof tests ran;
+            # a parsed 0 is ambiguous (the ``-json`` stream may not match the
+            # text-format regexes), so fall back to the output signal rather
+            # than false-failing a real run.
+            observed = passed_count + failed_count + skipped_count
+            if ran_no_tests(exit_code, raw, observed_tests=observed or None):
+                status = "errored"
+            else:
+                status = "passed"
         elif failed_count:
             status = "failed"
         else:

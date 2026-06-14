@@ -18,7 +18,7 @@ from .backend import ToolchainUnavailable
 from .prompt_hints import PromptHints
 from .project_tasks import ProjectTaskContext, ProjectTaskTemplates
 from .unit_kind import classify_unit_kind
-from .test_result import EnvHandle, TestFailure, TestRunResult
+from .test_result import EnvHandle, TestFailure, TestRunResult, ran_no_tests
 
 _JS_SEGMENT_RE = re.compile(r"^[A-Za-z0-9_$-]+$")
 _JS_SEGMENT_INVALID = re.compile(r"[^A-Za-z0-9_$-]")
@@ -174,17 +174,30 @@ class JavaScriptBackend:
         return [executable, "install", *deps]
 
     def parse_test_output(self, raw: str, exit_code: int) -> TestRunResult:
-        status = "passed" if exit_code == 0 else "failed"
-        failures = [] if exit_code == 0 else [TestFailure(
+        # node:test prints a TAP summary ("# tests N", "# pass N",
+        # "# fail N"). Use the test count to tell a real run from a no-op
+        # that exits 0 without running anything (which must not pass a gate).
+        tests_match = re.search(r"(?m)^#?\s*tests\s+(\d+)\b", raw)
+        observed = int(tests_match.group(1)) if tests_match else None
+        if ran_no_tests(exit_code, raw, observed_tests=observed):
+            status = "errored"
+        else:
+            status = "passed" if exit_code == 0 else "failed"
+        failures = [] if status != "failed" else [TestFailure(
             test_id="npm test",
             short_message="npm test failed",
             long_message=raw,
         )]
+        pass_match = re.search(r"(?m)^#?\s*pass\s+(\d+)\b", raw)
+        fail_match = re.search(r"(?m)^#?\s*fail\s+(\d+)\b", raw)
         return TestRunResult(
             status=status,
             exit_code=exit_code,
-            passed_count=0,
-            failed_count=0 if exit_code == 0 else 1,
+            passed_count=int(pass_match.group(1)) if pass_match else 0,
+            failed_count=(
+                int(fail_match.group(1)) if fail_match
+                else (1 if status == "failed" else 0)
+            ),
             error_count=0,
             skipped_count=0,
             duration_sec=0.0,

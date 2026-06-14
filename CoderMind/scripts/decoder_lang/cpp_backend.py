@@ -10,7 +10,7 @@ from .backend import ToolchainUnavailable
 from .prompt_hints import PromptHints
 from .project_tasks import ProjectTaskContext, ProjectTaskTemplates
 from .unit_kind import classify_unit_kind
-from .test_result import EnvHandle, TestFailure, TestRunResult
+from .test_result import EnvHandle, TestFailure, TestRunResult, ran_no_tests
 
 _CPP_IDENT_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 _CPP_IDENT_INVALID = re.compile(r"[^A-Za-z0-9_]")
@@ -180,17 +180,34 @@ class CppBackend:
         return None
 
     def parse_test_output(self, raw: str, exit_code: int) -> TestRunResult:
-        status = "passed" if exit_code == 0 else "failed"
-        failures = [] if exit_code == 0 else [TestFailure(
+        # The C++ test command is ctest/make when a harness exists, else a
+        # bare ``-fsyntax-only`` compile check that legitimately emits no
+        # output. So empty output is NOT a no-op here (a clean compile is a
+        # real signal); only ctest's explicit "no tests" / "out of 0" is.
+        out_of = re.search(r"out of (\d+)", raw)
+        observed = int(out_of.group(1)) if out_of else None
+        if ran_no_tests(
+            exit_code, raw, observed_tests=observed,
+            no_tests_markers=("No tests were found",),
+            empty_output_is_no_op=False,
+        ):
+            status = "errored"
+        else:
+            status = "passed" if exit_code == 0 else "failed"
+        failures = [] if status != "failed" else [TestFailure(
             test_id="c++ test",
             short_message="C++ test command failed",
             long_message=raw,
         )]
+        fail_match = re.search(r"(\d+)\s+tests?\s+failed", raw)
         return TestRunResult(
             status=status,
             exit_code=exit_code,
             passed_count=0,
-            failed_count=0 if exit_code == 0 else 1,
+            failed_count=(
+                int(fail_match.group(1)) if fail_match
+                else (1 if status == "failed" else 0)
+            ),
             error_count=0,
             skipped_count=0,
             duration_sec=0.0,
