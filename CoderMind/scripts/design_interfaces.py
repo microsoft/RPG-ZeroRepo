@@ -292,6 +292,7 @@ def _finalize_global_review_verdict(
     entry_points: list[dict],
     is_callable: Callable[[str], bool],
     retained_keys: set[str],
+    is_test_file: Optional[Callable[[str], bool]] = None,
 ) -> None:
     """Recompute the published convergence verdict from the FINAL graph.
 
@@ -313,10 +314,12 @@ def _finalize_global_review_verdict(
     conn = check_call_graph_connectivity(
         interfaces_data, enhanced_data_flow, entry_points,
         is_callable=is_callable,
+        is_test_file=is_test_file,
     )
     feats = check_feature_dependency_coverage(
         interfaces_data, enhanced_data_flow, entry_points,
         is_callable=is_callable,
+        is_test_file=is_test_file,
     )
     orphan_keys = [
         u["unit_key"] for u in conn["orphan_units"]
@@ -1225,6 +1228,7 @@ class InterfaceDesigner:
                 entry_points=review_result.get("final_entry_points", []),
                 is_callable=get_backend(review_language).is_callable_unit,
                 retained_keys=_retained_keys,
+                is_test_file=get_backend(review_language).is_test_file,
             )
 
             # Update dependency summary

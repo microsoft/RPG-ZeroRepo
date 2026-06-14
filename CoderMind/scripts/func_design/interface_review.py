@@ -40,6 +40,53 @@ logger = logging.getLogger(__name__)
 
 
 # ============================================================================
+# Non-production feature classification
+# ============================================================================
+
+# Top-level feature categories whose units are driven by an EXTERNAL runner
+# rather than by repository code: test functions are discovered and invoked
+# by the test runner, build targets by ``make`` / ``cmake``. Such a unit
+# legitimately has no incoming *invocation* edge in the production call
+# graph, so the "no incoming edge => dead code" orphan heuristic is a false
+# positive for it — exactly like the type-like case handled by ``is_callable``,
+# but along an orthogonal axis (the unit IS callable, it is just called from
+# outside the graph).
+#
+# Categories are matched on the leading segment of a feature path
+# (``"Testing/error reporting/..."`` -> ``"testing"``) and on the subtree
+# name, both lower-cased. The set is language-agnostic: the planner emits
+# these category names independently of the target language.
+NON_PRODUCTION_FEATURE_CATEGORIES: frozenset[str] = frozenset({
+    "testing", "test", "tests", "test infrastructure", "test suite",
+    "build system", "build", "build configuration",
+    "tooling", "ci", "cd", "ci/cd",
+})
+
+
+def _is_non_production_feature(
+    features: Optional[List[str]],
+    subtree: str = "",
+) -> bool:
+    """Return True when a feature-bearing unit belongs to a test/build category.
+
+    Such units are invoked by an external driver (test runner, ``make``),
+    not by repository code, so a missing incoming invocation edge is not a
+    coverage gap. Matching is on the leading segment of each feature path
+    and on the subtree name, both lower-cased, against
+    :data:`NON_PRODUCTION_FEATURE_CATEGORIES`. Language-agnostic.
+    """
+    if subtree and subtree.strip().lower() in NON_PRODUCTION_FEATURE_CATEGORIES:
+        return True
+    for feature in features or ():
+        if not isinstance(feature, str):
+            continue
+        head = feature.split("/", 1)[0].strip().lower()
+        if head in NON_PRODUCTION_FEATURE_CATEGORIES:
+            return True
+    return False
+
+
+# ============================================================================
 # Global Review Prompt
 # ============================================================================
 
@@ -309,11 +356,36 @@ def build_call_graph(
     return dict(outgoing), dict(incoming), unit_to_file
 
 
+def _build_unit_feature_index(
+    interfaces_data: Dict[str, Any],
+) -> Dict[str, Tuple[List[str], str]]:
+    """Map ``file_path::unit_name`` -> (feature paths, subtree name).
+
+    Lets the orphan checks consult a unit's feature category without
+    re-walking the subtree tree per unit. Units absent from the index
+    (no ``units_to_features`` entry) are treated as production code by the
+    callers (the conservative default keeps real dead code detectable).
+    """
+    index: Dict[str, Tuple[List[str], str]] = {}
+    subtrees = interfaces_data.get("subtrees", {})
+    for subtree_name, subtree_data in subtrees.items():
+        file_interfaces = subtree_data.get("interfaces", subtree_data.get("files", {}))
+        for file_path, file_data in file_interfaces.items():
+            units_to_features = file_data.get("units_to_features", {})
+            for unit_name, features in units_to_features.items():
+                index[f"{file_path}::{unit_name}"] = (
+                    features if isinstance(features, list) else [],
+                    subtree_name,
+                )
+    return index
+
+
 def check_call_graph_connectivity(
     interfaces_data: Dict[str, Any],
     enhanced_data_flow: Dict[str, Any],
     entry_points: List[Dict[str, Any]],
     is_callable: Optional[Callable[[str], bool]] = None,
+    is_test_file: Optional[Callable[[str], bool]] = None,
 ) -> Dict[str, Any]:
     """Build a directed graph of all invocation edges and check connectivity.
 
@@ -328,6 +400,14 @@ def check_call_graph_connectivity(
     When ``None`` (legacy callers / tests) every unit is treated as
     callable, preserving the previous behaviour.
 
+    ``is_test_file`` is a per-language predicate (``backend.is_test_file``).
+    When supplied, units in test files are excluded from orphan candidacy
+    — together with the language-agnostic test/build feature-category
+    check — because a test or build unit is driven by an external runner,
+    not by repository code, so its lack of an incoming edge is not dead
+    code. ``None`` disables the file-level check (the category check still
+    applies), preserving legacy behaviour.
+
     Requiring "no outgoing" as well mirrors
     :meth:`InterfacesStore.find_orphan_units` so the convergence gate and
     the pruning detector share one definition of "orphan".
@@ -336,6 +416,7 @@ def check_call_graph_connectivity(
         Dict with keys: orphan_units, total_units, entry_point_count
     """
     outgoing, incoming, unit_to_file = build_call_graph(interfaces_data, enhanced_data_flow)
+    feature_index = _build_unit_feature_index(interfaces_data)
 
     all_units = set(unit_to_file.keys())
 
@@ -363,6 +444,13 @@ def check_call_graph_connectivity(
             unit_name = unit_key.split("::", 1)[1] if "::" in unit_key else unit_key
             if not is_callable(unit_name):
                 continue
+        # Skip test/build units: invoked by an external runner (test
+        # framework / make), so a missing incoming edge is not dead code.
+        features, subtree = feature_index.get(unit_key, ([], ""))
+        if _is_non_production_feature(features, subtree):
+            continue
+        if is_test_file is not None and is_test_file(unit_to_file.get(unit_key, "")):
+            continue
         has_incoming = unit_key in incoming and len(incoming[unit_key]) > 0
         has_outgoing = unit_key in outgoing and len(outgoing[unit_key]) > 0
         if not has_incoming and not has_outgoing:
@@ -383,6 +471,7 @@ def check_feature_dependency_coverage(
     enhanced_data_flow: Dict[str, Any],
     entry_points: List[Dict[str, Any]],
     is_callable: Optional[Callable[[str], bool]] = None,
+    is_test_file: Optional[Callable[[str], bool]] = None,
 ) -> List[Dict[str, Any]]:
     """Check that every feature-bearing unit is either an entry point or has at least one incoming dependency edge.
 
@@ -392,6 +481,14 @@ def check_feature_dependency_coverage(
     being referenced, not invoked, so a missing incoming *invocation*
     edge is not a coverage gap. When ``None`` every unit is checked
     (legacy behaviour).
+
+    ``is_test_file`` is a per-language predicate (``backend.is_test_file``).
+    When supplied, units in test files are excluded — together with the
+    language-agnostic test/build feature-category check — because a test
+    or build unit is invoked by an external runner (test framework /
+    ``make``), not by repository code, so a missing incoming edge is not a
+    coverage gap. ``None`` disables the file-level check (the category
+    check still applies), preserving legacy behaviour.
 
     Returns: list of orphan features (feature paths without incoming edges
              and not in entry points)
@@ -426,6 +523,14 @@ def check_feature_dependency_coverage(
 
                 # Skip type-like units: they are referenced, not invoked.
                 if is_callable is not None and not is_callable(unit_name):
+                    continue
+
+                # Skip test/build units: invoked by an external runner
+                # (test framework / make), so a missing incoming edge is
+                # not a coverage gap.
+                if _is_non_production_feature(features, subtree_name):
+                    continue
+                if is_test_file is not None and is_test_file(file_path):
                     continue
 
                 # Check if has any incoming edge
@@ -601,10 +706,12 @@ class InterfaceReviewer:
             connectivity = check_call_graph_connectivity(
                 interfaces_data, enhanced_data_flow, entry_points,
                 is_callable=self.backend.is_callable_unit,
+                is_test_file=self.backend.is_test_file,
             )
             feature_orphans = check_feature_dependency_coverage(
                 interfaces_data, enhanced_data_flow, entry_points,
                 is_callable=self.backend.is_callable_unit,
+                is_test_file=self.backend.is_test_file,
             )
 
             self.logger.info(
