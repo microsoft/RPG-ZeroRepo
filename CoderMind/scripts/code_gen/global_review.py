@@ -715,7 +715,7 @@ def _build_review_prompt(repo_path: Path, previous_issues: str = "") -> str:
         file_list = "(file listing unavailable)"
 
     venv_python = get_dev_python(repo_path) or "python3"
-    backend = resolve_test_backend()
+    backend = resolve_test_backend(repo_path=repo_path)
     pytest_cmd = _build_backend_test_cmd(backend, repo_path, [], venv_python)
     gui_script_reuse_context = _load_gui_script_reuse_context(repo_path)
 
@@ -1117,7 +1117,7 @@ def global_review(
     }
     start_time = time.time()
     previous_issues = ""
-    backend = resolve_test_backend()
+    backend = resolve_test_backend(repo_path=repo_path)
 
     for iteration in range(1, max_iterations + 1):
         logger.info("━━━ Global Review: iteration %d/%d ━━━", iteration, max_iterations)

@@ -73,7 +73,7 @@ def final_test(
     except RuntimeError as exc:
         return {"success": False, "error": str(exc)}
 
-    backend = resolve_test_backend()
+    backend = resolve_test_backend(repo_path=repo_path)
     if backend.name == "python":
         try:
             ensure_deps_installed(repo_path)

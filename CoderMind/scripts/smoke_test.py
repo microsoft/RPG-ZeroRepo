@@ -42,24 +42,33 @@ logger = logging.getLogger(__name__)
 def _resolve_backend(repo_path: Path):
     """Resolve the target-language backend for ``repo_path``.
 
-    Reads the language from the repo's rpg.json (written by the encoder /
-    decoder), falling back to Python so the smoke test degrades to its
-    historical Python-only behaviour when no language metadata exists.
-    Never raises.
+    Reads explicit language metadata from the repo's ``.cmind/data``
+    artefacts (feature_spec / rpg, written by the encoder / decoder) and
+    falls back to scanning the real source files on disk, so the smoke
+    test detects the right language even when that metadata is missing or
+    unreadable. Degrades to Python only for a genuinely empty / unknown
+    repo. Never raises.
     """
     try:
-        from decoder_lang import get_backend, resolve_decoder_language
+        from decoder_lang import resolve_repo_backend
     except Exception:  # noqa: BLE001
         return None
-    rpg_obj = None
+
+    def _load(rel: str):
+        try:
+            artefact = repo_path / ".cmind" / "data" / rel
+            if artefact.is_file():
+                return json.loads(artefact.read_text(encoding="utf-8"))
+        except Exception:  # noqa: BLE001
+            return None
+        return None
+
     try:
-        rpg_file = repo_path / ".cmind" / "data" / "rpg.json"
-        if rpg_file.is_file():
-            rpg_obj = json.loads(rpg_file.read_text(encoding="utf-8"))
-    except Exception:  # noqa: BLE001
-        rpg_obj = None
-    try:
-        return get_backend(resolve_decoder_language(rpg_obj=rpg_obj))
+        return resolve_repo_backend(
+            repo_path,
+            feature_spec=_load("feature_spec.json"),
+            rpg_obj=_load("rpg.json"),
+        )
     except Exception:  # noqa: BLE001
         return None
 
@@ -400,6 +409,7 @@ def run_smoke_test(
     # them for non-Python projects (the entry layer is language-aware via
     # the backend and still runs). Default to Python when undetermined.
     backend = _resolve_backend(repo_path)
+    result.project_type = backend.name if backend is not None else "python"
     is_python = backend is None or backend.name == "python"
 
     # Layer 1: Import completeness

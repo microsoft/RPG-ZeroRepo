@@ -31,6 +31,7 @@ from decoder_lang import (
     ToolchainUnavailable,
     get_backend,
     resolve_decoder_language,
+    scan_repo_source_files,
 )
 
 
@@ -425,10 +426,24 @@ def _load_json_if_exists(path: Path) -> Any:
         return None
 
 
-def resolve_test_backend(valid_files: Optional[List[str]] = None) -> LanguageBackend:
-    """Resolve the backend that should run codegen verification tests."""
+def resolve_test_backend(
+    valid_files: Optional[List[str]] = None,
+    repo_path: Optional[Path] = None,
+) -> LanguageBackend:
+    """Resolve the backend that should run codegen verification tests.
+
+    Language is resolved through :func:`resolve_decoder_language`'s tier
+    chain (feature_spec meta -> rpg meta -> dominant language of the
+    supplied files -> python default). When the caller has no scoped
+    ``valid_files`` (e.g. the final-test / global-review / env-setup
+    stages operate over the whole repo), pass ``repo_path`` so the
+    language can still be inferred from the actual on-disk sources rather
+    than silently defaulting to python for a non-python project.
+    """
     feature_spec = _load_json_if_exists(FEATURE_SPEC_FILE)
     rpg_obj = _load_json_if_exists(REPO_RPG_FILE)
+    if not valid_files and repo_path is not None:
+        valid_files = scan_repo_source_files(repo_path) or None
     language = resolve_decoder_language(
         feature_spec=feature_spec,
         rpg_obj=rpg_obj,
@@ -446,7 +461,9 @@ def run_project_tests(
     backend: Optional[LanguageBackend] = None,
 ) -> TestResult:
     """Run the target language's native project test command."""
-    selected_backend = backend or resolve_test_backend(valid_files=test_files)
+    selected_backend = backend or resolve_test_backend(
+        valid_files=test_files, repo_path=repo_root
+    )
     if selected_backend.name == "python":
         return run_pytest(
             repo_root,

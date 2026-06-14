@@ -316,7 +316,7 @@ def test_run_batch_skips_python_env_for_non_python(monkeypatch, tmp_path: Path) 
         name = "go"
         display_name = "Go"
 
-    monkeypatch.setattr(run_batch, "resolve_test_backend", lambda: FakeBackend())
+    monkeypatch.setattr(run_batch, "resolve_test_backend", lambda *_a, **_k: FakeBackend())
     monkeypatch.setattr(
         run_batch,
         "ensure_dev_venv",
@@ -338,7 +338,7 @@ def test_run_batch_keeps_python_env_setup(monkeypatch, tmp_path: Path) -> None:
         name = "python"
         display_name = "Python"
 
-    monkeypatch.setattr(run_batch, "resolve_test_backend", lambda: FakeBackend())
+    monkeypatch.setattr(run_batch, "resolve_test_backend", lambda *_a, **_k: FakeBackend())
     monkeypatch.setattr(
         run_batch,
         "ensure_dev_venv",

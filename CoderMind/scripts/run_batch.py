@@ -153,7 +153,7 @@ MAX_BATCH_ATTEMPTS = 2               # initial + 1 auto-retry
 
 def _setup_codegen_environment(repo_path: Path) -> None:
     """Prepare the language-specific codegen environment."""
-    backend = resolve_test_backend()
+    backend = resolve_test_backend(repo_path=repo_path)
     if backend.name != "python":
         logger.info("Skipping Python venv setup for %s codegen", backend.display_name)
         return

@@ -36,12 +36,13 @@ def _pass_result() -> _TestResult:
 
 class _Backend:
     name = "python"
+    display_name = "Python"
 
 
 def _patch_common(monkeypatch, tmp_path: Path) -> None:
     monkeypatch.setattr(fv, "ensure_on_main", lambda *_a, **_k: None)
     monkeypatch.setattr(fv, "GitRunner", lambda *_a, **_k: object())
-    monkeypatch.setattr(fv, "resolve_test_backend", lambda: _Backend())
+    monkeypatch.setattr(fv, "resolve_test_backend", lambda *_a, **_k: _Backend())
     monkeypatch.setattr(fv, "ensure_deps_installed", lambda *_a, **_k: None)
     monkeypatch.setattr(fv, "get_dev_python", lambda *_a, **_k: "python3")
     # build_batch_pytest_cmd is imported lazily inside the loop.

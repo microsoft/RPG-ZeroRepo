@@ -116,7 +116,7 @@ def post_verify(
         test_files if test_files else "all tests",
     )
 
-    backend = resolve_test_backend(valid_files=test_files or None)
+    backend = resolve_test_backend(valid_files=test_files or None, repo_path=repo_path)
     if backend.name == "python":
         try:
             ensure_deps_installed(repo_path)

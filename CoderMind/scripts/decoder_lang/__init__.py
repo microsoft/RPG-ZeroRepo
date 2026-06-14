@@ -32,7 +32,9 @@ from .backend import (
     list_backends,
     register_backend,
     resolve_decoder_language,
+    resolve_repo_backend,
     resolve_target_language,
+    scan_repo_source_files,
 )
 from .c_backend import CBackend
 from .cpp_backend import CppBackend
@@ -79,6 +81,8 @@ __all__ = [
     "list_backends",
     "register_backend",
     "resolve_decoder_language",
+    "resolve_repo_backend",
     "resolve_target_language",
+    "scan_repo_source_files",
     "with_language_directive",
 ]

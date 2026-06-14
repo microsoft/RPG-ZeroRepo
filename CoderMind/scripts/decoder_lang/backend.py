@@ -421,3 +421,75 @@ def resolve_decoder_language(
             return languages[0]
     # Tier 1-3 share the same logic as resolve_target_language.
     return resolve_target_language(rpg_obj, valid_files=valid_files)
+
+
+def scan_repo_source_files(repo_root: "Path | str") -> list[str]:
+    """Enumerate supported-language source files under ``repo_root``.
+
+    Language-agnostic on-disk discovery: walks the tree, prunes VCS /
+    build / dependency directories via :func:`common.utils.is_skip_dir`,
+    and keeps only files whose extension maps to a registered language
+    (per :mod:`lang_parser`). Returns repo-relative POSIX path strings.
+
+    This is the robustness layer for language resolution: it lets a
+    verification stage infer the project language from the real sources
+    when the encoder metadata (feature_spec / rpg) is missing or
+    unreadable, so a non-python project is never silently mis-detected as
+    python. Adding a language requires no change here — the extension set
+    lives in :mod:`lang_parser`. Never raises; returns ``[]`` when the
+    path is absent or unreadable.
+    """
+    import os
+
+    try:
+        from lang_parser import detect_language  # type: ignore
+    except ImportError:
+        return []
+    try:
+        from common.utils import is_skip_dir
+    except ImportError:  # pragma: no cover - common is always importable here
+        is_skip_dir = None  # type: ignore[assignment]
+
+    root = Path(repo_root)
+    if not root.is_dir():
+        return []
+
+    found: list[str] = []
+    for dirpath, dirnames, filenames in os.walk(root):
+        if is_skip_dir is not None:
+            dirnames[:] = [d for d in dirnames if not is_skip_dir(d)]
+        for name in filenames:
+            if detect_language(name) is None:
+                continue
+            abs_path = Path(dirpath) / name
+            try:
+                found.append(abs_path.relative_to(root).as_posix())
+            except ValueError:
+                found.append(name)
+    return found
+
+
+def resolve_repo_backend(
+    repo_root: "Path | str",
+    *,
+    feature_spec: Any = None,
+    rpg_obj: Any = None,
+) -> "LanguageBackend":
+    """Resolve the language backend for an on-disk repo (canonical path).
+
+    Wraps :func:`resolve_decoder_language` but *guarantees* the on-disk
+    scan tier: when neither ``feature_spec`` nor ``rpg_obj`` carries an
+    explicit language, the project language is inferred from the actual
+    source files under ``repo_root`` (via :func:`scan_repo_source_files`)
+    rather than silently defaulting to python. Every post-codegen
+    verification stage (final test, smoke test, post-verify) routes
+    through this so a non-python project can never be mis-verified as a
+    python one.
+    """
+    valid_files = scan_repo_source_files(repo_root)
+    language = resolve_decoder_language(
+        feature_spec=feature_spec,
+        rpg_obj=rpg_obj,
+        valid_files=valid_files or None,
+    )
+    return get_backend(language)

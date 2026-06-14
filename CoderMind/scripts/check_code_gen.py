@@ -365,16 +365,19 @@ def determine_state(
 
         # Resolve the target language so entry-point / dependency artifact
         # checks are not hard-coded to Python's ``main.py`` /
-        # ``requirements.txt``. Falls back to Python on any failure so the
-        # check degrades to its previous behaviour rather than crashing.
+        # ``requirements.txt``. Routes through the canonical repo resolver so
+        # the language is inferred from the real on-disk sources when the rpg
+        # metadata is missing, rather than silently assuming Python. Falls
+        # back to Python on any failure so the check degrades to its previous
+        # behaviour rather than crashing.
         backend = None
         try:
             from common.paths import REPO_RPG_FILE
-            from decoder_lang import get_backend, resolve_decoder_language
+            from decoder_lang import resolve_repo_backend
             rpg_obj = None
             if Path(REPO_RPG_FILE).is_file():
                 rpg_obj = json.loads(Path(REPO_RPG_FILE).read_text(encoding="utf-8"))
-            backend = get_backend(resolve_decoder_language(rpg_obj=rpg_obj))
+            backend = resolve_repo_backend(repo_root, rpg_obj=rpg_obj)
         except Exception:  # noqa: BLE001 — degraded mode: assume Python
             backend = None
 
