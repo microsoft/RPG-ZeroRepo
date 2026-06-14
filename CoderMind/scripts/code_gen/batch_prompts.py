@@ -64,7 +64,7 @@ from code_gen._constants import DEFAULT_TEST_TIMEOUT  # noqa: E402
 MAX_ITERATIONS = 5
 
 _FALLBACK_TEST_COMMANDS = {
-    "go": ["go", "test", "./..."],
+    "go": ["go", "test", "-v", "./..."],
     "rust": ["cargo", "test"],
     "typescript": ["npm", "test"],
     "javascript": ["npm", "test"],

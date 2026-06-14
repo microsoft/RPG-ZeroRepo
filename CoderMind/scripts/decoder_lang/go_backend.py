@@ -213,7 +213,11 @@ class GoBackend:
         selectors: list[str] | None = None,
     ) -> list[str]:
         go_exe = env.runtime_executable or "go"
-        cmd = [go_exe, "test"]
+        # ``-v`` makes ``go test`` emit per-test ``=== RUN`` / ``--- PASS``
+        # lines that :meth:`parse_test_output` counts. Without it the output
+        # is only the ``ok <pkg>`` package summary, so passed_count stays 0 —
+        # a real run would then look indistinguishable from a zero-test no-op.
+        cmd = [go_exe, "test", "-v"]
         if selectors:
             cmd.extend(["-run", "|".join(selectors)])
         cmd.append("./...")

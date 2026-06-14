@@ -75,7 +75,7 @@ def test_go_codegen_prompt_uses_go_test(monkeypatch, tmp_path: Path) -> None:
     prompt = batch_prompts.build_tdd_prompt(_state(task), task, tmp_path)
 
     assert "Language: Go" in prompt
-    assert "go test ./..." in prompt
+    assert "go test -v ./..." in prompt
     assert "Read `go.mod`" in prompt
     assert "go get <module>" in prompt
     assert "python3 -m pytest" not in prompt

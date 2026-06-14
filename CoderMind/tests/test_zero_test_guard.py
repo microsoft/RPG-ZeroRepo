@@ -70,6 +70,7 @@ class TestGoVerdict:
         raw = "=== RUN   TestAdd\n--- PASS: TestAdd (0.00s)\nok  \tpkg\t0.01s\n"
         result = self.backend.parse_test_output(raw, 0)
         assert result.status == "passed"
+        assert result.passed_count == 1
 
     def test_nonempty_output_without_parsed_counts_still_passes(self):
         # ``-json`` output the text regexes don't parse → 0 counts, but the
@@ -82,6 +83,16 @@ class TestGoVerdict:
         raw = "=== RUN   TestAdd\n--- FAIL: TestAdd (0.00s)\nFAIL\tpkg\t0.01s\n"
         result = self.backend.parse_test_output(raw, 1)
         assert result.status == "failed"
+
+    def test_test_command_requests_verbose_output(self):
+        # ``-v`` is what makes go emit the per-test lines parse_test_output
+        # counts; without it a real run reports passed_count 0 and looks like
+        # a no-op. Lock the flag into the command.
+        from decoder_lang.test_result import EnvHandle
+
+        cmd = self.backend.test_command(EnvHandle(project_root=Path("/tmp/x")))
+        assert "-v" in cmd
+        assert cmd[-1] == "./..."
 
 
 class TestNodeBackendsVerdict:

@@ -142,7 +142,7 @@ class GoBackendBehaviourTests(unittest.TestCase):
             EnvHandle(project_root=Path("."), runtime_executable="/usr/bin/go"),
             selectors=["TestRun", "TestStop"],
         )
-        self.assertEqual(cmd, ["/usr/bin/go", "test", "-run", "TestRun|TestStop", "./..."])
+        self.assertEqual(cmd, ["/usr/bin/go", "test", "-v", "-run", "TestRun|TestStop", "./..."])
 
     def test_install_deps_command(self) -> None:
         env = EnvHandle(project_root=Path("."), runtime_executable="/usr/bin/go")
