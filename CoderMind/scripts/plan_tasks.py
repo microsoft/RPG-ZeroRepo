@@ -1337,16 +1337,17 @@ class TaskPlanner:
     def _reconciled_entry_point_path(self) -> Optional[str]:
         """Resolve the program entry path from already-designed interfaces.
 
-        Reuses an existing language-appropriate entry file (e.g. Go's
-        ``cmd/<name>/main.go``) when the skeleton already placed one, so
-        the synthetic MAIN_ENTRY task does not generate a second entry
-        (which on Go produced two ``func main()`` packages). Returns
-        ``None`` for languages / layouts with no special reconciliation,
-        letting the backend use its canonical path.
+        Reuses an existing language-appropriate entry file when the
+        skeleton already placed one (e.g. C++ ``src/cli/main.cpp`` off the
+        canonical ``src/main.cpp``, or Go ``cmd/<name>/main.go``), so the
+        synthetic MAIN_ENTRY task extends it instead of generating a
+        SECOND entry — the dual-``main`` bug. The per-language matching
+        rule lives in ``backend.find_existing_entry`` (filename match by
+        default; Go encodes the ``cmd/*/main.go`` shape). Returns ``None``
+        when the skeleton declared no entry, letting the backend use its
+        canonical path.
         """
-        if self.backend.name == "go":
-            return self._resolve_go_command_path()
-        return None
+        return self.backend.find_existing_entry(self.interfaces)
     
     def _build_requirements_task(self) -> str:
         """Build task description for dependency metadata generation."""

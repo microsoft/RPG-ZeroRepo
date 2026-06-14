@@ -146,6 +146,43 @@ class LanguageBackend(Protocol):
         the entry cannot be located; callers treat ``None`` as "skip"
         (non-fatal), never as failure."""
 
+    def find_existing_entry(self, interfaces: dict[str, Any]) -> str | None:
+        """Return the entry-point file the skeleton already placed, if any.
+
+        The skeleton (built by an LLM) may put the program entry at a
+        non-canonical path — e.g. C++ ``src/cli/main.cpp`` rather than the
+        backend's default ``src/main.cpp``. The planner calls this before
+        synthesising the ``<MAIN_ENTRY>`` task so it can reuse that file
+        instead of generating a SECOND entry at the canonical path (the
+        dual-``main`` bug). Returns the existing path (repo-relative POSIX)
+        or ``None`` when the skeleton declared no entry, in which case the
+        backend's canonical :meth:`entry_point_path` is used.
+
+        The default behaviour (see :func:`default_find_existing_entry`)
+        matches on the canonical entry's filename; backends with a
+        directory convention (Go's ``cmd/<name>/main.go``) override this
+        to encode the stricter shape."""
+
+    def entry_point_candidates(self) -> list[str]:
+        """Return accepted entry-file path patterns for verification.
+
+        ``check_code_gen`` checks that the ``<MAIN_ENTRY>`` task produced
+        a real entry file. A single canonical path is too strict when the
+        skeleton placed the entry elsewhere (or used a glob-shaped
+        convention), so backends return every accepted shape here. Entries
+        may contain ``*`` globs (Go's ``cmd/*/main.go``). The default is
+        just ``[entry_point_path("")]``."""
+
+    def prepare_test_env(self, env: EnvHandle) -> None:
+        """Hook run before the test command to settle the build state.
+
+        No-op for interpreted languages. Compiled languages whose test
+        set is materialised by a build configurator (C/C++ ``cmake``)
+        override this to (re)configure the build directory, so the test
+        runner never observes a stale/partial test set generated against
+        an earlier source revision. Must be idempotent and tolerate a
+        missing toolchain (degrade to no-op rather than raise)."""
+
     # --- 2. Code structure (delegates to lang_parser) -------------------
 
     def has_placeholder(self, code: str, path: str = "<string>") -> bool:
@@ -421,6 +458,79 @@ def resolve_decoder_language(
             return languages[0]
     # Tier 1-3 share the same logic as resolve_target_language.
     return resolve_target_language(rpg_obj, valid_files=valid_files)
+
+
+def cmake_reconfigure(env: Any) -> None:
+    """Reconfigure a CMake build dir so a later ``ctest`` sees a fresh test set.
+
+    The C/C++ test command runs ``ctest`` against a ``build/`` directory
+    whose registered test set is materialised by ``cmake``. When sources
+    or ``CMakeLists.txt`` changed since the last configure, ``ctest`` can
+    observe a STALE / partial test set (the post-verify "ran 1 test"
+    false-failure that failed an otherwise-green C++ stage). Running
+    ``cmake -S <root> -B build`` here regenerates the test registration
+    against the current tree before tests run.
+
+    No-op (silently) when there is no ``CMakeLists.txt`` or no ``cmake``
+    on PATH — the project then uses ``make`` / direct compile, which has
+    no separate configure step. Never raises: a failed reconfigure must
+    not crash the verification stage (the test command surfaces a real
+    build error itself).
+    """
+    import shutil
+    import subprocess
+
+    try:
+        root = Path(getattr(env, "project_root", "."))
+    except Exception:  # noqa: BLE001
+        return
+    extra = getattr(env, "extra", {}) or {}
+    cmake = extra.get("cmake") or shutil.which("cmake")
+    if not cmake or not (root / "CMakeLists.txt").exists():
+        return
+    try:
+        subprocess.run(
+            [cmake, "-S", str(root), "-B", str(root / "build")],
+            cwd=str(root),
+            capture_output=True,
+            timeout=120,
+        )
+    except Exception:  # noqa: BLE001 - reconfigure is best-effort
+        return
+
+
+def default_find_existing_entry(
+    backend: "LanguageBackend",
+    interfaces: dict[str, Any],
+) -> str | None:
+    """Filename-match the backend's canonical entry against the skeleton.
+
+    Shared default for :meth:`LanguageBackend.find_existing_entry`. Scans
+    every designed file path in ``interfaces`` and returns the first whose
+    basename equals the canonical entry's basename (e.g. ``main.cpp``), so
+    a skeleton entry placed off the canonical path (``src/cli/main.cpp``
+    vs ``src/main.cpp``) is reused instead of duplicated. Returns a
+    repo-relative POSIX path, or ``None`` when no match exists. Pure /
+    side-effect-free so backends can call it from their override.
+    """
+    try:
+        canonical = backend.entry_point_path("")
+    except Exception:  # noqa: BLE001 - defensive; treat as "no canonical"
+        return None
+    target_name = canonical.replace("\\", "/").rsplit("/", 1)[-1]
+    if not target_name or not isinstance(interfaces, dict):
+        return None
+    for subtree in interfaces.get("subtrees", {}).values():
+        if not isinstance(subtree, dict):
+            continue
+        container = subtree.get("interfaces", subtree.get("files", {}))
+        if not isinstance(container, dict):
+            continue
+        for file_path in container:
+            norm = str(file_path).replace("\\", "/")
+            if norm.rsplit("/", 1)[-1] == target_name:
+                return norm
+    return None
 
 
 def scan_repo_source_files(repo_root: "Path | str") -> list[str]:

@@ -385,14 +385,19 @@ def determine_state(
         main_entry_ids = [tid for tid in completed_ids if tid.startswith("<MAIN_ENTRY>")]
         if main_entry_ids:
             if backend is not None:
-                entry_rel = backend.entry_point_path("")
-                entry_exists = (repo_root / entry_rel).exists()
-                # Go places the entry under cmd/<name>/main.go; accept any
-                # such command package rather than the canonical slug only.
-                if not entry_exists and backend.name == "go":
-                    entry_exists = any(repo_root.glob("cmd/*/main.go"))
+                # Accept any of the backend's entry-point shapes. A single
+                # canonical path is too strict when the skeleton placed the
+                # entry off-canonical (e.g. C++ ``src/cli/main.cpp``) or the
+                # language uses a glob convention (Go ``cmd/*/main.go``).
+                candidates = backend.entry_point_candidates()
+                entry_exists = any(
+                    (any(repo_root.glob(c)) if "*" in c else (repo_root / c).exists())
+                    for c in candidates
+                )
                 if not entry_exists:
-                    missing_artifacts.append(f"{entry_rel} (from <MAIN_ENTRY> task)")
+                    missing_artifacts.append(
+                        f"{candidates[0]} (from <MAIN_ENTRY> task)"
+                    )
             elif not (repo_root / "main.py").exists():
                 missing_artifacts.append("main.py (from <MAIN_ENTRY> task)")
 

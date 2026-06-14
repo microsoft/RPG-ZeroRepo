@@ -164,6 +164,41 @@ class GoBackend:
         slug = self.sanitize_module_identifier(module) if module else "app"
         return f"cmd/{slug}/main.go"
 
+    def find_existing_entry(self, interfaces: dict) -> str | None:
+        """Reuse an existing ``cmd/<name>/main.go`` from the skeleton.
+
+        Go places the program entry under ``cmd/<name>/main.go``. The
+        canonical slug (``cmd/<repo>/main.go``) rarely matches the name
+        the skeleton actually chose (``cmd/todoapp/main.go``), so a plain
+        filename match is not enough: this returns the first designed
+        ``cmd/<name>/main.go`` three-segment path so the synthetic
+        MAIN_ENTRY task extends it instead of creating a second
+        ``package main``. Falls back to ``None`` (→ backend default) when
+        the skeleton declared no command package.
+        """
+        if not isinstance(interfaces, dict):
+            return None
+        for subtree in interfaces.get("subtrees", {}).values():
+            if not isinstance(subtree, dict):
+                continue
+            container = subtree.get("interfaces", subtree.get("files", {}))
+            if not isinstance(container, dict):
+                continue
+            for file_path in container:
+                norm = str(file_path).replace("\\", "/")
+                parts = norm.split("/")
+                if len(parts) == 3 and parts[0] == "cmd" and parts[2] == "main.go":
+                    return norm
+        return None
+
+    def entry_point_candidates(self) -> list[str]:
+        # Go's entry lives under cmd/<name>/main.go; accept any such
+        # command package, not only the canonical slug.
+        return ["cmd/*/main.go"]
+
+    def prepare_test_env(self, env: EnvHandle) -> None:
+        return None
+
     def entry_run_command(self, repo_root: Path, entry: str) -> list[str] | None:
         if not (repo_root / entry).is_file():
             return None

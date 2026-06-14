@@ -477,6 +477,15 @@ def run_project_tests(
         env_handle = selected_backend.detect_env(repo_root) or EnvHandle(
             project_root=repo_root.resolve(),
         )
+        # Settle the build state before testing (no-op for most backends;
+        # C/C++ reconfigure cmake so ctest sees the current test set rather
+        # than a stale one left from a mid-edit configure).
+        prepare = getattr(selected_backend, "prepare_test_env", None)
+        if callable(prepare):
+            try:
+                prepare(env_handle)
+            except Exception as exc:  # noqa: BLE001 - best-effort prep
+                _logger.debug("prepare_test_env failed (non-fatal): %s", exc)
         cmd = selected_backend.test_command(env_handle)
     except (ToolchainUnavailable, NotImplementedError, OSError) as exc:
         return TestResult(

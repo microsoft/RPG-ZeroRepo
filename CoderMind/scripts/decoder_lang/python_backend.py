@@ -355,6 +355,17 @@ class PythonBackend:
     def entry_point_path(self, module: str) -> str:
         return "main.py"
 
+    def find_existing_entry(self, interfaces: dict) -> str | None:
+        from .backend import default_find_existing_entry
+
+        return default_find_existing_entry(self, interfaces)
+
+    def entry_point_candidates(self) -> list[str]:
+        return [self.entry_point_path("")]
+
+    def prepare_test_env(self, env) -> None:
+        return None
+
     def entry_run_command(self, repo_root: Path, entry: str) -> list[str] | None:
         if not (repo_root / entry).is_file():
             return None

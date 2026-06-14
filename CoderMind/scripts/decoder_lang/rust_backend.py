@@ -109,6 +109,17 @@ class RustBackend:
     def entry_point_path(self, module: str) -> str:
         return "src/main.rs"
 
+    def find_existing_entry(self, interfaces: dict) -> str | None:
+        from .backend import default_find_existing_entry
+
+        return default_find_existing_entry(self, interfaces)
+
+    def entry_point_candidates(self) -> list[str]:
+        return [self.entry_point_path("")]
+
+    def prepare_test_env(self, env) -> None:
+        return None
+
     def entry_run_command(self, repo_root: Path, entry: str) -> list[str] | None:
         if not (repo_root / "Cargo.toml").is_file():
             return None
@@ -229,6 +240,9 @@ class RustBackend:
         return hints
 
     def project_task_templates(self, context: ProjectTaskContext) -> ProjectTaskTemplates:
+        # Reuse the planner-reconciled entry path when provided (avoids a
+        # second ``main`` file); else fall back to the canonical path.
+        entry = context.entry_point_path or "src/main.rs"
         return ProjectTaskTemplates(
             dependencies=f"""Generate or update Rust Cargo dependency files for the repository: {context.repo_name}
 
@@ -252,11 +266,12 @@ Repository purpose: {context.repo_info}
 **Goal:** Create a production-quality Cargo CLI entry point that lets users run the complete product through documented commands.
 
 **Files to create:**
-1. `src/main.rs` - Binary entry point for the CLI.
+1. `{entry}` - Binary entry point for the CLI.
 2. `src/lib.rs` (optional) - Library module that exposes reusable task/store logic.
 
 **Critical Rules:**
-- Do NOT re-implement business logic in `main.rs`. Delegate to modules already defined in the crate.
+- Do NOT re-implement business logic in the entry file. Delegate to modules already defined in the crate.
+- This is the ONLY binary entry point in the repository. If `{entry}` already exists, extend it in place — do NOT create a second entry file.
 - Every `use` path must reference real modules and symbols.
 - Use idiomatic `Result`-based error handling and explicit non-zero exits for user-facing failures.
 - Keep output plain text unless the requirements explicitly ask otherwise.

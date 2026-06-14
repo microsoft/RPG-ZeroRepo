@@ -119,6 +119,19 @@ class CppBackend:
     def entry_point_path(self, module: str) -> str:
         return "src/main.cpp"
 
+    def find_existing_entry(self, interfaces: dict) -> str | None:
+        from .backend import default_find_existing_entry
+
+        return default_find_existing_entry(self, interfaces)
+
+    def entry_point_candidates(self) -> list[str]:
+        return [self.entry_point_path("")]
+
+    def prepare_test_env(self, env: EnvHandle) -> None:
+        from .backend import cmake_reconfigure
+
+        cmake_reconfigure(env)
+
     def entry_run_command(self, repo_root: Path, entry: str) -> list[str] | None:
         # Compiled CLI: binary name is project-specific; the smoke layer
         # locates the built artifact rather than guessing here.
@@ -250,6 +263,9 @@ class CppBackend:
         return hints
 
     def project_task_templates(self, context: ProjectTaskContext) -> ProjectTaskTemplates:
+        # Reuse the planner-reconciled entry path when provided (avoids a
+        # second ``main`` file); else fall back to the canonical path.
+        entry = context.entry_point_path or "src/main.cpp"
         return ProjectTaskTemplates(
             dependencies=f"""Generate or update C++ build metadata for the repository: {context.repo_name}
 
@@ -272,14 +288,15 @@ Repository purpose: {context.repo_info}
 **Goal:** Create a production-quality C++ CLI entry point that exposes the documented product behavior.
 
 **Files to create:**
-1. `src/main.cpp` - CLI entry point.
+1. `{entry}` - CLI entry point.
 2. Headers only when needed to call implemented modules.
 
 **Critical Rules:**
-- Do NOT re-implement business logic in `main.cpp`; delegate to implemented modules.
+- Do NOT re-implement business logic in the entry file; delegate to implemented modules.
 - Include real project headers and call real symbols.
 - Validate arguments and return non-zero for user-facing failures.
 - Keep output plain text unless requirements say otherwise.
+- This is the ONLY program entry point in the repository. If `{entry}` already exists, extend it in place — do NOT create a second entry file.
 
 **Requirements:**
 1. Provide `int main(int argc, char **argv)`.

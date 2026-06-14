@@ -122,6 +122,17 @@ class JavaScriptBackend:
     def entry_point_path(self, module: str) -> str:
         return "src/index.js"
 
+    def find_existing_entry(self, interfaces: dict) -> str | None:
+        from .backend import default_find_existing_entry
+
+        return default_find_existing_entry(self, interfaces)
+
+    def entry_point_candidates(self) -> list[str]:
+        return [self.entry_point_path("")]
+
+    def prepare_test_env(self, env) -> None:
+        return None
+
     def entry_run_command(self, repo_root: Path, entry: str) -> list[str] | None:
         if (repo_root / "package.json").is_file():
             return ["npm", "start", "--", "--help"]
@@ -241,6 +252,9 @@ class JavaScriptBackend:
         return hints
 
     def project_task_templates(self, context: ProjectTaskContext) -> ProjectTaskTemplates:
+        # Reuse the planner-reconciled entry path when provided (avoids a
+        # second entry file); else fall back to the canonical path.
+        entry = context.entry_point_path or "src/index.js"
         return ProjectTaskTemplates(
             dependencies=f"""Generate or update Node.js/JavaScript dependency files for the repository: {context.repo_name}
 
@@ -265,13 +279,14 @@ Repository purpose: {context.repo_info}
 **Goal:** Create a production-quality Node.js CLI entry point that lets users run the complete product through documented commands.
 
 **Files to create:**
-1. `src/index.js` - CLI entry point referenced by package scripts.
+1. `{entry}` - CLI entry point referenced by package scripts.
 2. `src/cli.js` (optional) - Command parsing and dispatch separated from domain logic.
 
 **Critical Rules:**
-- Do NOT re-implement business logic in `index.js`. Import and delegate to implemented modules.
+- Do NOT re-implement business logic in the entry file. Import and delegate to implemented modules.
 - Every import must reference real files and exported symbols.
 - Use explicit error handling and non-zero process exits for user-facing failures.
+- This is the ONLY program entry point in the repository. If `{entry}` already exists, extend it in place — do NOT create a second entry file.
 - Keep output plain text unless the requirements explicitly ask otherwise.
 
 **Requirements:**

@@ -28,6 +28,7 @@ from __future__ import annotations
 from .backend import (
     LanguageBackend,
     ToolchainUnavailable,
+    default_find_existing_entry,
     get_backend,
     list_backends,
     register_backend,
@@ -76,6 +77,7 @@ __all__ = [
     "TestRunResult",
     "ToolchainUnavailable",
     "TypeScriptBackend",
+    "default_find_existing_entry",
     "get_backend",
     "language_directive",
     "list_backends",
