@@ -21,6 +21,7 @@ from lang_parser import (
     LPFileResult,
     NotSupported,
     detect_language,
+    dominant_language,
     get_config,
     get_config_for_path,
     get_parser,
@@ -92,6 +93,28 @@ class TestLangParserRegistry:
         assert detect_language("include/model.hpp") == "cpp"
         assert detect_language("src/main.rs") == "rust"
         assert detect_language("crates/foo/src/lib.rs") == "rust"
+
+    def test_dominant_language_basic_majority(self):
+        assert dominant_language(["a.py", "b.py", "c.go"]) == "python"
+        assert dominant_language(["a.go"] * 3 + ["b.py"]) == "go"
+        assert dominant_language([]) is None
+        assert dominant_language(["x.png", "y.md"]) is None
+
+    def test_dominant_language_cpp_with_c_headers(self):
+        # A C++ repo that uses .h headers (e.g. googletest): .h detects as C,
+        # but the C++-only extensions mean the repo is C++, so C votes fold
+        # into C++ rather than letting header count win.
+        paths = ["h%d.h" % i for i in range(2018)] + ["s%d.cc" % i for i in range(1062)]
+        assert dominant_language(paths) == "cpp"
+        # Even a single C++ source flips a header-only-looking repo to C++.
+        assert dominant_language(["a.h", "b.h", "c.h", "d.cpp"]) == "cpp"
+
+    def test_dominant_language_pure_c_unaffected(self):
+        # No C++ extension present → stays C (no regression).
+        assert dominant_language(["a.c", "b.h", "c.h"]) == "c"
+        assert dominant_language(["main.c"]) == "c"
+        # C alongside an unrelated language must not fold into C++.
+        assert dominant_language(["a.c"] * 5 + ["b.go"] * 2) == "c"
 
     def test_unsupported_paths_are_not_supported_source(self):
         unsupported = [
