@@ -93,7 +93,7 @@ For every response, you must respond with one `<solution>...</solution>` block c
 <solution>
 {{
   "DataLoader": {{
-    "new_loader": {{
+    "__init__": {{
        "initialize data loading configuration": "Configures the loader with the input source and validation defaults."
     }},
     "load_data": {{

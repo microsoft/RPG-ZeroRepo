@@ -236,7 +236,7 @@ def _infer_target_languages(source: InputSource) -> list[str]:
     patterns = [
         ("typescript", r"\btypescript\b|\bts\b"),
         ("javascript", r"\bjavascript\b|\bnode(?:\.js)?\b"),
-        ("go", r"\bgolang\b|\bgo\b|\bgo test\b|\bgo run\b|\bgo\.mod\b"),
+        ("go", r"\bgolang\b|\bgo\.mod\b|\bgo (?:test|run|build)\b|\bgo language\b|\bgo project\b"),
         ("rust", r"\brust\b|\bcargo\b"),
         ("cpp", r"\bc\+\+\b|\bcpp\b"),
         ("c", r"\bc language\b|\bc project\b"),

@@ -14,9 +14,10 @@ dependencies = [
     "pytest",
     "tree-sitter",
     "tree-sitter-json",
-    # Optional grammars for the lang_parser module (Python / Go / TS / JS / C /
-    # C++ / Rust). All are lazy-loaded by lang_parser/tree_sitter_backend.py,
-    # so a missing grammar only disables one language — the rest still work.
+    # Tree-sitter grammars for the lang_parser module (Go / TS / JS / C / C++ /
+    # Rust). Installed by default so every language works out of the box; each
+    # is lazy-loaded in lang_parser/tree_sitter_backend.py, so if one grammar
+    # fails to import on a given platform only that language degrades.
     "tree-sitter-go>=0.23.4",
     "tree-sitter-typescript>=0.23.2",
     "tree-sitter-javascript>=0.23.1",
