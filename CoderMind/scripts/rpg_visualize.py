@@ -59,7 +59,7 @@ def load_rpg(path: str | Path, dep_graph_path: str | Path | None = None) -> dict
         if resolved_dep_path:
             data["dep_graph"] = load_json(resolved_dep_path)
         elif dep_graph_path:
-          raise FileNotFoundError(f"dep_graph override not found: {dep_graph_path}")
+            raise FileNotFoundError(f"dep_graph override not found: {dep_graph_path}")
 
     return data
 

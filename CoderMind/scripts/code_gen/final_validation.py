@@ -139,10 +139,12 @@ def final_test(
     repair_attempts = 0
     while not result.success and repair_attempts < max_repair_iters:
         repair_attempts += 1
-        from code_gen.batch_prompts import build_batch_pytest_cmd
+        from code_gen.batch_prompts import _build_backend_test_cmd
 
         venv_python = get_dev_python(repo_path) or "python3"
-        repair_pytest_cmd = build_batch_pytest_cmd([], venv_python)
+        repair_verify_cmd = _build_backend_test_cmd(
+            backend, repo_path, [], venv_python,
+        )
         failure_tail = "\n".join(result.output.splitlines()[-80:])
         repair_prompt = (
             "The full test suite failed after every batch completed. Reconcile "
@@ -156,7 +158,7 @@ def final_test(
             "- Fix production code, documentation, or example files so the "
             "existing tests pass. Do NOT delete, skip, or weaken any test.\n"
             "- Do NOT create new test files.\n\n"
-            f"Verify with:\n```\n{repair_pytest_cmd}\n```\n\n"
+            f"Verify with:\n```\n{repair_verify_cmd}\n```\n\n"
             "When the suite is green, commit:\n"
             "```\ngit add -A && git commit -m "
             '"fix: reconcile final test failures"\n```\n'
@@ -210,7 +212,7 @@ def final_test(
             # Lazy import: smoke_test pulls in the dep_graph stack, so only
             # load it on the success path where we actually need it.
             from smoke_test import run_smoke_test
-            from code_gen.batch_prompts import build_batch_pytest_cmd
+            from code_gen.batch_prompts import _build_backend_test_cmd
 
             smoke_result = run_smoke_test()
             smoke_dict = smoke_result.to_dict()
@@ -223,9 +225,11 @@ def final_test(
                 findings_desc = "\n".join(
                     f"- [{f.severity}] {f.message}" for f in actionable
                 )
-                # Build pytest command for the repair agent
+                # Build the language-appropriate verify command for the agent
                 venv_python = get_dev_python(repo_path) or "python3"
-                repair_pytest_cmd = build_batch_pytest_cmd([], venv_python)
+                repair_verify_cmd = _build_backend_test_cmd(
+                    backend, repo_path, [], venv_python,
+                )
                 repair_prompt = (
                     "The smoke test detected the following issues after all "
                     "unit tests passed. Fix each issue in the production code, "
@@ -238,7 +242,7 @@ def final_test(
                     "- Startup crash → fix initialization code\n\n"
                     "Do NOT create new test files. Only fix production code.\n"
                     "After fixing, run this command to verify:\n"
-                    f"```\n{repair_pytest_cmd}\n```\n\n"
+                    f"```\n{repair_verify_cmd}\n```\n\n"
                     "When done, commit your changes:\n"
                     "```\ngit add -A && git commit -m "
                     '"fix: repair smoke test findings"\n```\n'
