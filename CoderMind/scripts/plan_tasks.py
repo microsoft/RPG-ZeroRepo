@@ -23,6 +23,7 @@ from collections import Counter, defaultdict, deque
 
 from common.trajectory import Trajectory, load_or_create_trajectory
 from common import LLMClient
+from common.code_dedup import dedup_file_code
 from common.language_meta import extract_language_metadata, metadata_with_languages
 from decoder_lang import ProjectTaskContext, get_backend
 from rpg import uuid8
@@ -560,21 +561,11 @@ def _dedup_interface_source(fdata: Dict[str, Any]) -> str:
     each duplicate copy carries the module header and imports, keeping exactly
     one copy yields a valid, complete file rather than a header-less
     concatenation of bodies. Genuinely distinct per-unit slices are preserved
-    unchanged.
+    unchanged. This is a consumer-side safety net; freshly serialized
+    ``interfaces.json`` is already deduplicated at the source.
     """
-    unit_codes = list(fdata.get("units_to_code", {}).values())
-    if not unit_codes:
-        return fdata.get("file_code", "")
-    seen: Set[str] = set()
-    unique: List[str] = []
-    for code in unit_codes:
-        stripped = code.strip()
-        if stripped and stripped not in seen:
-            seen.add(stripped)
-            unique.append(stripped)
-    if not unique:
-        return fdata.get("file_code", "")
-    return "\n\n".join(unique)
+    unit_codes = fdata.get("units_to_code", {}).values()
+    return dedup_file_code(unit_codes, fallback=fdata.get("file_code", ""))
 
 
 # ============================================================================

@@ -22,6 +22,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from common import LLMClient
+from common.code_dedup import dedup_file_code
 
 # AST inspection routes through the Python backend's
 # ``find_main_block_lineno`` helper so entry-point splicing shares the
@@ -1687,13 +1688,12 @@ def prune_orphan_interfaces(
                 # All units pruned → remove the entire file entry
                 files_to_remove.append(file_path)
             else:
-                # Regenerate file_code from surviving units
-                code_parts = []
-                for uname in units:
-                    code = units_to_code.get(uname, "")
-                    if code:
-                        code_parts.append(code)
-                file_data["file_code"] = "\n\n".join(code_parts)
+                # Regenerate file_code from surviving units, collapsing the
+                # whole-file-per-unit duplication so the rebuilt source is a
+                # single clean file rather than N copies.
+                file_data["file_code"] = dedup_file_code(
+                    units_to_code.get(uname, "") for uname in units
+                )
 
         for fp in files_to_remove:
             del file_interfaces[fp]
