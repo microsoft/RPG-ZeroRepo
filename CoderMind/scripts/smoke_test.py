@@ -250,6 +250,29 @@ def check_imports(repo_path: Path, result: SmokeResult) -> Dict[str, Any]:
 # Layer 2: Entry Point Validation
 # ============================================================================
 
+def _locate_existing_entry(repo_path: Path, backend: Any) -> Optional[str]:
+    """Return an existing entry file matching the backend's accepted shapes.
+
+    ``entry_point_candidates`` may contain ``*`` globs (Go's
+    ``cmd/*/main.go``). The canonical ``entry_point_path`` slug often differs
+    from the one the skeleton chose, so probing the accepted shapes locates a
+    real entry the canonical path would miss. Returns the first existing
+    repo-relative POSIX match, or None when no candidate resolves to a file.
+    """
+    try:
+        candidates = backend.entry_point_candidates()
+    except Exception:  # noqa: BLE001
+        return None
+    for pattern in candidates:
+        if any(ch in pattern for ch in "*?["):
+            for match in sorted(repo_path.glob(pattern)):
+                if match.is_file():
+                    return match.relative_to(repo_path).as_posix()
+        elif (repo_path / pattern).is_file():
+            return pattern
+    return None
+
+
 def check_entry_point(repo_path: Path, result: SmokeResult) -> Dict[str, Any]:
     """Verify the project's entry point starts and ``--help`` works.
 
@@ -273,6 +296,21 @@ def check_entry_point(repo_path: Path, result: SmokeResult) -> Dict[str, Any]:
             run_cmd = backend.entry_run_command(repo_path, entry_rel)
         except Exception:  # noqa: BLE001
             entry_rel, run_cmd = None, None
+
+    if run_cmd is None and backend is not None and backend.name != "python":
+        # The canonical entry slug often differs from the one the skeleton
+        # actually chose (Go: canonical ``cmd/app/main.go`` vs generated
+        # ``cmd/todoapp/main.go``), so ``entry_run_command`` returns None for a
+        # repo that does ship a runnable entry. Probe the backend's accepted
+        # entry shapes (globs allowed) to locate the real entry before giving
+        # up, so it is actually validated instead of silently skipped.
+        located = _locate_existing_entry(repo_path, backend)
+        if located is not None:
+            entry_rel = located
+            try:
+                run_cmd = backend.entry_run_command(repo_path, located)
+            except Exception:  # noqa: BLE001
+                run_cmd = None
 
     if run_cmd is None and backend is not None and backend.name != "python":
         # Compiled CLIs (C/C++) and toolchain-less hosts expose no run

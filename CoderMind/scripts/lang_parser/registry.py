@@ -20,8 +20,14 @@ _PARSERS: dict[str, BaseLanguageParser] = {}
 
 
 def _normalize_path(path: str) -> str:
-    file_part = str(path).split(":", 1)[0]
-    return PurePosixPath(file_part.replace("\\", "/")).as_posix().removeprefix("./")
+    raw = str(path).replace("\\", "/")
+    # Preserve a Windows drive prefix (``C:/``) while still dropping an
+    # RPG/dep-graph symbol suffix (``path:Symbol``).
+    drive = ""
+    if len(raw) >= 2 and raw[1] == ":" and raw[0].isalpha():
+        drive, raw = raw[:2], raw[2:]
+    file_part = raw.split(":", 1)[0]
+    return PurePosixPath(drive + file_part).as_posix().removeprefix("./")
 
 
 def detect_language(path: str) -> str | None:

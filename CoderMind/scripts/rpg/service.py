@@ -777,7 +777,8 @@ class RPGService:
         responsible for that if they want it.
 
         Args:
-            file_paths: Repo-relative ``.py`` paths to refresh.
+            file_paths: Repo-relative source paths to refresh (any supported
+                language: ``.py``/``.go``/``.rs``/``.ts``/``.js``/``.c``/``.cpp``).
             code_dir / workspace_root: As :meth:`refresh_dep_graph`.
             save_path: Optional standalone output path for the dep_graph.
                 ``None`` (default) means the caller relies on the embedded

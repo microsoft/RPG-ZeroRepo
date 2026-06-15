@@ -399,11 +399,9 @@ class RepoSkeleton:
         if backend is None:
             marker_filename: Optional[str] = "__init__.py"
             source_extension: str = ".py"
-            marker_default_body = None
         else:
             marker_filename = backend.package_marker_filename()
             source_extension = backend.file_extension
-            marker_default_body = None  # backend supplies its own below
 
         # Languages without a package marker (Go / Rust / TS) → no-op.
         if marker_filename is None:

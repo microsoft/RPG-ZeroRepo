@@ -99,9 +99,30 @@ def final_test(
     # dispatching a code-repair agent that cannot fix a "no tests ran" state.
     executed = result.passed + result.failed + result.errors + result.skipped
     if not result.success and executed == 0:
+        # A toolchain/infra failure (missing tool, timeout, crash →
+        # return_code -1) is a different non-result than a command that ran
+        # cleanly (exit 0) yet collected zero tests. Neither is a pass and
+        # neither is fixable by a code-repair agent, but they need different
+        # diagnostics, so report them distinctly.
+        toolchain_failure = result.return_code != 0
+        if toolchain_failure:
+            next_action = (
+                f"Final test could not run the {backend.display_name} test "
+                "command (toolchain unavailable, timeout, or crash). Install or "
+                "repair the language toolchain and re-run — this is an "
+                "environment problem, not a code defect."
+            )
+        else:
+            next_action = (
+                f"Final test ran the {backend.display_name} test command but "
+                "no tests executed (zero collected). This is a verification "
+                "no-op, not a pass: confirm the generated test suite is present "
+                "on the main branch and the test command discovers it."
+            )
         logger.error(
-            "Final test executed zero tests for %s backend — treating as a "
-            "verification failure, not a pass.", backend.name,
+            "Final test executed zero tests for %s backend (return_code=%s) — "
+            "treating as a verification failure, not a pass.",
+            backend.name, result.return_code,
         )
         no_test_result = {
             "success": False,
@@ -112,20 +133,17 @@ def final_test(
             "skipped": 0,
             "duration": result.duration,
             "output": result.output[:5000],
-            "no_tests_executed": True,
-            "next_action": (
-                f"Final test ran the {backend.display_name} test command but "
-                "no tests executed (zero collected). This is a verification "
-                "no-op, not a pass: confirm the generated test suite is present "
-                "on the main branch and the test command discovers it."
-            ),
+            "no_tests_executed": not toolchain_failure,
+            "toolchain_unavailable": toolchain_failure,
+            "next_action": next_action,
         }
         save_stage_result("final_test", {
             "success": False,
             "passed": 0,
             "failed": 0,
             "errors": 0,
-            "no_tests_executed": True,
+            "no_tests_executed": not toolchain_failure,
+            "toolchain_unavailable": toolchain_failure,
             "output_tail": "\n".join(result.output.splitlines()[-40:]),
         })
         return no_test_result
