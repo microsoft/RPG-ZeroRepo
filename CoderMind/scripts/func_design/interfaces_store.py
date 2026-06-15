@@ -17,6 +17,7 @@ from dataclasses import dataclass, field, asdict
 from pathlib import Path
 from typing import Dict, List, Optional, Set, Any, Union, Tuple
 
+from common.code_dedup import dedup_file_code
 from decoder_lang.unit_kind import classify_unit_kind
 
 logger = logging.getLogger(__name__)
@@ -1208,7 +1209,7 @@ class InterfacesStore:
                     "units": [u.name for u in units],
                     "units_to_features": {u.name: u.features for u in units},
                     "units_to_code": {u.name: u.code for u in units},
-                    "file_code": "\n\n".join(u.code for u in units),
+                    "file_code": dedup_file_code(u.code for u in units),
                 }
                 # Preserve handler-added tag for downstream diagnostics
                 # and so a subsequent ``from_legacy_format`` round-trip
