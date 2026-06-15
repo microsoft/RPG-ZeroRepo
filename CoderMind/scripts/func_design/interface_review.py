@@ -13,7 +13,7 @@ but BEFORE the final interfaces.json is saved.
 
 import json
 import logging
-from collections import defaultdict, deque
+from collections import defaultdict
 from dataclasses import dataclass, field
 from typing import Callable, Dict, List, Optional, Tuple, Any, Set
 
@@ -32,7 +32,6 @@ from decoder_lang.prompt_directive import with_language_directive
 from .interface_agent import (
     GlobalInterfaceRegistry,
     DependencyCollector,
-    cross_validate_imports_vs_calls,
 )
 from .interface_prompts import ORPHAN_REVIEW_PROMPT
 
@@ -326,9 +325,6 @@ def build_call_graph(
     for edge in enhanced_data_flow.get("inheritance_edges", []):
         child = edge.get("child", "")
         parent = edge.get("parent", "")
-        source_file = edge.get("source_file", "")
-        parent_file = edge.get("parent_file", "")
-        
         child_candidates = name_to_keys.get(child, [])
         parent_candidates = name_to_keys.get(parent, [])
         
@@ -342,8 +338,6 @@ def build_call_graph(
     for edge in enhanced_data_flow.get("reference_edges", []):
         unit = edge.get("unit", "")
         ref_type = edge.get("referenced_type", "")
-        source_file = edge.get("source_file", "")
-        
         unit_candidates = name_to_keys.get(unit, [])
         type_candidates = name_to_keys.get(ref_type, [])
         
@@ -378,6 +372,105 @@ def _build_unit_feature_index(
                     subtree_name,
                 )
     return index
+
+
+def _unit_name_aliases(unit_name: str) -> Set[str]:
+    """Return comparable aliases for an interface unit name."""
+    raw = unit_name.strip()
+    if not raw:
+        return set()
+
+    aliases = {raw}
+    if " " in raw:
+        aliases.add(raw.split(" ", 1)[1].strip())
+
+    expanded = set()
+    for alias in aliases:
+        if not alias:
+            continue
+        expanded.add(alias)
+        if "." in alias:
+            expanded.add(alias.rsplit(".", 1)[-1])
+        if "::" in alias:
+            expanded.add(alias.rsplit("::", 1)[-1])
+    return {alias for alias in expanded if alias}
+
+
+def _build_entry_point_keys(
+    entry_points: List[Dict[str, Any]],
+    unit_to_file: Dict[str, str],
+) -> Set[str]:
+    """Resolve LLM entry-point records to concrete unit keys."""
+    alias_to_keys: Dict[str, Set[str]] = defaultdict(set)
+    for unit_key in unit_to_file:
+        unit_name = unit_key.split("::", 1)[1] if "::" in unit_key else unit_key
+        for alias in _unit_name_aliases(unit_name):
+            alias_to_keys[alias].add(unit_key)
+
+    entry_point_keys: Set[str] = set()
+    for entry_point in entry_points:
+        entry_file = str(entry_point.get("file_path") or "").strip()
+        entry_unit = str(entry_point.get("unit_name") or "").strip()
+        if entry_file and entry_unit:
+            exact_key = f"{entry_file}::{entry_unit}"
+            if exact_key in unit_to_file:
+                entry_point_keys.add(exact_key)
+
+        for alias in _unit_name_aliases(entry_unit):
+            candidate_keys = alias_to_keys.get(alias, set())
+            if not entry_file and len(candidate_keys) > 1:
+                continue
+            for unit_key in candidate_keys:
+                if entry_file and unit_to_file.get(unit_key) != entry_file:
+                    continue
+                entry_point_keys.add(unit_key)
+    return entry_point_keys
+
+
+def _is_isolated_orphan(
+    unit_key: str,
+    unit_name: str,
+    file_path: str,
+    features: List[str],
+    subtree: str,
+    incoming: Dict[str, Set[str]],
+    outgoing: Dict[str, Set[str]],
+    entry_point_keys: Set[str],
+    is_callable: Optional[Callable[[str], bool]],
+    is_test_file: Optional[Callable[[str], bool]],
+) -> bool:
+    """Return True when a unit is a genuinely disconnected production orphan.
+
+    Single source of truth shared by the unit-level connectivity gate and
+    the feature-coverage gate so the two can never diverge (a past defect
+    had them disagree, leaving stale orphan counts). A unit is an orphan
+    only when ALL of the following hold:
+
+    * it is not an entry point;
+    * it is callable (type-like units are referenced, not invoked, so a
+      missing incoming *invocation* edge is expected);
+    * it is production code (test / build units are driven by an external
+      runner, so a missing incoming edge is not dead code);
+    * it is completely isolated — no incoming AND no outgoing edge.
+
+    Requiring isolation on BOTH directions (rather than "no incoming") is
+    what keeps roots / factories / framework callbacks — which have no
+    static incoming edge but DO call into the graph — from being mistaken
+    for dead code. The rule is identical for every language; all
+    language-specific behaviour enters only through the injected
+    ``is_callable`` / ``is_test_file`` predicates.
+    """
+    if unit_key in entry_point_keys:
+        return False
+    if is_callable is not None and not is_callable(unit_name):
+        return False
+    if _is_non_production_feature(features, subtree):
+        return False
+    if is_test_file is not None and is_test_file(file_path):
+        return False
+    has_incoming = bool(incoming.get(unit_key))
+    has_outgoing = bool(outgoing.get(unit_key))
+    return not has_incoming and not has_outgoing
 
 
 def check_call_graph_connectivity(
@@ -420,40 +513,18 @@ def check_call_graph_connectivity(
 
     all_units = set(unit_to_file.keys())
 
-    # Build entry point key set
-    entry_point_keys = set()
-    for ep in entry_points:
-        ep_file = ep.get("file_path", "")
-        ep_unit = ep.get("unit_name", "")
-        ep_key = f"{ep_file}::{ep_unit}"
-        if ep_key in all_units:
-            entry_point_keys.add(ep_key)
-        else:
-            # Try fuzzy match
-            for uk in all_units:
-                if uk.endswith(f"::{ep_unit}"):
-                    entry_point_keys.add(uk)
-                    break
-
-    non_entry_units = all_units - entry_point_keys
+    entry_point_keys = _build_entry_point_keys(entry_points, unit_to_file)
 
     # Orphan = callable + completely isolated (no incoming, no outgoing).
     orphan_units = []
-    for unit_key in non_entry_units:
-        if is_callable is not None:
-            unit_name = unit_key.split("::", 1)[1] if "::" in unit_key else unit_key
-            if not is_callable(unit_name):
-                continue
-        # Skip test/build units: invoked by an external runner (test
-        # framework / make), so a missing incoming edge is not dead code.
+    for unit_key in all_units:
+        unit_name = unit_key.split("::", 1)[1] if "::" in unit_key else unit_key
         features, subtree = feature_index.get(unit_key, ([], ""))
-        if _is_non_production_feature(features, subtree):
-            continue
-        if is_test_file is not None and is_test_file(unit_to_file.get(unit_key, "")):
-            continue
-        has_incoming = unit_key in incoming and len(incoming[unit_key]) > 0
-        has_outgoing = unit_key in outgoing and len(outgoing[unit_key]) > 0
-        if not has_incoming and not has_outgoing:
+        if _is_isolated_orphan(
+            unit_key, unit_name, unit_to_file.get(unit_key, ""),
+            features, subtree, incoming, outgoing, entry_point_keys,
+            is_callable, is_test_file,
+        ):
             orphan_units.append({
                 "unit_key": unit_key,
                 "file_path": unit_to_file.get(unit_key, ""),
@@ -473,7 +544,7 @@ def check_feature_dependency_coverage(
     is_callable: Optional[Callable[[str], bool]] = None,
     is_test_file: Optional[Callable[[str], bool]] = None,
 ) -> List[Dict[str, Any]]:
-    """Check that every feature-bearing unit is either an entry point or has at least one incoming dependency edge.
+    """Check that feature-bearing units are not isolated from the graph.
 
     ``is_callable`` is a per-language predicate (``backend.is_callable_unit``).
     When supplied, type-like feature-bearing units (struct / enum / ...)
@@ -490,22 +561,11 @@ def check_feature_dependency_coverage(
     coverage gap. ``None`` disables the file-level check (the category
     check still applies), preserving legacy behaviour.
 
-    Returns: list of orphan features (feature paths without incoming edges
-             and not in entry points)
+    Returns: list of orphan features attached to isolated units.
     """
-    _, incoming, unit_to_file = build_call_graph(interfaces_data, enhanced_data_flow)
+    outgoing, incoming, unit_to_file = build_call_graph(interfaces_data, enhanced_data_flow)
     
-    # Build entry point key set
-    entry_point_keys = set()
-    for ep in entry_points:
-        ep_file = ep.get("file_path", "")
-        ep_unit = ep.get("unit_name", "")
-        ep_key = f"{ep_file}::{ep_unit}"
-        entry_point_keys.add(ep_key)
-        # Also add bare match
-        for uk in unit_to_file:
-            if uk.endswith(f"::{ep_unit}"):
-                entry_point_keys.add(uk)
+    entry_point_keys = _build_entry_point_keys(entry_points, unit_to_file)
     
     orphan_features = []
     subtrees = interfaces_data.get("subtrees", {})
@@ -516,25 +576,11 @@ def check_feature_dependency_coverage(
             units_to_features = file_data.get("units_to_features", {})
             for unit_name, features in units_to_features.items():
                 unit_key = f"{file_path}::{unit_name}"
-                
-                # Skip entry points
-                if unit_key in entry_point_keys:
-                    continue
-
-                # Skip type-like units: they are referenced, not invoked.
-                if is_callable is not None and not is_callable(unit_name):
-                    continue
-
-                # Skip test/build units: invoked by an external runner
-                # (test framework / make), so a missing incoming edge is
-                # not a coverage gap.
-                if _is_non_production_feature(features, subtree_name):
-                    continue
-                if is_test_file is not None and is_test_file(file_path):
-                    continue
-
-                # Check if has any incoming edge
-                if unit_key not in incoming or len(incoming[unit_key]) == 0:
+                if _is_isolated_orphan(
+                    unit_key, unit_name, file_path, features, subtree_name,
+                    incoming, outgoing, entry_point_keys,
+                    is_callable, is_test_file,
+                ):
                     orphan_features.append({
                         "file_path": file_path,
                         "unit_name": unit_name,
@@ -784,10 +830,12 @@ class InterfaceReviewer:
             final_connectivity = check_call_graph_connectivity(
                 interfaces_data, enhanced_data_flow, final_entry_points,
                 is_callable=self.backend.is_callable_unit,
+                is_test_file=self.backend.is_test_file,
             )
             final_feature_orphans = check_feature_dependency_coverage(
                 interfaces_data, enhanced_data_flow, final_entry_points,
                 is_callable=self.backend.is_callable_unit,
+                is_test_file=self.backend.is_test_file,
             )
             final_orphan_units = final_connectivity["orphan_units"]
             self.logger.info(
