@@ -545,6 +545,38 @@ def validate_tasks(
     return True, f"Planned {len(tasks)} tasks covering all {total_units} units across {len(file_unit_keys)} files.", tasks
 
 
+def _dedup_interface_source(fdata: Dict[str, Any]) -> str:
+    """Return a file's interface source with per-unit duplication collapsed.
+
+    ``interfaces.json`` stores ``file_code`` as ``"\n\n".join(unit codes)``.
+    For non-Python units the ``count_lines`` call in interface synthesis
+    raises (``LPCodeUnit`` has no such method), and the fallback stores the
+    whole interface block as *every* unit's code, so a file with N units
+    embeds the entire file N times — an O(units x file_size) blow-up that
+    pushes the planner prompt past the 128 KB single-argument limit on large
+    modules.
+
+    Collapsing identical blocks reconstructs the original single file: because
+    each duplicate copy carries the module header and imports, keeping exactly
+    one copy yields a valid, complete file rather than a header-less
+    concatenation of bodies. Genuinely distinct per-unit slices are preserved
+    unchanged.
+    """
+    unit_codes = list(fdata.get("units_to_code", {}).values())
+    if not unit_codes:
+        return fdata.get("file_code", "")
+    seen: Set[str] = set()
+    unique: List[str] = []
+    for code in unit_codes:
+        stripped = code.strip()
+        if stripped and stripped not in seen:
+            seen.add(stripped)
+            unique.append(stripped)
+    if not unique:
+        return fdata.get("file_code", "")
+    return "\n\n".join(unique)
+
+
 # ============================================================================
 # Task Planner Agent (per subtree)
 # ============================================================================
@@ -600,7 +632,7 @@ class TaskPlannerAgent:
             files_context_parts.append(
                 f"### File {i + 1}: {fp}\n"
                 f"Units ({len(unit_keys)}): {json.dumps(unit_keys)}\n\n"
-                f"Source code (interfaces only):\n{fdata.get('file_code', '')}\n"
+                f"Source code (interfaces only):\n{_dedup_interface_source(fdata)}\n"
             )
         files_context = "\n---\n".join(files_context_parts)
         
