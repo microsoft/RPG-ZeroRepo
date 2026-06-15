@@ -139,6 +139,14 @@ def dominant_language(paths) -> str | None:
     skipped, not voted for ``None``. ``None`` is returned only when
     *every* path is unknown (empty or assets-only input).
 
+    A ``.h`` header is detected as C (it is the only config owning ``.h``),
+    but C++ projects routinely use ``.h`` for headers. When a repository
+    contains any C++-only extension (``.cpp``/``.cc``/``.cxx``/``.hpp``/
+    ``.hh``/``.hxx``) alongside ``.h`` files, the repo is C++ and those
+    ``.h`` votes belong to C++; a pure C repo never carries C++ sources.
+    So C votes fold into C++ whenever both appear, preventing header-heavy
+    C++ repos (e.g. googletest) from being misclassified as C.
+
     Tie-breaking is deterministic on CPython (insertion order) but
     callers that care about precise behaviour in mixed-language repos
     should pass a curated ``language_map`` to the consumer instead.
@@ -150,4 +158,6 @@ def dominant_language(paths) -> str | None:
             counts[lang] = counts.get(lang, 0) + 1
     if not counts:
         return None
+    if "cpp" in counts and "c" in counts:
+        counts["cpp"] += counts.pop("c")
     return max(counts.items(), key=lambda kv: kv[1])[0]
