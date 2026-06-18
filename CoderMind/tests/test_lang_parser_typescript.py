@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Tests for the TypeScript language parser."""
 
+import multiprocessing as mp
 import os
 import sys
 import textwrap
@@ -10,6 +11,12 @@ sys.path.insert(0, _project_root)
 sys.path.insert(0, os.path.join(_project_root, "scripts"))
 
 from lang_parser import parse_file, validate_syntax
+
+
+def _strip_string_literals_worker(line, result_queue):
+    from lang_parser.extractors.fallback import strip_string_literals
+
+    result_queue.put(strip_string_literals(line))
 
 
 TS_SOURCE = textwrap.dedent(
@@ -140,3 +147,28 @@ class TestTypeScriptParser:
         valid, error = validate_syntax("bad.ts", "export function broken(\n")
         assert valid is False
         assert error is not None
+
+    def test_comment_with_unterminated_quote_and_many_escapes_does_not_hang(self):
+        zod_like_line = (
+            "// const emailRegex = /^([!#\\$%&'"
+            + ("\\d" * 20)
+            + "_`{|}~]/"
+        )
+        result_queue = mp.Queue()
+        process = mp.Process(
+            target=_strip_string_literals_worker,
+            args=(zod_like_line, result_queue),
+        )
+
+        process.start()
+        process.join(3)
+
+        if process.is_alive():
+            process.terminate()
+            process.join()
+            raise AssertionError(
+                "strip_string_literals hung on zod-like escaped regex comment"
+            )
+
+        assert process.exitcode == 0
+        assert result_queue.get_nowait() == zod_like_line
