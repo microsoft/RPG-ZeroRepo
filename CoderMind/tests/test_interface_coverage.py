@@ -491,3 +491,57 @@ def test_apply_fixes_applies_add_interface_for_python() -> None:
     assert stats["applied_fixes"] == 1
     cli = interfaces_data["subtrees"]["Core"]["interfaces"]["src/cli.py"]
     assert "function run" in cli["units"]
+
+
+def test_apply_fixes_can_create_python_interface_file_in_feature_subtree() -> None:
+    reviewer = _make_reviewer("python")
+    registry = GlobalInterfaceRegistry(backend=get_backend_for("python"))
+    interfaces_data = {
+        "subtrees": {
+            "Todo Display": {
+                "files_order": ["src/todo_web_app/views/todo_list.py"],
+                "interfaces": {
+                    "src/todo_web_app/views/todo_list.py": {
+                        "units": ["function render_todo_items"],
+                        "units_to_features": {
+                            "function render_todo_items": [
+                                "Todo Display/list rendering/items/render all items"
+                            ]
+                        },
+                        "units_to_code": {},
+                        "file_code": "",
+                    }
+                },
+            }
+        }
+    }
+    feature_path = "Todo Display/list rendering/page/render complete page"
+
+    stats = reviewer._apply_fixes(
+        fixes=[{
+            "action": "add_interface",
+            "file_path": "src/todo_web_app/views/render.py",
+            "unit_name": "function render_todo_page",
+            "signature": "def render_todo_page(todos: list[dict]) -> str:",
+            "docstring": "Render the complete todo page.",
+            "feature_path": feature_path,
+            "incoming_calls_from": ["list_todos"],
+        }],
+        interfaces_data=interfaces_data,
+        enhanced_data_flow={"invocation_edges": []},
+        global_registry=registry,
+        skeleton_features={feature_path},
+        rpg_features={feature_path},
+    )
+
+    assert stats["applied_fixes"] == 1
+    files = interfaces_data["subtrees"]["Todo Display"]["interfaces"]
+    render_file = files["src/todo_web_app/views/render.py"]
+    assert render_file["units"] == ["function render_todo_page"]
+    assert render_file["units_to_features"]["function render_todo_page"] == [
+        feature_path
+    ]
+    assert "def render_todo_page(todos: list[dict]) -> str:" in render_file["file_code"]
+    assert "src/todo_web_app/views/render.py" in interfaces_data["subtrees"][
+        "Todo Display"
+    ]["files_order"]

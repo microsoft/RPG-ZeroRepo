@@ -1278,7 +1278,8 @@ Please perform the review tasks and return the JSON result.
         """Materialise an LLM-requested new interface unit into interfaces_data.
 
         Required fix fields:
-            - ``file_path``: must already exist as a key under some subtree
+                        - ``file_path``: existing key under some subtree, or a new file
+                            whose feature root names an existing subtree
             - ``unit_name``: prefixed with ``"function "`` or ``"class "``
             - ``signature``: full Python signature (e.g. ``def foo() -> None:``)
             - ``docstring``: non-empty, 1-3 sentences
@@ -1349,18 +1350,44 @@ Please perform the review tasks and return the JSON result.
         subtrees = interfaces_data.get("subtrees") or interfaces_data.get("components") or {}
         target_subtree: Optional[str] = None
         file_entry: Optional[Dict[str, Any]] = None
+        file_container: Optional[Dict[str, Any]] = None
         for st_name, st_data in subtrees.items():
-            file_container = st_data.get("interfaces") or st_data.get("files") or {}
-            if file_path in file_container:
+            container = st_data.get("interfaces")
+            if container is None:
+                container = st_data.get("files")
+            if container is not None and file_path in container:
                 target_subtree = st_name
-                file_entry = file_container[file_path]
+                file_container = container
+                file_entry = container[file_path]
                 break
         if file_entry is None:
-            return (
-                False,
-                f"file_path '{file_path}' not found in any subtree's interfaces",
-                0,
-            )
+            feature_root = feature_path.split("/", 1)[0].strip()
+            target_data = subtrees.get(feature_root) if feature_root else None
+            if target_data is None:
+                return (
+                    False,
+                    f"file_path '{file_path}' not found in any subtree's interfaces",
+                    0,
+                )
+
+            target_subtree = feature_root
+            file_container = target_data.get("interfaces")
+            if file_container is None:
+                file_container = target_data.get("files")
+            if file_container is None:
+                file_container = {}
+                target_data["interfaces"] = file_container
+
+            file_entry = {
+                "units": [],
+                "units_to_features": {},
+                "units_to_code": {},
+                "file_code": "",
+            }
+            file_container[file_path] = file_entry
+            files_order = target_data.setdefault("files_order", [])
+            if isinstance(files_order, list) and file_path not in files_order:
+                files_order.append(file_path)
 
         # --- Idempotency check --------------------------------------------
         existing_units = file_entry.setdefault("units", [])

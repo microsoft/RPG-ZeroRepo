@@ -65,6 +65,51 @@ def test_dependency_collector_python_inheritance_still_works() -> None:
     ), collector.inheritance_edges
 
 
+def test_dependency_collector_python_same_file_method_calls() -> None:
+    collector = DependencyCollector(
+        known_base_classes=set(),
+        known_types=set(),
+        target_language="python",
+    )
+    code = """
+class RecordFactory:
+    def create_record(self, title: str) -> dict:
+        return {"title": title}
+
+
+class Planner:
+    def __init__(self, record_factory: RecordFactory) -> None:
+        self._record_factory = record_factory or RecordFactory()
+
+    def resolve_action(self, action: str) -> str:
+        return action.strip()
+
+    def _require_action(self, action: str) -> str:
+        return self.resolve_action(action)
+
+    def plan_add(self, title: str) -> dict:
+        action = self._require_action("add")
+        record = self._record_factory.create_record(title)
+        return {"action": action, "record": record}
+"""
+
+    collector.analyze_code_dependencies(
+        code=code,
+        file_path="src/domain/todo.py",
+        base_class_files={},
+    )
+
+    assert {
+        (edge["caller"], edge["callee"])
+        for edge in collector.invocation_edges
+    } >= {
+        ("method __init__", "class RecordFactory"),
+        ("class Planner", "class RecordFactory"),
+        ("method plan_add", "method resolve_action"),
+        ("method plan_add", "method create_record"),
+    }
+
+
 def test_base_class_validation_accepts_go_source() -> None:
     backend = get_backend("go")
     model = BaseClassOutput.model_validate({
