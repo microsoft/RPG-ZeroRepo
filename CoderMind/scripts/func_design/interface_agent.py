@@ -302,7 +302,57 @@ class DependencyCollector:
         # Type references from annotations — Python-specific rich
         # extraction. Other languages cover this via LLM ``uses_types``.
         if self.backend.name == "python":
+            self._analyze_python_invocations(code, file_path)
             self._analyze_python_type_references(code, file_path, base_class_files)
+
+    def _analyze_python_invocations(self, code: str, file_path: str) -> None:
+        """Add same-file Python invocation edges from function bodies."""
+        units = self.backend.list_code_units(code, file_path)
+        local_callables: Dict[str, List[str]] = defaultdict(list)
+        caller_nodes: List[Tuple[str, ast.AST, Optional[str]]] = []
+
+        for unit in units:
+            if unit.unit_type not in ("function", "method", "class"):
+                continue
+            if unit.unit_type == "method":
+                prefix = "method"
+            elif unit.unit_type == "class":
+                prefix = "class"
+            else:
+                prefix = "function"
+            unit_name = f"{prefix} {unit.name}"
+            local_callables[unit.name].append(unit_name)
+            node = (unit.extra or {}).get("ast_node")
+            if node is not None and unit.unit_type in ("function", "method"):
+                owner_class = None
+                if unit.unit_type == "method" and unit.name == "__init__":
+                    parent = getattr(unit, "parent", None)
+                    if parent:
+                        owner_class = f"class {parent}"
+                caller_nodes.append((unit_name, node, owner_class))
+
+        local_calls: Dict[str, Set[str]] = defaultdict(set)
+        for caller, node, owner_class in caller_nodes:
+            for child in ast.walk(node):
+                if not isinstance(child, ast.Call):
+                    continue
+                callee_name = _python_call_name(child.func)
+                if not callee_name:
+                    continue
+                candidates = local_callables.get(callee_name, [])
+                if len(candidates) != 1:
+                    continue
+                callee = candidates[0]
+                local_calls[caller].add(callee)
+                if owner_class and callee.startswith("class "):
+                    local_calls[owner_class].add(callee)
+
+        for caller, callees in local_calls.items():
+            for callee in callees:
+                self.add_invocation(caller, callee, file_path, file_path)
+                if _is_private_python_unit(callee):
+                    for target in _public_targets_reached_via_private(callee, local_calls):
+                        self.add_invocation(caller, target, file_path, file_path)
 
     def _analyze_python_type_references(
         self,
@@ -521,6 +571,46 @@ def _extract_name_from_node(node: ast.expr) -> Optional[str]:
     elif isinstance(node, ast.Attribute):
         return node.attr
     return None
+
+
+def _python_call_name(node: ast.expr) -> Optional[str]:
+    """Return a local callee name for safe same-file call edges."""
+    if isinstance(node, ast.Name):
+        return node.id
+    if isinstance(node, ast.Attribute) and _attribute_root_is_self(node):
+        return node.attr
+    return None
+
+
+def _attribute_root_is_self(node: ast.Attribute) -> bool:
+    value = node.value
+    while isinstance(value, ast.Attribute):
+        value = value.value
+    return isinstance(value, ast.Name) and value.id == "self"
+
+
+def _is_private_python_unit(unit_name: str) -> bool:
+    bare_name = unit_name.split(" ", 1)[-1]
+    return bare_name.startswith("_")
+
+
+def _public_targets_reached_via_private(
+    start: str,
+    local_calls: Dict[str, Set[str]],
+) -> Set[str]:
+    targets: Set[str] = set()
+    seen: Set[str] = set()
+    stack = list(local_calls.get(start, set()))
+    while stack:
+        unit_name = stack.pop()
+        if unit_name in seen:
+            continue
+        seen.add(unit_name)
+        if _is_private_python_unit(unit_name):
+            stack.extend(local_calls.get(unit_name, set()))
+        else:
+            targets.add(unit_name)
+    return targets
 
 
 def _extract_type_names(node: ast.expr) -> List[str]:
