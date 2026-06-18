@@ -47,7 +47,10 @@ def line_end_for_statement(lines: list[str], start_index: int) -> int:
 
 
 def strip_string_literals(line: str) -> str:
-    return re.sub(r"(['\"`])(?:\\.|(?!\1).)*\1", "", line)
+    # Exclude backslashes from the normal-character branch so escapes have a
+    # single matching path.  Otherwise, unterminated quoted text with many
+    # escapes can trigger catastrophic backtracking.
+    return re.sub(r"(['\"`])(?:\\.|(?!\1)[^\\])*\1", "", line)
 
 
 def delimiter_syntax_error(source: str) -> str | None:
