@@ -16,7 +16,10 @@ _SCRIPTS = Path(__file__).resolve().parents[1] / "scripts"
 if str(_SCRIPTS) not in sys.path:
     sys.path.insert(0, str(_SCRIPTS))
 
-from plan_tasks import _dedup_interface_source  # noqa: E402
+from plan_tasks import (  # type: ignore[import-not-found]  # noqa: E402
+    _dedup_interface_source,
+    _validate_interfaces_cover_skeleton_features,
+)
 
 
 def test_collapses_whole_file_repeated_per_unit():
@@ -44,3 +47,69 @@ def test_preserves_distinct_unit_slices():
 def test_empty_units_falls_back_to_file_code():
     fdata = {"units_to_code": {}, "file_code": "raw source"}
     assert _dedup_interface_source(fdata) == "raw source"
+
+
+def test_rejects_partial_interfaces_against_skeleton(tmp_path):
+    skeleton_path = tmp_path / "skeleton.json"
+    skeleton_path.write_text(
+        """
+        {
+          "root": {
+            "type": "directory",
+            "children": [
+              {"type": "file", "path": "src/a.cpp", "feature_paths": ["Core/a"]},
+              {"type": "file", "path": "src/b.cpp", "feature_paths": ["Core/b"]}
+            ]
+          }
+        }
+        """,
+        encoding="utf-8",
+    )
+    interfaces = {
+        "subtrees": {
+            "Core": {
+                "interfaces": {
+                    "src/a.cpp": {
+                        "units_to_features": {"function a": ["Core/a"]},
+                    }
+                }
+            }
+        }
+    }
+
+    try:
+        _validate_interfaces_cover_skeleton_features(interfaces, skeleton_path)
+    except ValueError as exc:
+        assert "Core/b" in str(exc)
+    else:
+        raise AssertionError("partial interfaces should be rejected")
+
+
+def test_accepts_complete_interfaces_against_skeleton(tmp_path):
+    skeleton_path = tmp_path / "skeleton.json"
+    skeleton_path.write_text(
+        """
+        {
+          "root": {
+            "type": "directory",
+            "children": [
+              {"type": "file", "path": "src/a.cpp", "feature_paths": ["Core/a"]}
+            ]
+          }
+        }
+        """,
+        encoding="utf-8",
+    )
+    interfaces = {
+        "subtrees": {
+            "Core": {
+                "interfaces": {
+                    "src/a.cpp": {
+                        "units_to_features": {"function a": ["Core/a"]},
+                    }
+                }
+            }
+        }
+    }
+
+    _validate_interfaces_cover_skeleton_features(interfaces, skeleton_path)

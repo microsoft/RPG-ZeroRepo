@@ -36,10 +36,16 @@ cmind script plan.py --check-only --json
 Parse the JSON. The fields you need:
 
 * `total` — total number of stages (always 5)
-* `done`  — count of stages whose `type` is `update` or `warning`
+* `done`  — count of stages whose `type` is `update`
 * `next`  — name of the first not-done stage (or `null` if all done)
 * `stages[*].name`, `stages[*].type` (`update` / `warning` / `init` /
   `error`), `stages[*].done`
+
+Treat `warning` as **not done**. A warning means the artifact exists but
+violates a cross-stage contract (for example, `interfaces.json` does not
+cover all `skeleton.json` features). Do not skip the stage, do not run a
+later stage directly, and do not create downstream artifacts from a
+warning-state input.
 
 ### Step 2: One decision (the only prompt of this command)
 
