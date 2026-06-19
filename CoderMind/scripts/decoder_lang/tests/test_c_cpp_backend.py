@@ -14,6 +14,7 @@ if str(_SCRIPTS_DIR) not in sys.path:
 from decoder_lang import (  # noqa: E402
     CBackend,
     CppBackend,
+    EnvHandle,
     ProjectTaskContext,
     ToolchainUnavailable,
     get_backend,
@@ -160,6 +161,25 @@ class CppBackendTests(unittest.TestCase):
         self.assertIn("CMakeLists.txt", templates.dependencies)
         self.assertIn("src/main.cpp", templates.main_entry)
         self.assertIn("C++ CLI", templates.readme)
+
+    def test_cmake_test_command_runs_ctest_in_build_dir(self) -> None:
+        with TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            (root / "CMakeLists.txt").write_text("cmake_minimum_required(VERSION 3.16)\n")
+            env = EnvHandle(
+                project_root=root,
+                extra={"ctest": "/usr/bin/ctest"},
+            )
+
+            self.assertEqual(
+                self.backend.test_command(env),
+                [
+                    "/usr/bin/ctest",
+                    "--test-dir",
+                    str(root / "build"),
+                    "--output-on-failure",
+                ],
+            )
 
     def test_missing_toolchain_raises(self) -> None:
         with TemporaryDirectory() as temp_dir:

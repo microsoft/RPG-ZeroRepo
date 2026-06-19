@@ -167,7 +167,7 @@ class CppBackend:
     def test_command(self, env: EnvHandle, selectors: list[str] | None = None) -> list[str]:
         ctest = env.extra.get("ctest") if env.extra else None
         if ctest and (env.project_root / "CMakeLists.txt").exists():
-            return [ctest, "--output-on-failure"]
+            return [ctest, "--test-dir", str(env.project_root / "build"), "--output-on-failure"]
         make = env.extra.get("make") if env.extra else None
         if make and (env.project_root / "Makefile").exists():
             return [make, "test"]

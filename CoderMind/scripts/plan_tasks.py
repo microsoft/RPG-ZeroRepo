@@ -32,6 +32,7 @@ from rpg import uuid8
 from common.paths import (
     DATA_FLOW_FILE,
     INTERFACES_FILE,
+    SKELETON_FILE,
     REPO_RPG_FILE as RPG_FILE,
     REPO_INFO_FILE,
     TASKS_FILE as OUTPUT_FILE,
@@ -1963,6 +1964,65 @@ def load_repo_info() -> tuple[str, str]:
     return repo_name, repo_info
 
 
+def _collect_skeleton_features(skeleton: Dict[str, Any]) -> Set[str]:
+    features: Set[str] = set()
+
+    def visit(node: Any) -> None:
+        if not isinstance(node, dict):
+            return
+        node_features = node.get("feature_paths") or []
+        if isinstance(node_features, list):
+            features.update(str(feature) for feature in node_features if feature)
+        for child in node.get("children") or []:
+            visit(child)
+
+    visit(skeleton.get("root"))
+    return features
+
+
+def _collect_interface_features(interfaces: Dict[str, Any]) -> Set[str]:
+    features: Set[str] = set()
+    subtrees = interfaces.get("subtrees") or interfaces.get("components") or {}
+    if not isinstance(subtrees, dict):
+        return features
+    for subtree_data in subtrees.values():
+        if not isinstance(subtree_data, dict):
+            continue
+        files = subtree_data.get("interfaces") or subtree_data.get("files") or {}
+        if not isinstance(files, dict):
+            continue
+        for file_data in files.values():
+            if not isinstance(file_data, dict):
+                continue
+            units_to_features = file_data.get("units_to_features") or {}
+            if not isinstance(units_to_features, dict):
+                continue
+            for unit_features in units_to_features.values():
+                if isinstance(unit_features, list):
+                    features.update(str(feature) for feature in unit_features if feature)
+    return features
+
+
+def _validate_interfaces_cover_skeleton_features(
+    interfaces: Dict[str, Any],
+    skeleton_path: Path = SKELETON_FILE,
+) -> None:
+    if not skeleton_path.exists():
+        return
+    with open(skeleton_path, "r", encoding="utf-8") as f:
+        skeleton = json.load(f)
+    missing = sorted(
+        _collect_skeleton_features(skeleton) - _collect_interface_features(interfaces)
+    )
+    if missing:
+        preview = ", ".join(repr(feature) for feature in missing[:5])
+        raise ValueError(
+            "interfaces.json is incomplete for skeleton.json: "
+            f"{len(missing)} feature(s) missing from interfaces.json: "
+            f"[{preview}]. Re-run design_interfaces before plan_tasks."
+        )
+
+
 # ============================================================================
 # Main Entry Point
 # ============================================================================
@@ -2029,6 +2089,7 @@ def main():
     
     with open(args.interfaces, 'r', encoding='utf-8') as f:
         interfaces = json.load(f)
+    _validate_interfaces_cover_skeleton_features(interfaces)
     
     with open(args.data_flow, 'r', encoding='utf-8') as f:
         data_flow = json.load(f)
