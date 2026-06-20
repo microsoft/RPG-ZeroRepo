@@ -6,6 +6,8 @@ import shutil
 from pathlib import Path
 from typing import Any
 
+from common.utils import path_has_skip_dir
+
 from .backend import ToolchainUnavailable
 from .file_deps import FileDependencyEdge, resolved_c_family_edges
 from .prompt_hints import PromptHints
@@ -171,7 +173,11 @@ class CBackend:
         cc = env.extra.get("cc") if env.extra else None
         if not cc:
             raise ToolchainUnavailable("C compiler is not available on PATH")
-        sources = sorted(str(path) for path in env.project_root.rglob("*.c"))
+        sources = sorted(
+            str(path)
+            for path in env.project_root.rglob("*.c")
+            if not path_has_skip_dir(path.relative_to(env.project_root).as_posix())
+        )
         return [
             cc,
             "-std=c99",

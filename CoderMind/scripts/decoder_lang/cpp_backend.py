@@ -6,6 +6,8 @@ import shutil
 from pathlib import Path
 from typing import Any
 
+from common.utils import path_has_skip_dir
+
 from .backend import ToolchainUnavailable
 from .file_deps import FileDependencyEdge, resolved_c_family_edges
 from .prompt_hints import PromptHints
@@ -183,8 +185,10 @@ class CppBackend:
         if not cxx:
             raise ToolchainUnavailable("C++ compiler is not available on PATH")
         sources = sorted(
-            str(path) for ext in ("*.cpp", "*.cc", "*.cxx")
+            str(path)
+            for ext in ("*.cpp", "*.cc", "*.cxx")
             for path in env.project_root.rglob(ext)
+            if not path_has_skip_dir(path.relative_to(env.project_root).as_posix())
         )
         return [
             cxx,

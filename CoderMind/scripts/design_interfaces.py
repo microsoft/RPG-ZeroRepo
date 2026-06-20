@@ -21,6 +21,8 @@ Output:
 import json
 import logging
 import argparse
+import threading
+import time
 from pathlib import Path
 from typing import Callable, Dict, Any, List, Optional, Set
 
@@ -57,6 +59,21 @@ from common import print_unicode_table, get_repo_info_from_files
 import re
 from common import get_project_background_context
 from common.language_meta import extract_language_metadata, metadata_with_languages
+
+
+def _start_heartbeat(label: str, interval_sec: int = 120):
+    """Print periodic progress while a long-running design step is active."""
+    stop = threading.Event()
+    started = time.monotonic()
+
+    def run() -> None:
+        while not stop.wait(interval_sec):
+            elapsed = int(time.monotonic() - started)
+            print(f"[heartbeat] {label} still running ({elapsed}s elapsed)", flush=True)
+
+    thread = threading.Thread(target=run, name=f"{label}-heartbeat", daemon=True)
+    thread.start()
+    return stop, thread
 from decoder_lang import get_backend
 from func_design.interface_review import review_orphan_units
 
@@ -1672,7 +1689,12 @@ def main():
             output_path=str(args.output)
         )
         
-        result = designer.build(skeleton, data_flow, base_classes)
+        heartbeat_stop, heartbeat_thread = _start_heartbeat("design_interfaces")
+        try:
+            result = designer.build(skeleton, data_flow, base_classes)
+        finally:
+            heartbeat_stop.set()
+            heartbeat_thread.join(timeout=1)
 
         # Extract internal keys before JSON serialisation
         result.pop("_surviving_feature_paths", None)
