@@ -97,6 +97,7 @@ def test_cpp_codegen_prompt_injects_cpp_context(monkeypatch, tmp_path: Path) -> 
     assert "mapfile -d" in prompt
     assert "sources < <(find ." in prompt
     assert "No C++ source files found" in prompt
+    assert "PYTEST_SUMMARY: syntax check passed" in prompt
     # Non-Python projects get the strengthened prohibition, not the legacy line.
     assert "NOT Python" in prompt
     assert "Do NOT create ANY `.py` file" in prompt
