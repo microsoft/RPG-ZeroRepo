@@ -211,6 +211,7 @@ value must be the *literal* one-line summary printed by the test command,
 for example `5 passed in 0.42s`, `ok ./...`, or `test result: ok`. Copy it
 verbatim from the run you just performed; do NOT invent it. This lets the
 runner cross-check your claim against an independent re-run.
+{summary_fallback_rule}
 
 ## ── Capabilities ─────────────────────────────────────────
 
@@ -535,6 +536,16 @@ def _test_timeout_rule(backend: LanguageBackend) -> str:
     if backend.name == "python":
         return "- Run pytest without `--timeout` flag (already included in the command)"
     return "- Run long-lived servers, watchers, or interactive commands instead of the exact test command"
+
+
+def _summary_fallback_rule(backend: LanguageBackend, test_command: str) -> str:
+    if backend.name in {"c", "cpp"} and "-fsyntax-only" in test_command:
+        return (
+            "\nFor C/C++ syntax-only commands: if the exact command exits 0 "
+            "and prints no summary line, use exactly "
+            "`PYTEST_SUMMARY: syntax check passed`.\n"
+        )
+    return ""
 
 
 def _build_language_context(backend: LanguageBackend, test_command: str) -> str:
@@ -917,6 +928,7 @@ def build_tdd_prompt(
         dependency_install_capability=_dependency_install_capability(backend, repo_path),
         dependency_management=_dependency_management_text(backend, repo_path),
         test_timeout_rule=_test_timeout_rule(backend),
+        summary_fallback_rule=_summary_fallback_rule(backend, pytest_cmd),
         import_convention=import_convention,
         language_context=_build_language_context(backend, pytest_cmd),
         dependency_context=dep_ctx_str,
