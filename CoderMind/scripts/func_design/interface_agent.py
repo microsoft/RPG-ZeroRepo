@@ -2341,14 +2341,16 @@ class InterfaceOrchestrator:
             }
             implemented_subtrees[subtree_name] = subtree_implemented
             
-            # Save after each subtree
+            # Save resume data after each subtree without publishing a partial
+            # interfaces.json as the final artifact.
             self._save_interfaces(
                 self._build_result(
                     all_interfaces,
                     subtree_order,
                     implemented_subtrees,
                     coverage_status,
-                )
+                ),
+                partial=True,
             )
             self._print_coverage_progress(
                 coverage_status,
@@ -2485,7 +2487,12 @@ class InterfaceOrchestrator:
             "missing_features": missing_features,
         })
     
-    def _save_interfaces(self, result: Dict[str, Any]) -> None:
+    def _partial_output_path(self) -> Optional[Path]:
+        if not self.output_path:
+            return None
+        return Path(f"{self.output_path}.partial")
+
+    def _save_interfaces(self, result: Dict[str, Any], partial: bool = False) -> None:
         """Save current interfaces result to output_path (if configured).
         
         Strips internal keys (prefixed with '_') that contain non-serializable
@@ -2494,7 +2501,9 @@ class InterfaceOrchestrator:
         if not self.output_path:
             return
         try:
-            output = Path(self.output_path)
+            output = self._partial_output_path() if partial else Path(self.output_path)
+            if output is None:
+                return
             output.parent.mkdir(parents=True, exist_ok=True)
             # Filter out non-serializable internal keys
             serializable = {
@@ -2504,6 +2513,10 @@ class InterfaceOrchestrator:
             with open(output, "w", encoding="utf-8") as f:
                 json.dump(serializable, f, indent=2, ensure_ascii=False)
             self.logger.info(f"[InterfaceOrchestrator] Saved interfaces to {output}")
+            if not partial:
+                partial_path = self._partial_output_path()
+                if partial_path and partial_path.exists():
+                    partial_path.unlink()
         except Exception as e:
             self.logger.warning(f"[InterfaceOrchestrator] Failed to save interfaces: {e}")
 
@@ -2536,8 +2549,13 @@ class InterfaceOrchestrator:
         """Load an existing interfaces file for subtree-level resume."""
         if not self.output_path:
             return None
-        path = Path(self.output_path)
-        if not path.exists():
+        candidates = []
+        partial_path = self._partial_output_path()
+        if partial_path is not None:
+            candidates.append(partial_path)
+        candidates.append(Path(self.output_path))
+        path = next((candidate for candidate in candidates if candidate.exists()), None)
+        if path is None:
             return None
         try:
             with path.open("r", encoding="utf-8") as handle:

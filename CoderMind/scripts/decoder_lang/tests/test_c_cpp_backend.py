@@ -89,6 +89,20 @@ class CBackendTests(unittest.TestCase):
                 with self.assertRaises(ToolchainUnavailable):
                     self.backend.ensure_env(Path(temp_dir))
 
+    def test_syntax_fallback_skips_git_refs(self) -> None:
+        with TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            (root / "src").mkdir()
+            (root / "src" / "main.c").write_text("int main(void) { return 0; }\n")
+            (root / ".git" / "refs" / "heads" / "batch").mkdir(parents=True)
+            (root / ".git" / "refs" / "heads" / "batch" / "main.c").write_text("not c")
+            env = EnvHandle(project_root=root, extra={"cc": "/usr/bin/cc"})
+
+            cmd = self.backend.test_command(env)
+
+            self.assertIn(str(root / "src" / "main.c"), cmd)
+            self.assertNotIn(str(root / ".git" / "refs" / "heads" / "batch" / "main.c"), cmd)
+
 
 class CppBackendTests(unittest.TestCase):
     """C++ backend registry and parser-backed behaviour."""
@@ -180,6 +194,20 @@ class CppBackendTests(unittest.TestCase):
                     "--output-on-failure",
                 ],
             )
+
+    def test_syntax_fallback_skips_git_refs(self) -> None:
+        with TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            (root / "src").mkdir()
+            (root / "src" / "main.cpp").write_text("int main() { return 0; }\n")
+            (root / ".git" / "refs" / "heads" / "batch").mkdir(parents=True)
+            (root / ".git" / "refs" / "heads" / "batch" / "main.cpp").write_text("not cpp")
+            env = EnvHandle(project_root=root, extra={"cxx": "/usr/bin/c++"})
+
+            cmd = self.backend.test_command(env)
+
+            self.assertIn(str(root / "src" / "main.cpp"), cmd)
+            self.assertNotIn(str(root / ".git" / "refs" / "heads" / "batch" / "main.cpp"), cmd)
 
     def test_missing_toolchain_raises(self) -> None:
         with TemporaryDirectory() as temp_dir:

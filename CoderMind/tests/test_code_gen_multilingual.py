@@ -94,10 +94,15 @@ def test_cpp_codegen_prompt_injects_cpp_context(monkeypatch, tmp_path: Path) -> 
     assert "Language: C++" in prompt
     assert "Source extension: `.cpp`" in prompt
     assert "C++17" in prompt
+    assert "mapfile -d" in prompt
+    assert "sources < <(find ." in prompt
+    assert "No C++ source files found" in prompt
     # Non-Python projects get the strengthened prohibition, not the legacy line.
     assert "NOT Python" in prompt
     assert "Do NOT create ANY `.py` file" in prompt
     assert "conftest.py" in prompt
+    assert "standalone translation units" in prompt
+    assert "create or update a matching header" in prompt
     assert "python3 -m pytest" not in prompt
 
 

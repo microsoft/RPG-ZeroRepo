@@ -545,3 +545,32 @@ def test_apply_fixes_can_create_python_interface_file_in_feature_subtree() -> No
     assert "src/todo_web_app/views/render.py" in interfaces_data["subtrees"][
         "Todo Display"
     ]["files_order"]
+
+
+def test_interface_orchestrator_writes_partial_resume_file(tmp_path) -> None:
+    output_path = tmp_path / "interfaces.json"
+    orchestrator = InterfaceOrchestrator(output_path=str(output_path))
+    partial_result = {
+        "subtrees": {"Core": {"interfaces": {}}},
+        "subtree_order": ["Core", "UI"],
+        "implemented_subtrees": {"Core": []},
+        "coverage": {"issues": [{"subtree": "UI"}]},
+        "success": False,
+    }
+    final_result = {
+        "subtrees": {"Core": {"interfaces": {}}, "UI": {"interfaces": {}}},
+        "subtree_order": ["Core", "UI"],
+        "implemented_subtrees": {"Core": [], "UI": []},
+        "coverage": {"issues": []},
+        "success": True,
+    }
+
+    orchestrator._save_interfaces(partial_result, partial=True)
+
+    assert not output_path.exists()
+    assert Path(f"{output_path}.partial").exists()
+
+    orchestrator._save_interfaces(final_result)
+
+    assert output_path.exists()
+    assert not Path(f"{output_path}.partial").exists()

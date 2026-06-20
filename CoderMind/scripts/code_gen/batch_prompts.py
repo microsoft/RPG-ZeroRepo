@@ -405,6 +405,35 @@ def _fallback_test_command(backend: LanguageBackend) -> List[str]:
     return list(_FALLBACK_TEST_COMMANDS.get(backend.name, [backend.prompt_hints().test_framework_name]))
 
 
+def _dynamic_c_family_syntax_command(
+    backend: LanguageBackend,
+    command: List[str],
+) -> str:
+    compiler = shlex.quote(str(command[0]))
+    include_flags: List[str] = []
+    for index, part in enumerate(command):
+        if part == "-I" and index + 1 < len(command):
+            include_flags.extend(["-I", "$PWD"])
+    standard = "-std=c++17" if backend.name == "cpp" else "-std=c99"
+    patterns = (
+        r'\( -name "*.cpp" -o -name "*.cc" -o -name "*.cxx" \)'
+        if backend.name == "cpp"
+        else r'-name "*.c"'
+    )
+    include_text = " ".join(shlex.quote(part) for part in include_flags)
+    return (
+        "bash -lc "
+        + shlex.quote(
+            "mapfile -d '' sources < <(find . "
+            r"\( -path './.git' -o -path './.cmind' -o -path './build' "
+            r"-o -path './node_modules' -o -path './target' \) -prune "
+            f"-o -type f {patterns} -print0); "
+            f"if (( ${{#sources[@]}} == 0 )); then echo 'No {backend.prompt_hints().display_name} source files found' >&2; exit 1; fi; "
+            f"{compiler} {standard} {include_text} -Wall -Wextra -fsyntax-only \"${{sources[@]}}\""
+        )
+    )
+
+
 def _build_backend_test_cmd(
     backend: LanguageBackend,
     repo_path: Path,
@@ -417,7 +446,10 @@ def _build_backend_test_cmd(
 
     env = backend.detect_env(repo_path) or EnvHandle(project_root=repo_path.resolve())
     try:
-        return _shell_join(backend.test_command(env))
+        command = backend.test_command(env)
+        if backend.name in {"c", "cpp"} and "-fsyntax-only" in command:
+            return _dynamic_c_family_syntax_command(backend, command)
+        return _shell_join(command)
     except (ToolchainUnavailable, NotImplementedError, OSError):
         return _shell_join(_fallback_test_command(backend))
 
@@ -534,6 +566,13 @@ def _build_language_context(backend: LanguageBackend, test_command: str) -> str:
             f"- Run tests ONLY with `{test_command}` ({hints.test_framework_name}). Do NOT wrap, "
             "re-implement, or drive the test suite through pytest or any Python script.\n"
         )
+        if backend.name in {"c", "cpp"}:
+            context += (
+                "- C/C++ tests and examples must be valid standalone translation units. "
+                "If a test or example calls a helper implemented in another `.c`/`.cpp` file, "
+                "create or update a matching header and include that header; do NOT rely on "
+                "transitive `.cpp` inclusion or undeclared functions.\n"
+            )
     else:
         context += (
             "- Do NOT introduce Python-specific files, packages, or pytest conventions unless this is a Python project.\n"
