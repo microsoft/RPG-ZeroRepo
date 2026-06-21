@@ -24,6 +24,11 @@ import subprocess
 from pathlib import Path
 from typing import Tuple
 
+from common.generated_artifacts import (
+    ensure_generated_artifact_excludes,
+    find_persisted_generated_artifact_changes,
+    format_generated_artifact_violation,
+)
 from common.git_utils import GitRunner
 from common.task_batch import PlannedTask
 from code_gen.prompts import is_project_docs_batch
@@ -61,7 +66,18 @@ def post_verify(
     Returns:
         ``(passed, test_output_summary)``
     """
-    # Skip verification for docs batches
+    ensure_generated_artifact_excludes(repo_path)
+
+    generated_artifact_changes = find_persisted_generated_artifact_changes(
+        repo_path,
+        base_ref=GitRunner.MAIN_BRANCH,
+    )
+    if generated_artifact_changes:
+        summary = format_generated_artifact_violation(generated_artifact_changes)
+        logger.warning("Post-verification rejected generated artifact changes:\n%s", summary)
+        return False, summary
+
+    # Skip test execution for docs batches after shared git hygiene gates pass.
     if is_project_docs_batch(task):
         logger.info("Skipping post-verification for docs batch")
         return True, "Documentation batch — no tests."
@@ -136,6 +152,15 @@ def post_verify(
         extra_args=[f"--timeout={DEFAULT_TEST_TIMEOUT}", "--timeout-method=thread"],
         backend=backend,
     )
+
+    generated_artifact_changes = find_persisted_generated_artifact_changes(
+        repo_path,
+        base_ref=GitRunner.MAIN_BRANCH,
+    )
+    if generated_artifact_changes:
+        summary = format_generated_artifact_violation(generated_artifact_changes)
+        logger.warning("Post-verification rejected generated artifact changes:\n%s", summary)
+        return False, summary
 
     # Build summary
     summary_lines = [

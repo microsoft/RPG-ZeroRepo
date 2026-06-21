@@ -26,6 +26,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from common.execution_state import BatchExecutionState, load_code_gen_state
+from common.generated_artifacts import generated_artifact_prompt_rule
 from common.import_normalizer import build_import_convention_snippet
 from common.paths import (
     CODE_GEN_STATE_FILE as STATE_FILE,
@@ -443,6 +444,18 @@ def _dynamic_c_family_syntax_command(
     )
 
 
+def _cmake_c_family_test_command(command: List[str]) -> str:
+    ctest = shlex.quote(str(command[0]))
+    return (
+        "bash -lc "
+        + shlex.quote(
+            "cmake -S . -B build && "
+            "cmake --build build && "
+            f"{ctest} --test-dir build --output-on-failure"
+        )
+    )
+
+
 def _build_backend_test_cmd(
     backend: LanguageBackend,
     repo_path: Path,
@@ -456,6 +469,8 @@ def _build_backend_test_cmd(
     env = backend.detect_env(repo_path) or EnvHandle(project_root=repo_path.resolve())
     try:
         command = backend.test_command(env)
+        if backend.name in {"c", "cpp"} and command and "ctest" in Path(str(command[0])).name:
+            return _cmake_c_family_test_command(command)
         if backend.name in {"c", "cpp"} and "-fsyntax-only" in command:
             return _dynamic_c_family_syntax_command(backend, command)
         return _shell_join(command)
@@ -569,6 +584,13 @@ def _build_language_context(backend: LanguageBackend, test_command: str) -> str:
         f"- Module naming: {hints.module_naming_rule}\n"
         f"- Style: {hints.style_directive}\n"
     )
+    artifact_extra = ""
+    if backend.name in {"c", "cpp"}:
+        artifact_extra = (
+            "If CTest needs arguments or target wiring, change source files "
+            "such as `CMakeLists.txt` or the test source instead."
+        )
+    context += generated_artifact_prompt_rule(artifact_extra)
     if backend.name != "python":
         # The decoder's defaults are Python-centric; without an explicit
         # prohibition the sub-agent tends to add Python helpers (a main.py

@@ -20,6 +20,10 @@ import logging
 from pathlib import Path
 from typing import List, Optional, Tuple
 
+from common.generated_artifacts import (
+    find_persisted_generated_artifact_changes,
+    format_generated_artifact_violation,
+)
 from common.git_utils import GitRunner, sanitize_branch_component
 
 logger = logging.getLogger(__name__)
@@ -140,6 +144,15 @@ def merge_batch_branch(
                 f"WIP: salvage uncommitted changes after missing branch '{branch_name}'"
             )
         return False, "branch_missing"
+
+    generated_artifact_changes = find_persisted_generated_artifact_changes(
+        git.repo_path,
+        base_ref=git.main_branch,
+    )
+    if generated_artifact_changes:
+        summary = format_generated_artifact_violation(generated_artifact_changes)
+        logger.error("Cannot merge generated artifact changes:\n%s", summary)
+        return False, summary
 
     # Commit any leftover changes
     if git.has_uncommitted_changes():
