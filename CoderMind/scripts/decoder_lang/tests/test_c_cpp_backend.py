@@ -195,6 +195,35 @@ class CppBackendTests(unittest.TestCase):
                 ],
             )
 
+    def test_prepare_test_env_configures_and_builds_cmake_project(self) -> None:
+        with TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            (root / "CMakeLists.txt").write_text("cmake_minimum_required(VERSION 3.16)\n")
+            env = EnvHandle(
+                project_root=root,
+                extra={"cmake": "/usr/bin/cmake"},
+            )
+            calls = []
+
+            def fake_run(args, **kwargs):
+                calls.append(args)
+
+                class Result:
+                    returncode = 0
+
+                return Result()
+
+            with patch("subprocess.run", side_effect=fake_run):
+                self.backend.prepare_test_env(env)
+
+            self.assertEqual(
+                calls,
+                [
+                    ["/usr/bin/cmake", "-S", str(root), "-B", str(root / "build")],
+                    ["/usr/bin/cmake", "--build", str(root / "build")],
+                ],
+            )
+
     def test_syntax_fallback_skips_git_refs(self) -> None:
         with TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)

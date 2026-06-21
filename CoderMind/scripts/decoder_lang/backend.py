@@ -461,7 +461,7 @@ def resolve_decoder_language(
 
 
 def cmake_reconfigure(env: Any) -> None:
-    """Reconfigure a CMake build dir so a later ``ctest`` sees a fresh test set.
+    """Prepare a CMake build dir so a later ``ctest`` can execute tests.
 
     The C/C++ test command runs ``ctest`` against a ``build/`` directory
     whose registered test set is materialised by ``cmake``. When sources
@@ -469,7 +469,9 @@ def cmake_reconfigure(env: Any) -> None:
     observe a STALE / partial test set (the post-verify "ran 1 test"
     false-failure that failed an otherwise-green C++ stage). Running
     ``cmake -S <root> -B build`` here regenerates the test registration
-    against the current tree before tests run.
+    against the current tree before tests run. Running
+    ``cmake --build build`` then materialises the executable files that
+    ``ctest --test-dir build`` launches.
 
     No-op (silently) when there is no ``CMakeLists.txt`` or no ``cmake``
     on PATH — the project then uses ``make`` / direct compile, which has
@@ -494,6 +496,12 @@ def cmake_reconfigure(env: Any) -> None:
             cwd=str(root),
             capture_output=True,
             timeout=120,
+        )
+        subprocess.run(
+            [cmake, "--build", str(root / "build")],
+            cwd=str(root),
+            capture_output=True,
+            timeout=300,
         )
     except Exception:  # noqa: BLE001 - reconfigure is best-effort
         return
