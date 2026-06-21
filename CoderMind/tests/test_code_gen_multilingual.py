@@ -104,7 +104,20 @@ def test_cpp_codegen_prompt_injects_cpp_context(monkeypatch, tmp_path: Path) -> 
     assert "conftest.py" in prompt
     assert "standalone translation units" in prompt
     assert "create or update a matching header" in prompt
+    assert "Do NOT edit or commit generated build, dependency, cache" in prompt
     assert "python3 -m pytest" not in prompt
+
+
+def test_cpp_codegen_prompt_aligns_cmake_command_with_post_verify(monkeypatch, tmp_path: Path) -> None:
+    _set_language(monkeypatch, tmp_path, "cpp")
+    (tmp_path / "CMakeLists.txt").write_text("cmake_minimum_required(VERSION 3.16)\n")
+    task = _task("src/tasklite_cli/task.cpp")
+
+    prompt = batch_prompts.build_tdd_prompt(_state(task), task, tmp_path)
+
+    assert "cmake -S . -B build" in prompt
+    assert "cmake --build build" in prompt
+    assert "ctest --test-dir build --output-on-failure" in prompt
 
 
 def test_non_python_integration_prompt_uses_native_entry_point(monkeypatch, tmp_path: Path) -> None:

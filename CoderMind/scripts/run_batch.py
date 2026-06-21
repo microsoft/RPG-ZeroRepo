@@ -47,6 +47,7 @@ from common.execution_state import (
     complete_batch as state_complete_batch,
     skip_current_batch as state_skip_batch,
 )
+from common.generated_artifacts import ensure_generated_artifact_excludes
 from common.git_utils import GitRunner
 from common.task_batch import PlannedTask, get_task_by_id
 from common.paths import (
@@ -630,6 +631,7 @@ def run_batch(
         return _error(f"Failed to create branch for batch '{batch_id}'", scripts)
 
     logger.info("Branch: %s (initial_commit=%s)", branch_name, initial_commit[:8] if initial_commit else "none")
+    ensure_generated_artifact_excludes(repo_path)
 
     # ── Step 4: Setup language environment ──────────────────────────
 
