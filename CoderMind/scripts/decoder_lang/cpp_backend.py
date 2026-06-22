@@ -19,6 +19,13 @@ _CPP_IDENT_INVALID = re.compile(r"[^A-Za-z0-9_]")
 _PLACEHOLDER_RE = re.compile(
     r"(?is)\b(?:TODO|PLACEHOLDER|NOT IMPLEMENTED|throw\s+std::logic_error|abort\s*\()"
 )
+_COMPILE_ONLY_COMMAND_RE = re.compile(
+    r"(?m)^\s*\S*(?:c\+\+|g\+\+|clang\+\+)(?=\s).*\s-c\s"
+)
+_TEST_EXECUTION_RE = re.compile(
+    r"(?im)(^|\s)(?:PASS|FAIL)(?:\s|:)|^\s*ok\b|^\s*1\.\.|"
+    r"test result:|\btests? passed\b|^\s*running\s+\d+\s+tests?"
+)
 _CPP_SOURCE_EXTENSIONS = (".cpp", ".cc", ".cxx", ".hpp", ".hh", ".hxx", ".h")
 _CPP_KEYWORDS = frozenset({
     "alignas", "alignof", "and", "asm", "auto", "bool", "break",
@@ -205,9 +212,9 @@ class CppBackend:
         observed = int(out_of.group(1)) if out_of else None
         if ran_no_tests(
             exit_code, raw, observed_tests=observed,
-            no_tests_markers=("No tests were found",),
+            no_tests_markers=("No tests were found", "Nothing to be done for 'test'"),
             empty_output_is_no_op=False,
-        ):
+        ) or self._looks_like_compile_only_make_test(raw):
             status = "errored"
         else:
             status = "passed" if exit_code == 0 else "failed"
@@ -232,6 +239,13 @@ class CppBackend:
             raw_output=raw,
             extra={"tool": "ctest, make test, or compiler syntax check"},
         )
+
+    @staticmethod
+    def _looks_like_compile_only_make_test(raw: str) -> bool:
+        """Return True when make output compiled tests but ran none."""
+        if not _COMPILE_ONLY_COMMAND_RE.search(raw):
+            return False
+        return not _TEST_EXECUTION_RE.search(raw)
 
     _PROMPT_HINTS_SINGLETON: PromptHints | None = None
 
@@ -280,7 +294,10 @@ class CppBackend:
 1. Prefer the C++ standard library.
 2. Use C++17 unless implemented code requires a newer standard.
 3. Provide build and test instructions compatible with CMake and ctest.
-4. Keep generated binaries and build directories out of source control.
+4. The test target must build and execute real test binaries. For Makefile
+    fallback projects, `make test` must not only compile `.o` files or print
+    "Nothing to be done".
+5. Keep generated binaries and build directories out of source control.
 
 **Important:**
 - Do NOT create Python dependency files for a C++ project.
@@ -306,7 +323,7 @@ Repository purpose: {context.repo_info}
 1. Provide `int main(int argc, char **argv)`.
 2. Implement `--help` and documented commands/options.
 3. Delegate storage and task lifecycle behavior to existing C++ modules.
-4. Verify with a CMake build and `ctest`, or with `make test` when the project uses a Makefile.
+4. Verify with a CMake build and `ctest`, or with `make test` when the project uses a Makefile. The verification command must execute tests and return non-zero when any test fails.
 
 **Important:**
 - Read `docs/` first and faithfully expose the requested behavior.

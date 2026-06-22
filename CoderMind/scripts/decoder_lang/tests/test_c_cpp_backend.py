@@ -80,7 +80,10 @@ class CBackendTests(unittest.TestCase):
             ProjectTaskContext(repo_name="tasklite", repo_info="task cli", package_name="tasklite")
         )
         self.assertIn("Makefile", templates.dependencies)
+        self.assertIn("must build and execute real test binaries", templates.dependencies)
+        self.assertIn("must not only", templates.dependencies)
         self.assertIn("src/main.c", templates.main_entry)
+        self.assertIn("must execute tests", templates.main_entry)
         self.assertIn("C CLI", templates.readme)
 
     def test_missing_toolchain_raises(self) -> None:
@@ -102,6 +105,18 @@ class CBackendTests(unittest.TestCase):
 
             self.assertIn(str(root / "src" / "main.c"), cmd)
             self.assertNotIn(str(root / ".git" / "refs" / "heads" / "batch" / "main.c"), cmd)
+
+    def test_make_test_compile_only_output_is_not_pass(self) -> None:
+        raw = "cc -Isrc -std=c99 -Wall -Wextra -c tests/test_engine.c -o build/tests/test_engine.o\n"
+
+        result = self.backend.parse_test_output(raw, 0)
+
+        self.assertEqual(result.status, "errored")
+
+    def test_make_test_nothing_to_do_is_not_pass(self) -> None:
+        result = self.backend.parse_test_output("make: Nothing to be done for 'test'.\n", 0)
+
+        self.assertEqual(result.status, "errored")
 
 
 class CppBackendTests(unittest.TestCase):
@@ -173,7 +188,10 @@ class CppBackendTests(unittest.TestCase):
             ProjectTaskContext(repo_name="tasklite", repo_info="task cli", package_name="tasklite")
         )
         self.assertIn("CMakeLists.txt", templates.dependencies)
+        self.assertIn("must build and execute real test binaries", templates.dependencies)
+        self.assertIn("must not only", templates.dependencies)
         self.assertIn("src/main.cpp", templates.main_entry)
+        self.assertIn("must execute tests", templates.main_entry)
         self.assertIn("C++ CLI", templates.readme)
 
     def test_cmake_test_command_runs_ctest_in_build_dir(self) -> None:
@@ -237,6 +255,18 @@ class CppBackendTests(unittest.TestCase):
 
             self.assertIn(str(root / "src" / "main.cpp"), cmd)
             self.assertNotIn(str(root / ".git" / "refs" / "heads" / "batch" / "main.cpp"), cmd)
+
+    def test_make_test_compile_only_output_is_not_pass(self) -> None:
+        raw = "c++ -std=c++17 -c tests/parser_test.cpp -o build/tests/parser_test.o\n"
+
+        result = self.backend.parse_test_output(raw, 0)
+
+        self.assertEqual(result.status, "errored")
+
+    def test_make_test_nothing_to_do_is_not_pass(self) -> None:
+        result = self.backend.parse_test_output("make: Nothing to be done for 'test'.\n", 0)
+
+        self.assertEqual(result.status, "errored")
 
     def test_missing_toolchain_raises(self) -> None:
         with TemporaryDirectory() as temp_dir:
