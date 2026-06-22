@@ -159,3 +159,29 @@ def test_final_test_no_repair_when_first_pass(monkeypatch, tmp_path):
 
     assert out["success"] is True
     assert "final_test_repair_attempts" not in out
+
+
+def test_final_test_fails_when_smoke_test_crashes(monkeypatch, tmp_path):
+    _patch_common(monkeypatch, tmp_path)
+    monkeypatch.setattr(fv, "run_project_tests", lambda *_a, **_k: _pass_result())
+
+    saved = {}
+
+    def fake_save_stage_result(name, data):
+        saved[name] = data
+
+    monkeypatch.setattr(fv, "save_stage_result", fake_save_stage_result)
+    monkeypatch.setitem(sys.modules, "smoke_test", type(sys)("smoke_test"))
+
+    def crash_smoke_test():
+        raise FileNotFoundError("python")
+
+    sys.modules["smoke_test"].run_smoke_test = crash_smoke_test
+
+    out = fv.final_test(repo_path=tmp_path, max_repair_iters=2)
+
+    assert out["success"] is False
+    assert out["errors"] == 1
+    assert "Smoke test failed to run" in out["smoke_test_error"]
+    assert saved["final_test"]["success"] is False
+    assert saved["smoke_test"]["error_count"] == 1

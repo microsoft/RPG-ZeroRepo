@@ -20,12 +20,12 @@ GIT_LOCAL_EXCLUDE_PATTERNS: tuple[str, ...] = (
     "venv/",
     "env/",
     "node_modules/",
-    ".next/",
-    ".nuxt/",
-    "target/",
-    "build/",
-    "dist/",
-    "coverage/",
+    "/.next/",
+    "/.nuxt/",
+    "/target/",
+    "/build/",
+    "/dist/",
+    "/coverage/",
     "cmake-build-debug/",
     "cmake-build-release/",
     "CMakeFiles/",
@@ -53,7 +53,12 @@ GIT_LOCAL_EXCLUDE_PATTERNS: tuple[str, ...] = (
 GENERATED_ARTIFACT_DIRS = frozenset(
     pattern.rstrip("/")
     for pattern in GIT_LOCAL_EXCLUDE_PATTERNS
-    if pattern.endswith("/")
+    if pattern.endswith("/") and not pattern.startswith("/")
+)
+ROOT_GENERATED_ARTIFACT_DIRS = frozenset(
+    pattern.strip("/")
+    for pattern in GIT_LOCAL_EXCLUDE_PATTERNS
+    if pattern.startswith("/") and pattern.endswith("/")
 )
 GENERATED_ARTIFACT_FILES = frozenset(
     pattern
@@ -104,6 +109,8 @@ def is_generated_artifact_path(path: str) -> bool:
     if not parts:
         return False
 
+    if parts[0] in ROOT_GENERATED_ARTIFACT_DIRS:
+        return True
     if any(part in GENERATED_ARTIFACT_DIRS for part in parts):
         return True
 

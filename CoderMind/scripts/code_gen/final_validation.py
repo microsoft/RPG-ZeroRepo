@@ -46,6 +46,32 @@ from code_gen._constants import (  # noqa: E402
 )
 
 
+def _fail_final_test_for_smoke_error(
+    result_dict: Dict[str, Any],
+    message: str,
+    *,
+    smoke_dict: Optional[Dict[str, Any]] = None,
+) -> None:
+    """Mark final validation failed because smoke validation failed."""
+    result_dict["success"] = False
+    result_dict["errors"] = max(int(result_dict.get("errors", 0) or 0), 1)
+    result_dict["output"] = message
+    result_dict["next_action"] = (
+        "Unit tests passed, but smoke validation failed. Fix the smoke "
+        "failure and re-run final validation."
+    )
+    result_dict["smoke_test_error"] = message
+    if smoke_dict is None:
+        smoke_dict = {
+            "success": False,
+            "type": "smoke_test",
+            "findings": [{"severity": "error", "message": message}],
+            "error_count": 1,
+            "warning_count": 0,
+        }
+    result_dict["smoke_test"] = smoke_dict
+
+
 def final_test(
     repo_path: Optional[Path] = None,
     state_path: Path = STATE_FILE,
@@ -238,6 +264,8 @@ def final_test(
             actionable = [f for f in smoke_result.findings if f.severity == "error"]
 
             if actionable:
+                remaining = actionable
+                recheck_success = True
                 findings_desc = "\n".join(
                     f"- [{f.severity}] {f.message}" for f in actionable
                 )
@@ -293,6 +321,7 @@ def final_test(
                     result_dict["smoke_test"] = smoke_result_2.to_dict()
                     result_dict["smoke_repair_attempted"] = True
                     result_dict["post_repair_tests_pass"] = recheck.success
+                    recheck_success = recheck.success
                     remaining = [
                         f for f in smoke_result_2.findings
                         if f.severity == "error"
@@ -303,18 +332,39 @@ def final_test(
                         len(remaining), len(actionable),
                         "PASS" if recheck.success else "FAIL",
                     )
+                if remaining or not recheck_success:
+                    smoke_dict = result_dict.get("smoke_test")
+                    if not isinstance(smoke_dict, dict):
+                        smoke_dict = {}
+                    message = (
+                        "Smoke validation failed after unit tests passed. "
+                        f"Remaining smoke errors: {len(remaining)}; "
+                        f"post-repair tests pass: {recheck_success}."
+                    )
+                    _fail_final_test_for_smoke_error(
+                        result_dict,
+                        message,
+                        smoke_dict=smoke_dict,
+                    )
         except ImportError:
             logger.debug("smoke_test module not available, skipping")
         except Exception as exc:
             logger.warning("Smoke test / repair failed: %s", exc)
+            _fail_final_test_for_smoke_error(
+                result_dict,
+                f"Smoke test failed to run: {exc}",
+            )
 
     # Save per-stage results for global_review context
     save_stage_result("final_test", {
-        "success": result.success,
-        "passed": result.passed,
-        "failed": result.failed,
-        "errors": result.errors,
-        "output_tail": "\n".join(result.output.splitlines()[-40:]) if not result.success else "",
+        "success": bool(result_dict.get("success")),
+        "passed": result_dict.get("passed", result.passed),
+        "failed": result_dict.get("failed", result.failed),
+        "errors": result_dict.get("errors", result.errors),
+        "output_tail": (
+            "\n".join(str(result_dict.get("output", "")).splitlines()[-40:])
+            if not result_dict.get("success") else ""
+        ),
     })
     smoke_data = result_dict.get("smoke_test")
     if isinstance(smoke_data, dict):

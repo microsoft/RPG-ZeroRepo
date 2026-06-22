@@ -68,10 +68,13 @@ def test_generated_artifact_path_policy_covers_common_outputs() -> None:
         "__pycache__/app.cpython-312.pyc",
         "compile_commands.json",
         "dist/bundle.js",
+        "build/generated_source.c",
     ]
     allowed = [
         "src/app.py",
         "src/build_config.py",
+        "configs/build/build_contract.c",
+        "configs/build/build_contract.h",
         "CMakeLists.txt",
         "Makefile",
         "package.json",
@@ -100,11 +103,15 @@ def test_local_excludes_prevent_git_add_a_from_staging_outputs(tmp_path: Path) -
     (repo_path / "build" / "CTestTestfile.cmake").write_text("generated\n", encoding="utf-8")
     source = repo_path / "src" / "feature.py"
     source.write_text("def feature():\n    return 2\n", encoding="utf-8")
+    build_contract = repo_path / "configs" / "build" / "build_contract.c"
+    build_contract.parent.mkdir(parents=True)
+    build_contract.write_text("int build_contract(void) { return 0; }\n", encoding="utf-8")
 
     _run_git(repo_path, "add", "-A")
     status = _run_git(repo_path, "status", "--porcelain").stdout
 
     assert "src/feature.py" in status
+    assert "configs/build/build_contract.c" in status
     assert "build/CTestTestfile.cmake" not in status
 
 
@@ -210,6 +217,51 @@ def test_post_verify_allows_untracked_ignored_build_outputs(
 
     assert passed
     assert output == "passed=1 failed=0 errors=0 skipped=0"
+
+
+def test_post_verify_runs_project_tests_for_docs_batches(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    repo_path = _init_repo(tmp_path / "repo")
+    docs_task = PlannedTask(
+        task="Update README.",
+        file_path="README.md",
+        units_key=["README"],
+        unit_to_code={"README": "# Demo"},
+        unit_to_features={"README": ["Docs/readme"]},
+        task_type="project_docs",
+    )
+
+    class FakeBackend:
+        name = "cpp"
+        display_name = "C++"
+
+    monkeypatch.setattr(
+        post_verify,
+        "resolve_test_backend",
+        lambda **_kwargs: FakeBackend(),
+    )
+
+    calls = {"count": 0}
+
+    def fake_run_project_tests(*_args, **_kwargs):
+        calls["count"] += 1
+        return CodegenTestResult(
+            success=False,
+            return_code=8,
+            output="ctest failed after README update",
+            test_files=[],
+            failed=1,
+        )
+
+    monkeypatch.setattr(post_verify, "run_project_tests", fake_run_project_tests)
+
+    passed, output = post_verify.post_verify(repo_path, docs_task)
+
+    assert calls["count"] == 1
+    assert not passed
+    assert "ctest failed after README update" in output
 
 
 def test_merge_batch_rejects_committed_generated_artifacts(tmp_path: Path) -> None:
