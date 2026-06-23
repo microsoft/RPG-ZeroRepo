@@ -28,6 +28,7 @@ import os
 import time
 from typing import Any, Dict, List, Optional, Tuple, Union
 
+from common.rpg_io import atomic_write_rpg
 from common.utils import (
     is_skip_dir,
     exclude_files,
@@ -815,7 +816,6 @@ class RPGEvolution:
             # diff job used to leave a half-truncated artefact that
             # downstream consumers (``cmind diff``, debug tools) would
             # fail to parse on the next read.
-            from common.rpg_io import atomic_write_rpg
             atomic_write_rpg(save_path, result, indent=4)
 
         total_time = time.time() - global_start

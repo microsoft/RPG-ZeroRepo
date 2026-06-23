@@ -33,7 +33,7 @@ if str(SCRIPTS_DIR) not in sys.path:
     sys.path.insert(0, str(SCRIPTS_DIR))
 
 from common.paths import REPO_RPG_FILE, DEP_GRAPH_FILE, RPG_HTML_FILE, HOOK_CALLS_LOG  # noqa: E402
-from common.rpg_io import safe_load_rpg  # noqa: E402
+from common.rpg_io import atomic_write_rpg, safe_load_rpg  # noqa: E402
 
 
 # Shared message used by every subcommand that requires an existing
@@ -170,7 +170,6 @@ def update_dep_only(code_dir: str, workspace_root: str, dep_graph_path: Path,
     raw["code_dir"] = code_dir_rel
     from datetime import datetime, timezone
     raw["generated_at"] = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S")
-    from common.rpg_io import atomic_write_rpg
     atomic_write_rpg(str(dep_graph_path), raw, ensure_ascii=False, indent=2)
 
     return {

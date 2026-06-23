@@ -30,6 +30,7 @@ from common.paths import (  # noqa: E402
     DEP_GRAPH_FILE,
     WORKSPACE_ROOT,
 )
+from common.rpg_io import atomic_write_rpg  # noqa: E402
 
 
 def run_update_rpg(
@@ -178,7 +179,6 @@ def run_update_rpg(
         # ``atomic_write_rpg`` swaps a fully-written ``<output>.tmp`` into
         # place so readers always see either the previous good rpg.json
         # or the new one.
-        from common.rpg_io import atomic_write_rpg
         result_data = updated_rpg.to_dict()
         atomic_write_rpg(output, result_data, indent=2, ensure_ascii=False)
 

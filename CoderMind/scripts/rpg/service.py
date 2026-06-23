@@ -19,6 +19,7 @@ Typical usage::
 
 from __future__ import annotations
 
+import logging
 from pathlib import Path
 from typing import TYPE_CHECKING, Dict, List, Optional, Set, Tuple
 from .models import RPG, Node, Edge, EdgeType, NodeType, NodeMetaData, strip_uuid8, uuid8
@@ -64,8 +65,7 @@ class RPGService:
         readable.  New encodes never produce a standalone
         ``dep_graph.json`` so this path naturally goes cold.
         """
-        import logging as _logging
-        _logger = _logging.getLogger(__name__)
+        _logger = logging.getLogger(__name__)
 
         rpg = RPG.load_json(str(path))
         svc = cls(rpg)

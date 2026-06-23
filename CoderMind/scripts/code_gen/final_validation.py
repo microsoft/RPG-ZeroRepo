@@ -26,6 +26,7 @@ from typing import Any, Dict, Optional
 
 from common.git_utils import GitRunner
 from common.paths import CODE_GEN_STATE_FILE as STATE_FILE, REPO_DIR
+from code_gen.batch_prompts import _build_backend_test_cmd
 from code_gen.git_ops import ensure_on_main
 from code_gen.stage_io import save_stage_result
 from code_gen.sub_agent import dispatch_sub_agent
@@ -157,8 +158,6 @@ def final_test(
     repair_attempts = 0
     while not result.success and repair_attempts < max_repair_iters:
         repair_attempts += 1
-        from code_gen.batch_prompts import _build_backend_test_cmd
-
         venv_python = get_dev_python(repo_path) or "python3"
         repair_verify_cmd = _build_backend_test_cmd(
             backend, repo_path, [], venv_python,
@@ -230,7 +229,6 @@ def final_test(
             # Lazy import: smoke_test pulls in the dep_graph stack, so only
             # load it on the success path where we actually need it.
             from smoke_test import run_smoke_test
-            from code_gen.batch_prompts import _build_backend_test_cmd
 
             smoke_result = run_smoke_test()
             smoke_dict = smoke_result.to_dict()
