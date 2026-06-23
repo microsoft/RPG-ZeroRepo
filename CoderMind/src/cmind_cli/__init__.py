@@ -4117,22 +4117,23 @@ def init(
         )
         step_num += 1
 
-    steps_lines.append(f"{step_num}. Start using slash commands with your AI agent:")
+    steps_lines.append(f"{step_num}. Start using high-level slash commands with your AI agent:")
 
     steps_lines.extend([
-        f"   {step_num}.1  [cyan]/cmind.feature_spec[/] - Create feature spec from docs",
-        f"   {step_num}.2  [cyan]/cmind.feature_build[/] - Generate and Expand Feature Tree",
-        f"   {step_num}.3  [cyan]/cmind.feature_refactor[/] - Refactor Feature Tree",
-        f"   {step_num}.4  [cyan]/cmind.feature_edit[/] - Edit Feature Tree Nodes",
-        f"   {step_num}.5  [cyan]/cmind.build_skeleton[/] - Repository Skeleton Structure",
-        f"   {step_num}.6  [cyan]/cmind.build_data_flow[/] - Data Flow Design",
-        f"   {step_num}.7  [cyan]/cmind.design_base_classes[/] - Base Classes Design",
-        f"   {step_num}.8  [cyan]/cmind.design_interfaces[/] - Interface Design",
-        f"   {step_num}.9  [cyan]/cmind.plan_tasks[/] - Task Planning",
-        f"   {step_num}.10 [cyan]/cmind.code_gen[/] - Code Generation",
-        f"   {step_num}.11 [cyan]/cmind.rpg_edit[/] - Surgical RPG/code edit",
-        f"   {step_num}.12 [cyan]/cmind.encode[/] - Encode repo into RPG",
-        f"   {step_num}.13 [cyan]/cmind.update_rpg[/] - Incremental RPG update",
+        "   For new projects / requirements-to-code:",
+        f"   {step_num}.1  [cyan]/cmind.feature_construct <feature description>[/] - Build the feature tree from requirements",
+        f"   {step_num}.2  [dim][Optional][/dim] [cyan]/cmind.feature_edit <edit instructions>[/] - Edit Feature Tree Nodes",
+        f"   {step_num}.3  [cyan]/cmind.plan[/] - Run RPG construction and planning",
+        f"   {step_num}.4  [cyan]/cmind.code_gen[/] - Code Generation",
+        f"   {step_num}.5  [dim][Optional][/dim] [cyan]/cmind.rpg_edit <edit instructions>[/] - Surgical RPG/code edit",
+        "",
+        "   For existing repositories / code-to-RPG:",
+        f"   {step_num}.6  [cyan]/cmind.encode[/] - Encode an existing repo into RPG",
+        f"   {step_num}.7  [cyan]/cmind.update_rpg[/] - Manual incremental RPG update fallback",
+        f"   {step_num}.8  [dim][Optional][/dim] [cyan]/cmind.rpg_edit <edit instructions>[/] - Surgical RPG/code edit",
+        "",
+        "   For finer-grained commands and stage-by-stage reruns, see:",
+        "   [link=https://github.com/microsoft/RPG-ZeroRepo/blob/main/CoderMind/docs/commands.md]https://github.com/microsoft/RPG-ZeroRepo/blob/main/CoderMind/docs/commands.md[/link]",
     ])
 
     step_num += 1
