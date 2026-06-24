@@ -20,6 +20,7 @@ import time
 from copy import deepcopy
 from unittest.mock import MagicMock, patch
 
+import networkx as nx
 import pytest
 
 # Ensure the project root and scripts/ are on sys.path
@@ -405,6 +406,74 @@ class TestBuildDepToRpgMap:
         simple_rpg.set_dep_graph(mock_dg)
         assert simple_rpg.dep_graph is mock_dg
         assert simple_rpg._dep_to_rpg_map == {}
+
+    def _dep_graph_with_nodes(self, nodes):
+        graph = nx.MultiDiGraph()
+        for node_id, node_type in nodes:
+            graph.add_node(node_id, type=node_type)
+        mock_dg = MagicMock()
+        mock_dg.G = graph
+        return mock_dg
+
+    def test_code_unit_prefers_exact_rpg_node_over_parent_file(self, simple_rpg):
+        dep_graph = self._dep_graph_with_nodes([
+            ("src/module_a.py", NodeType.FILE),
+            ("src/module_a.py:do_stuff", NodeType.FUNCTION),
+        ])
+
+        simple_rpg.set_dep_graph(dep_graph)
+
+        assert simple_rpg._dep_to_rpg_map["src/module_a.py:do_stuff"] == ["func_1"]
+
+    def test_non_python_code_unit_suffix_matches_exact_rpg_node(self):
+        rpg = RPG(repo_name="test_repo")
+        file_node = Node(
+            id="go_file",
+            name="Store",
+            meta=NodeMetaData(type_name=NodeType.FILE, path="src/store.go"),
+        )
+        func_node = Node(
+            id="go_func",
+            name="Load",
+            meta=NodeMetaData(type_name=NodeType.FUNCTION, path="src/store.go::Load"),
+        )
+        rpg.add_node(file_node)
+        rpg.add_node(func_node)
+        rpg.add_edge(rpg.repo_node, file_node, EdgeType.CONTAINS)
+        rpg.add_edge(file_node, func_node, EdgeType.CONTAINS)
+
+        dep_graph = self._dep_graph_with_nodes([
+            ("generated/src/store.go", NodeType.FILE),
+            ("generated/src/store.go:Load", NodeType.FUNCTION),
+        ])
+        rpg.set_dep_graph(dep_graph)
+
+        assert rpg._dep_to_rpg_map["generated/src/store.go:Load"] == ["go_func"]
+
+    def test_non_python_method_suffix_matches_exact_rpg_node(self):
+        rpg = RPG(repo_name="test_repo")
+        file_node = Node(
+            id="ts_file",
+            name="Client",
+            meta=NodeMetaData(type_name=NodeType.FILE, path="src/client.ts"),
+        )
+        method_node = Node(
+            id="ts_method",
+            name="request",
+            meta=NodeMetaData(type_name=NodeType.METHOD, path="src/client.ts::Client::request"),
+        )
+        rpg.add_node(file_node)
+        rpg.add_node(method_node)
+        rpg.add_edge(rpg.repo_node, file_node, EdgeType.CONTAINS)
+        rpg.add_edge(file_node, method_node, EdgeType.CONTAINS)
+
+        dep_graph = self._dep_graph_with_nodes([
+            ("generated/src/client.ts", NodeType.FILE),
+            ("generated/src/client.ts:Client.request", NodeType.METHOD),
+        ])
+        rpg.set_dep_graph(dep_graph)
+
+        assert rpg._dep_to_rpg_map["generated/src/client.ts:Client.request"] == ["ts_method"]
 
 
 # ============================================================================

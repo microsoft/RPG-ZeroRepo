@@ -31,6 +31,7 @@ from .path_format import (
     desc_key_function,
     desc_key_class,
     desc_key_method,
+    from_dep_graph_id,
 )
 
 if TYPE_CHECKING:
@@ -194,16 +195,11 @@ def _normalize_dep_id_for_matching(dep_nid: str) -> str:
     """Normalize a dep-graph node ID to a suffix-based matching key.
 
     ``'models/user.py:User'``   → ``'models/user.py::User'``
-    ``'models/user.py'``         → ``'models/user.py'``
-    ``'x.py:Cls.method'``        → ``'x.py::Cls.method'``
+    ``'models/user.go:User'``   → ``'models/user.go::User'``
+    ``'models/user.py'``        → ``'models/user.py'``
+    ``'x.py:Cls.method'``       → ``'x.py::Cls.method'``
     """
-    if ".py:" in dep_nid:
-        file_part, entity = dep_nid.rsplit(":", 1)
-    else:
-        file_part, entity = dep_nid, ""
-    parts = file_part.replace("\\", "/").split("/")
-    suffix = "/".join(parts[-2:]) if len(parts) >= 2 else file_part
-    return f"{suffix}::{entity}" if entity else suffix
+    return _normalize_path_for_matching(from_dep_graph_id(dep_nid))
 
 
 def infer_type_name_from_path(path: str, has_children: bool = False) -> Optional[str]:
@@ -1953,45 +1949,28 @@ class RPG:
                     dep2rpg[nid] = filtered
                     continue
 
-            # Fallback for code-unit dep nodes: if RPG has no dedicated
-            # function/class/method node, map to the parent file node instead.
-            if dep_node_type is not None:
-                dep_type_str = (
-                    dep_node_type.value
-                    if hasattr(dep_node_type, "value")
-                    else str(dep_node_type)
-                )
-                if dep_type_str in ("class", "function", "method"):
-                    # Extract file path from qualified path
-                    # e.g. "src/x.py:Cls" -> "src/x.py"
-                    # e.g. "src/x.py::function foo" -> "src/x.py"
-                    sep = "::" if "::" in nid else (":" if ":" in nid else None)
-                    if sep:
-                        file_part = nid.split(sep, 1)[0]
-                        file_rpg_path = prefix + file_part if prefix else file_part
-                        file_matches = rpg_path_index.get(file_rpg_path, [])
-                        if not file_matches:
-                            file_matches = rpg_path_index.get(file_part, [])
-                        if file_matches:
-                            # Prefer an exact file-type node; accept any if none
-                            file_filtered = [
-                                rpg_nid for rpg_nid in file_matches
-                                if self._node_index[rpg_nid].meta
-                                and self._node_index[rpg_nid].meta.type_name is not None
-                                and (
-                                    self._node_index[rpg_nid].meta.type_name.value == "file"
-                                    if hasattr(self._node_index[rpg_nid].meta.type_name, "value")
-                                    else str(self._node_index[rpg_nid].meta.type_name) == "file"
-                                )
-                            ]
-                            if file_filtered:
-                                dep2rpg[nid] = file_filtered
-                            elif file_matches:
-                                dep2rpg[nid] = file_matches
+            # Fallback: exact canonical path match for dep-graph code-unit IDs
+            # (``src/x.py:Cls.method`` -> ``src/x.py::Cls::method``).
+            canonical_path = from_dep_graph_id(nid)
+            canonical_rpg_path = prefix + canonical_path if prefix else canonical_path
+            matched_canonical = rpg_path_index.get(canonical_rpg_path, [])
+            if not matched_canonical and canonical_rpg_path != canonical_path:
+                matched_canonical = rpg_path_index.get(canonical_path, [])
+            if matched_canonical:
+                filtered = [
+                    rpg_nid for rpg_nid in matched_canonical
+                    if self._node_index[rpg_nid].meta
+                    and self._node_index[rpg_nid].meta.type_name == dep_node_type
+                ]
+                if filtered:
+                    dep2rpg[nid] = filtered
+                    continue
 
         # Step 4: suffix-normalized fallback for remaining unmatched nodes.
-        # Resolves separator mismatch (dep ':' vs RPG '::class') and
-        # path-prefix differences (decoder 'src/...' vs encoder 'repo/...').
+        # Resolves separator mismatch (dep ':' vs RPG '::') and path-prefix
+        # differences (decoder 'src/...' vs encoder 'repo/...'). Run this
+        # before the parent-file fallback so code units prefer their exact RPG
+        # node over a coarse file node when both are present.
         unmatched = [nid for nid in self.dep_graph.G.nodes() if nid not in dep2rpg]
         if unmatched:
             rpg_suffix_index = self._build_rpg_suffix_index()
@@ -2006,6 +1985,53 @@ class RPG:
                 ]
                 if filtered:
                     dep2rpg[dep_nid] = filtered
+
+        # Final fallback for code-unit dep nodes: if RPG has no dedicated
+        # function/class/method node, map to the parent file node instead.
+        unmatched = [nid for nid in self.dep_graph.G.nodes() if nid not in dep2rpg]
+        for nid in unmatched:
+            dep_node = self.dep_graph.G.nodes[nid]
+            dep_node_type = dep_node.get("type")
+            if dep_node_type is None:
+                continue
+            dep_type_str = (
+                dep_node_type.value
+                if hasattr(dep_node_type, "value")
+                else str(dep_node_type)
+            )
+            if dep_type_str not in ("class", "function", "method"):
+                continue
+
+            # Extract the file path from either dep-graph or canonical RPG path:
+            # ``src/x.py:Cls`` / ``src/x.py::Cls`` -> ``src/x.py``.
+            canonical_path = from_dep_graph_id(nid)
+            if "::" in canonical_path:
+                file_part = canonical_path.split("::", 1)[0]
+            elif ":" in nid:
+                file_part = nid.split(":", 1)[0]
+            else:
+                continue
+
+            file_rpg_path = prefix + file_part if prefix else file_part
+            file_matches = rpg_path_index.get(file_rpg_path, [])
+            if not file_matches:
+                file_matches = rpg_path_index.get(file_part, [])
+            if file_matches:
+                # Prefer an exact file-type node; accept any if none
+                file_filtered = [
+                    rpg_nid for rpg_nid in file_matches
+                    if self._node_index[rpg_nid].meta
+                    and self._node_index[rpg_nid].meta.type_name is not None
+                    and (
+                        self._node_index[rpg_nid].meta.type_name.value == "file"
+                        if hasattr(self._node_index[rpg_nid].meta.type_name, "value")
+                        else str(self._node_index[rpg_nid].meta.type_name) == "file"
+                    )
+                ]
+                if file_filtered:
+                    dep2rpg[nid] = file_filtered
+                elif file_matches:
+                    dep2rpg[nid] = file_matches
 
         return dep2rpg
 
