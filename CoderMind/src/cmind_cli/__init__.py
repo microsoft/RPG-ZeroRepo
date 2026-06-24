@@ -1790,7 +1790,7 @@ def _workspace_has_python_code(project_path: Path) -> bool:
 # in its previous state), so these are best-effort and fail-soft.
 _ENCODE_RE_REPO_ITER = re.compile(r"LLM call for repo info, iter=(\d+)")
 _ENCODE_RE_EXCLUDE_VOTE = re.compile(r"LLM vote #(\d+)")
-_ENCODE_RE_TOTAL_FILES = re.compile(r"Total valid Python files to parse:\s*(\d+)")
+_ENCODE_RE_TOTAL_FILES = re.compile(r"Total valid source files to parse:\s*(\d+)")
 _ENCODE_RE_CLASS_BATCHES = re.compile(r"\[GLOBAL\] kind=class,\s*groups=\d+,\s*batches=(\d+)")
 _ENCODE_RE_FUNC_BATCHES = re.compile(r"\[GLOBAL\] kind=function,\s*groups=\d+,\s*batches=(\d+)")
 _ENCODE_RE_CLASS_PROCESS = re.compile(r"\[GLOBAL\] process_class_batch:")
@@ -1811,7 +1811,7 @@ def _parse_encoder_line(line: str, state: Dict[str, Any]) -> None:
       * ``Generating repo info`` / ``LLM call for repo info, iter=N``
       * ``Computing exclude list`` / ``LLM vote #N``
       * ``Excluded paths decided`` / ``Parsing features`` /
-        ``Total valid Python files to parse: N``
+        ``Total valid source files to parse: N``
       * ``[GLOBAL] kind=class, ..., batches=N``  → class batch total
       * ``[GLOBAL] finished class batch``        → +1 class batch done
       * ``[GLOBAL] kind=function, ..., batches=N`` → function batch total
