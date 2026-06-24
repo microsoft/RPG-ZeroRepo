@@ -52,6 +52,7 @@ from decoder_lang import (
     ToolchainUnavailable,
     get_backend,
     resolve_decoder_language,
+    scan_repo_source_files,
 )
 
 logger = logging.getLogger(__name__)
@@ -387,11 +388,18 @@ def _load_json_if_exists(path: Path) -> Any:
         return None
 
 
-def _resolve_codegen_backend() -> LanguageBackend:
+def _resolve_codegen_backend(repo_path: Path | None = None) -> LanguageBackend:
     """Resolve the target language backend for code generation."""
     feature_spec = _load_json_if_exists(FEATURE_SPEC_FILE)
     rpg_obj = _load_json_if_exists(REPO_RPG_FILE)
-    language = resolve_decoder_language(feature_spec=feature_spec, rpg_obj=rpg_obj)
+    valid_files = None
+    if repo_path is not None:
+        valid_files = scan_repo_source_files(repo_path) or None
+    language = resolve_decoder_language(
+        feature_spec=feature_spec,
+        rpg_obj=rpg_obj,
+        valid_files=valid_files,
+    )
     return get_backend(language)
 
 
@@ -599,7 +607,7 @@ def _build_api_summary(repo_path: Path, source_files: List[str], max_chars: int 
     # receive real API context instead of nothing.
     import ast as _ast  # local import; only used for unparse(returns)
 
-    backend = _resolve_codegen_backend()
+    backend = _resolve_codegen_backend(repo_path)
     is_python = backend.name == "python"
     summaries = []
     for filepath in sorted(source_files):
@@ -757,7 +765,7 @@ def build_tdd_prompt(
     Returns:
         Complete prompt string ready for LLMClient.generate().
     """
-    backend = _resolve_codegen_backend()
+    backend = _resolve_codegen_backend(repo_path)
     venv_python = get_dev_python(repo_path) or "python3"
     import_convention = (
         build_import_convention_snippet(repo_path=repo_path)
