@@ -239,6 +239,19 @@ class TestExcludeIrrelevantForBuild:
     def test_node_modules_excluded(self):
         assert _exclude_irrelevant_for_build("node_modules/package/index.js") is False
 
+    def test_go_testdata_source_included(self):
+        assert _exclude_irrelevant_for_build("pkg/testdata/fixtures.go") is True
+
+    def test_non_python_test_helper_source_included_when_language_rule_allows(self):
+        assert _exclude_irrelevant_for_build("src/test_helpers.ts") is True
+
+    def test_language_test_source_excluded(self):
+        assert _exclude_irrelevant_for_build("pkg/foo_test.go") is False
+        assert _exclude_irrelevant_for_build("src/client.test.ts") is False
+
+    def test_non_source_testish_file_keeps_legacy_exclusion(self):
+        assert _exclude_irrelevant_for_build("data/test_fixture.json") is False
+
 
 class TestExcludeIrrelevantForParse:
     def test_python_file_included(self):

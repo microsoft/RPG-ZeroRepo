@@ -93,7 +93,10 @@ def _exclude_irrelevant_for_build(file_id: str) -> bool:
     if path_obj.name.startswith("."):
         return False
 
-    if is_test_file(file_id):
+    if lang_parser.is_supported_source(file_id):
+        if lang_parser.is_test_file(file_id):
+            return False
+    elif is_test_file(file_id):
         return False
 
     return True
