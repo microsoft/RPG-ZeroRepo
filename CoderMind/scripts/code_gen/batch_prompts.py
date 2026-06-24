@@ -69,7 +69,7 @@ _FALLBACK_TEST_COMMANDS = {
     "typescript": ["npm", "test"],
     "javascript": ["npm", "test"],
     "c": ["make", "test"],
-    "cpp": ["ctest", "--output-on-failure"],
+    "cpp": ["ctest", "--test-dir", "build", "--output-on-failure"],
 }
 
 
