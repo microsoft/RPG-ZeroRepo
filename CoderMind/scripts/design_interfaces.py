@@ -1135,6 +1135,7 @@ class InterfaceDesigner:
                     repo_info=repo_info,
                     subtree_interfaces=result.get("subtrees", {}),
                     llm_client=self.llm,
+                    target_language=review_language,
                 )
 
                 # Apply completed edges first (before pruning, so retained units get connected)

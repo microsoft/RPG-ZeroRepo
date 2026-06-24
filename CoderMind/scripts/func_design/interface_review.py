@@ -396,6 +396,15 @@ def _unit_name_aliases(unit_name: str) -> Set[str]:
     return {alias for alias in expanded if alias}
 
 
+def _is_advisory_unapplied_fix(fix: Dict[str, Any]) -> bool:
+    """Return True when an unapplied fix is manual follow-up, not a blocker."""
+    return (
+        fix.get("advisory") is True
+        or fix.get("manual_follow_up") is True
+        or fix.get("action") == "modify_interface"
+    )
+
+
 def _build_entry_point_keys(
     entry_points: List[Dict[str, Any]],
     unit_to_file: Dict[str, str],
@@ -845,12 +854,11 @@ class InterfaceReviewer:
             )
 
         # Collect unapplied fixes from every iteration and classify them:
-        #   * advisory  — ``modify_interface`` requests, which by design have
-        #     no auto-handler. They are architectural suggestions for manual
-        #     follow-up and do NOT gate the verdict.
-        #   * blocking  — an ``add_dependency`` with unresolved callees or a
-        #     rejected ``add_interface``: wiring the pipeline could not
-        #     install. These gate ``passed``.
+        #   * advisory  — manual follow-up that does NOT gate the verdict
+        #     (``modify_interface`` and unsupported non-Python ``add_interface``).
+        #   * blocking  — an automatic repair that the pipeline attempted but
+        #     could not install, such as unresolved ``add_dependency`` or a
+        #     rejected Python ``add_interface``. These gate ``passed``.
         unapplied_fixes: List[Dict[str, Any]] = []
         for entry in review_history:
             stats = entry.get("fix_stats") or {}
@@ -858,10 +866,10 @@ class InterfaceReviewer:
                 unapplied_fixes.append({**u, "iteration": entry.get("iteration")})
 
         advisory_fixes = [
-            u for u in unapplied_fixes if u.get("action") == "modify_interface"
+            u for u in unapplied_fixes if _is_advisory_unapplied_fix(u)
         ]
         blocking_unapplied_fixes = [
-            u for u in unapplied_fixes if u.get("action") != "modify_interface"
+            u for u in unapplied_fixes if not _is_advisory_unapplied_fix(u)
         ]
 
         last_llm_pass = (
@@ -1063,16 +1071,18 @@ Please perform the review tasks and return the JSON result.
 
         Supported actions:
         - add_dependency:    Add a call dependency edge (auto-applied)
-        - add_interface:     Materialise a new unit (auto-applied via
+        - add_interface:     Materialise a new Python unit (auto-applied via
                              ``_apply_add_interface``; requires
-                             ``skeleton_features`` + ``rpg_features``)
-        - modify_interface:  Logged + recorded as unapplied (manual)
+                             ``skeleton_features`` + ``rpg_features``).
+                             Non-Python requests are recorded as advisory
+                             manual follow-up.
+        - modify_interface:  Logged + recorded as advisory manual follow-up
 
         Returns:
             Stats dict with keys ``requested_fixes`` (top-level fix count),
             ``applied_fixes`` (fixes that produced >=1 edge or unit),
             ``applied_edges`` (total dependency edges added), and
-            ``unapplied`` (list of fixes with no auto-handler).
+            ``unapplied`` (list of fixes that were not auto-applied).
         """
         applied_edges = 0
         applied_fixes = 0
@@ -1173,15 +1183,28 @@ Please perform the review tasks and return the JSON result.
                 # Interface-stub synthesis is Python-only: it emits a
                 # ``def/class`` body with a docstring + ``pass``. For other
                 # languages we cannot materialise a syntactically valid stub,
-                # so skip the request without counting it as an unresolved
-                # blocker (the review still passes on structural grounds).
+                # so surface the request as advisory manual follow-up instead
+                # of silently dropping it or blocking structural convergence.
                 if self.backend.name != "python":
                     self.logger.info(
-                        "[InterfaceReviewer] Skipping add_interface for "
-                        "%s project (stub synthesis is Python-only): "
-                        "%s::%s",
+                        "[InterfaceReviewer] Recording add_interface as "
+                        "advisory for %s project (stub synthesis is "
+                        "Python-only): %s::%s",
                         self.backend.name, file_path, unit_name,
                     )
+                    unapplied.append({
+                        "action": action,
+                        "file_path": file_path,
+                        "unit_name": unit_name,
+                        "description": description[:200],
+                        "reason": (
+                            "add_interface auto-handler is Python-only; "
+                            f"manual follow-up required for {self.backend.name}"
+                        ),
+                        "advisory": True,
+                        "manual_follow_up": True,
+                        "unsupported_for_language": self.backend.name,
+                    })
                     continue
                 ok, reason, edges_added = self._apply_add_interface(
                     fix=fix,
@@ -1481,7 +1504,7 @@ Please perform the review tasks and return the JSON result.
                         code_preview = "\n".join(code_lines[:25]) + "\n    # ... (truncated)"
                     else:
                         code_preview = file_code
-                    parts.append(f"  ```python\n{code_preview}\n  ```")
+                    parts.append(f"  ```{self.backend.markdown_fence}\n{code_preview}\n  ```")
         
         return "\n".join(parts) if parts else "No interfaces designed."
     
@@ -1563,7 +1586,12 @@ def prune_orphan_interfaces(
     enhanced_data_flow: Dict[str, Any],
     logger: Optional[logging.Logger] = None,
 ) -> Dict[str, Any]:
-    """Remove orphan interfaces from interfaces_data after global review.
+    """Outdated legacy helper for removing orphan interfaces from raw dicts.
+
+    This function is retained for backward compatibility with older callers.
+    The active design_interfaces flow uses ``InterfacesStore.find_orphan_units()``
+    followed by ``InterfacesStore.prune_units()`` after LLM orphan review. Do
+    not extend this helper for new pruning behavior.
 
     An interface unit is considered a **true orphan** when it has **no incoming
     edges AND no outgoing edges** in the call graph and is not an entry point.
@@ -1838,6 +1866,7 @@ def review_orphan_units(
     repo_info: str,
     subtree_interfaces: Optional[Dict[str, Any]] = None,
     llm_client: Optional[LLMClient] = None,
+    target_language: Optional[str] = None,
 ) -> OrphanReviewResult:
     """Review orphan units using LLM to determine which should be retained or pruned.
 
@@ -1848,6 +1877,8 @@ def review_orphan_units(
         repo_info: Repository description for context
         subtree_interfaces: Optional dict mapping subtree -> interfaces data for context
         llm_client: LLM client to use (creates new one if not provided)
+        target_language: Optional target language used for prompt code fences.
+            Defaults to Python for backward compatibility.
 
     Returns:
         OrphanReviewResult with decisions and completed edges
@@ -1857,6 +1888,7 @@ def review_orphan_units(
         return OrphanReviewResult()
 
     llm = llm_client or LLMClient()
+    backend = get_backend(target_language or "python")
     result = OrphanReviewResult()
 
     # Group orphans by subtree
@@ -1873,7 +1905,8 @@ def review_orphan_units(
             subtree_context = subtree_interfaces[subtree]
 
         batch_result = _review_orphan_batch(
-            subtree_orphans, repo_info, subtree, subtree_context, llm
+            subtree_orphans, repo_info, subtree, subtree_context, llm,
+            markdown_fence=backend.markdown_fence,
         )
         result.decisions.update(batch_result.decisions)
         result.completed_edges.update(batch_result.completed_edges)
@@ -1895,6 +1928,7 @@ def _review_orphan_batch(
     subtree_name: str,
     subtree_context: Optional[Dict[str, Any]],
     llm: LLMClient,
+    markdown_fence: str = "python",
 ) -> OrphanReviewResult:
     """Review orphan units from a single subtree."""
     # Build user prompt with orphan details
@@ -1906,7 +1940,7 @@ def _review_orphan_batch(
 - Features: {', '.join(detail['features']) if detail['features'] else '(none)'}
 
 Code:
-```python
+```{markdown_fence}
 {detail['code']}
 ```
 """
