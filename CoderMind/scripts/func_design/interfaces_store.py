@@ -291,6 +291,51 @@ class InterfacesStore:
         """Get a unit by its key."""
         return self._units.get(key)
 
+    def apply_backfill(self, backfilled: List[Dict[str, Any]]) -> int:
+        """Synchronise deterministic feature backfill into the store.
+
+        ``backfill_uncovered_features`` operates on the exported
+        ``interfaces.json`` shape and returns audit entries with
+        ``feature``, ``file_path``, and ``unit`` fields. This method mirrors
+        those metadata-only additions into the canonical store so subsequent
+        RPG updates see the same feature ownership and the feature index used
+        by ``surviving_feature_paths`` stays current.
+
+        Returns the number of entries that changed the store. Missing units
+        are ignored: backfill never creates interface units.
+        """
+        synced = 0
+        for entry in backfilled or []:
+            if not isinstance(entry, dict):
+                continue
+            feature = str(entry.get("feature") or "").strip()
+            file_path = str(entry.get("file_path") or "").strip()
+            unit_name = str(entry.get("unit") or "").strip()
+            if not feature or not file_path or not unit_name:
+                continue
+
+            key = f"{file_path}::{unit_name}"
+            unit = self._units.get(key)
+            if not unit:
+                logger.warning(
+                    "[InterfacesStore.apply_backfill] Unit not found for %s -> %s",
+                    feature,
+                    key,
+                )
+                continue
+
+            changed = False
+            if feature not in unit.features:
+                unit.features.append(feature)
+                changed = True
+            if key not in self._feature_to_units[feature]:
+                self._feature_to_units[feature].add(key)
+                changed = True
+            if changed:
+                synced += 1
+
+        return synced
+
     def get_units_for_file(self, file_path: str) -> List[InterfaceUnit]:
         """Get all units in a file."""
         keys = self._file_to_units.get(file_path, [])

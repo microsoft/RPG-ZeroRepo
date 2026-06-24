@@ -22,7 +22,7 @@ import json
 import logging
 import argparse
 from pathlib import Path
-from typing import Callable, Dict, Any, List, Optional
+from typing import Callable, Dict, Any, List, Optional, Set
 
 # Import trajectory module
 from common.trajectory import Trajectory, load_or_create_trajectory
@@ -54,7 +54,6 @@ from common.paths import (
     REPO_RPG_FILE,
 )
 from common import print_unicode_table, get_repo_info_from_files
-import ast
 import re
 from common import get_project_background_context
 from common.language_meta import extract_language_metadata, metadata_with_languages
@@ -346,59 +345,101 @@ def _finalize_global_review_verdict(
     )
 
 
-def extract_known_classes_and_types(base_classes: Dict[str, Any]) -> tuple:
+_INHERITANCE_CAPABLE_UNIT_TYPES = {"class", "struct", "interface", "trait"}
+_TYPE_LIKE_UNIT_TYPES = {
+    "class", "struct", "interface", "trait", "type", "enum", "union", "typedef", "record",
+}
+
+
+def _extract_backend_declarations(
+    code: str,
+    backend: Any,
+    path: str = "<string>",
+) -> List[Any]:
+    """Return top-level declarations from the target-language backend."""
+    if not code or backend is None:
+        return []
+    try:
+        units = backend.list_code_units(code, path)
+    except Exception:  # noqa: BLE001 - extraction is best-effort metadata only
+        return []
+    return [unit for unit in units if getattr(unit, "parent", None) is None]
+
+
+def _declaration_names_by_type(
+    code: str,
+    backend: Any,
+    path: str = "<string>",
+) -> Dict[str, Set[str]]:
+    """Extract target-language declaration names grouped by unit_type."""
+    names_by_type: Dict[str, Set[str]] = {}
+    for unit in _extract_backend_declarations(code, backend, path):
+        name = str(getattr(unit, "name", "") or "").strip()
+        unit_type = str(getattr(unit, "unit_type", "") or "").strip().lower()
+        if name and unit_type:
+            names_by_type.setdefault(unit_type, set()).add(name)
+    return names_by_type
+
+
+def extract_known_classes_and_types(
+    base_classes: Dict[str, Any],
+    backend: Optional[Any] = None,
+) -> tuple:
     """Extract known base class names and type names from base_classes.json.
-    
+
     Returns:
         Tuple of (known_base_classes: Set[str], known_types: Set[str])
     """
-    known_base_classes = set()
-    known_types = set()
-    
+    known_base_classes: Set[str] = set()
+    known_types: Set[str] = set()
+    backend = backend or get_backend("python")
+
     base_classes_list = base_classes.get("base_classes", [])
-    
+
     for bc in base_classes_list:
         code = bc.get("code", "")
         if not code:
             continue
-        
-        try:
-            tree = ast.parse(code)
-            for node in ast.walk(tree):
-                if isinstance(node, ast.ClassDef):
-                    known_base_classes.add(node.name)
-                    # Classes can also be used as types
-                    known_types.add(node.name)
-        except SyntaxError:
-            continue
-    
+
+        names_by_type = _declaration_names_by_type(
+            code,
+            backend,
+            bc.get("file_path", "<base_class>"),
+        )
+        for unit_type, names in names_by_type.items():
+            if unit_type in _INHERITANCE_CAPABLE_UNIT_TYPES:
+                known_base_classes.update(names)
+            if unit_type in _TYPE_LIKE_UNIT_TYPES:
+                known_types.update(names)
+
     # Also add class_names if provided
     for name in base_classes.get("class_names", []):
         known_base_classes.add(name)
         known_types.add(name)
-    
+
     # Also process data_structures - these are known types (not base classes)
     data_structures_list = base_classes.get("data_structures", [])
-    
+
     for ds in data_structures_list:
         code = ds.get("code", "")
         if code:
-            try:
-                tree = ast.parse(code)
-                for node in ast.walk(tree):
-                    if isinstance(node, ast.ClassDef):
-                        known_types.add(node.name)
-            except SyntaxError:
-                continue
-        
+            names_by_type = _declaration_names_by_type(
+                code,
+                backend,
+                ds.get("file_path", "<data_structure>"),
+            )
+            for unit_type, names in names_by_type.items():
+                if unit_type in _TYPE_LIKE_UNIT_TYPES:
+                    known_types.update(names)
+
         # Also add data_flow_types names as known types
         for dt_name in ds.get("data_flow_types", []):
             known_types.add(dt_name)
-    
+
     # Add data_structure_names if provided
     for name in base_classes.get("data_structure_names", []):
         known_types.add(name)
-    
+
     return known_base_classes, known_types
 
 
@@ -984,9 +1025,14 @@ class InterfaceDesigner:
         if not extract_language_metadata(metadata_source)[0]:
             metadata_source = data_flow if extract_language_metadata(data_flow)[0] else base_classes
         
+        language_backend = get_backend(primary_language)
+
         # Extract known classes and types for dependency analysis
-        known_base_classes, known_types = extract_known_classes_and_types(base_classes)
-        
+        known_base_classes, known_types = extract_known_classes_and_types(
+            base_classes,
+            backend=language_backend,
+        )
+
         # Initialize dependency collector
         dependency_collector = DependencyCollector(
             known_base_classes=known_base_classes,
@@ -1122,7 +1168,10 @@ class InterfaceDesigner:
             prune_summary = None
 
             if orphan_keys:
-                print(f"\nFound {len(orphan_keys)} orphan interface units (no call edges)")
+                print(
+                    f"\nFound {len(orphan_keys)} orphan interface units "
+                    "(no incoming and no outgoing call edges)"
+                )
 
                 # Get details for review
                 orphan_details = store.get_orphan_unit_details(orphan_keys)
@@ -1187,24 +1236,21 @@ class InterfaceDesigner:
             result["enhanced_data_flow"] = store_export["enhanced_data_flow"]
             result["implemented_subtrees"] = store_export["implemented_subtrees"]
 
-            # Store surviving feature paths for potential later use
-            if prune_summary:
-                result["_surviving_feature_paths"] = prune_summary.surviving_feature_paths
-
-            # Update RPG using the store
-            rpg_summary = store.update_rpg(REPO_RPG_FILE)
-
-            # Record RPG pruning in global_review
-            if rpg_summary.pruned_feature_nodes > 0:
-                result["global_review"]["rpg_pruned_nodes"] = (
-                    rpg_summary.pruned_feature_nodes + rpg_summary.pruned_parent_nodes
-                )
-
             # Deterministically attribute any skeleton feature the designer
             # implemented but forgot to list in a unit's units_to_features.
-            # Runs before the verdict recompute so coverage reflects the
-            # backfill. Metadata-only: no units invented, no code touched.
+            # Runs before the RPG update and verdict recompute so both the
+            # persisted graph and published coverage reflect the backfill.
+            # Metadata-only: no units invented, no code touched.
             backfill_audit = backfill_uncovered_features(skeleton, result)
+            if backfill_audit["backfilled"]:
+                synced_backfills = store.apply_backfill(backfill_audit["backfilled"])
+                self.logger.info("Feature backfill synced to store: %d", synced_backfills)
+                # Re-export after syncing so result is derived from the store,
+                # not from incidental aliasing in to_interfaces_json().
+                store_export = store.to_interfaces_json()
+                result["subtrees"] = store_export["subtrees"]
+                result["enhanced_data_flow"] = store_export["enhanced_data_flow"]
+                result["implemented_subtrees"] = store_export["implemented_subtrees"]
             if backfill_audit["backfilled"] or backfill_audit["unbackfilled"]:
                 result["global_review"]["backfilled_features"] = backfill_audit["backfilled"]
                 result["global_review"]["unbackfilled_features"] = backfill_audit["unbackfilled"]
@@ -1212,6 +1258,21 @@ class InterfaceDesigner:
                     "Feature backfill: %d attributed, %d unbackfillable",
                     len(backfill_audit["backfilled"]),
                     len(backfill_audit["unbackfilled"]),
+                )
+
+            # Store surviving feature paths for potential later use. Use the
+            # store after backfill sync so the snapshot cannot lag the RPG
+            # pruning input.
+            if prune_summary or backfill_audit["backfilled"]:
+                result["_surviving_feature_paths"] = store.surviving_feature_paths
+
+            # Update RPG using the post-backfill store
+            rpg_summary = store.update_rpg(REPO_RPG_FILE)
+
+            # Record RPG pruning in global_review
+            if rpg_summary.pruned_feature_nodes > 0:
+                result["global_review"]["rpg_pruned_nodes"] = (
+                    rpg_summary.pruned_feature_nodes + rpg_summary.pruned_parent_nodes
                 )
 
             # Refresh the published verdict from the FINAL graph (after
@@ -1247,8 +1308,8 @@ class InterfaceDesigner:
                     "passed": True,
                     "skipped": True,
                     "reason": (
-                        "Global interface review currently supports Python "
-                        "interface repair only."
+                        "Global interface review was not enabled for this "
+                        "run; automatic stub synthesis is Python-specific."
                     ),
                 }
         
@@ -1422,8 +1483,8 @@ class InterfaceDesigner:
             blocking_count = global_review.get(
                 "blocking_unapplied_fixes_count", unapplied_count
             )
-            print(f"  Orphan units (no incoming edges): {orphan_units}")
-            print(f"  Orphan features (no unit reachable from entry): {orphan_features}")
+            print(f"  Orphan units (isolated: no incoming or outgoing call edges): {orphan_units}")
+            print(f"  Orphan features attached to isolated units: {orphan_features}")
             print(
                 f"  Unapplied fix requests: {unapplied_count} "
                 f"({blocking_count} blocking, {advisory_count} advisory)"
@@ -1639,7 +1700,7 @@ def main():
         if trajectory:
             subtrees = result.get("subtrees", {})
             total_files = sum(
-                len(st.get("files", {}))
+                len(st.get("interfaces", st.get("files", {})))
                 for st in subtrees.values()
             )
             # Include dependency summary in metadata

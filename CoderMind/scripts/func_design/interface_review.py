@@ -217,8 +217,9 @@ Rules for `add_interface` (auto-applied when valid):
 - Use ONLY when no existing unit could possibly serve the role (e.g. a route
   handler is missing entirely). If two existing units just need to be wired
   together, use `add_dependency` instead — do NOT invent a new unit.
-- `signature` MUST be a single-line Python def/class header ending with `:`,
-  e.g. `def list_todos() -> Response:` or `class TodoView(MethodView):`.
+- `signature` MUST be a single-line language-appropriate interface/stub
+  signature (for Python, a def/class header ending with `:`, e.g.
+  `def list_todos() -> Response:` or `class TodoView(MethodView):`).
 - `docstring` MUST be non-empty (1–3 sentences).
 - `unit_name` MUST be prefixed with "function " or "class ".
 - `feature_path` MUST be one of the feature paths declared in the skeleton;
