@@ -116,35 +116,22 @@ def find_test_files_in_directory(
     return sorted(test_files)
 
 
-def find_related_test_files(
-    source_file: str,
-    repo_root: Path
-) -> List[str]:
-    """Find test files related to a source file using path-signature matching.
+def _existing_relative_paths(repo_root: Path, candidates: List[Path]) -> List[str]:
+    """Return existing candidate paths relative to ``repo_root`` without duplicates."""
+    seen: Set[str] = set()
+    found: List[str] = []
+    for candidate in candidates:
+        if not candidate.exists() or not candidate.is_file():
+            continue
+        rel = str(candidate.relative_to(repo_root))
+        if rel not in seen:
+            seen.add(rel)
+            found.append(rel)
+    return found
 
-    Builds a canonical signature from the source path by stripping common
-    prefixes (``src/``, ``lib/``) and the project-package directory, then
-    joining remaining directory parts + stem with ``_``.
 
-    Example::
-
-        src/flask_blog/auth/views.py  → signature "auth_views"
-        tests/test_auth_views.py      → match ✓
-
-    If no signature match is found, falls back to simple stem matching
-    (the legacy behavior).
-
-    Args:
-        source_file: Path to the source file (relative to repo root)
-        repo_root: Repository root path
-
-    Returns:
-        List of related test file paths (relative to repo root)
-    """
-    source_path = Path(source_file)
-    if source_path.suffix != '.py':
-        return []
-
+def _find_related_python_tests(source_path: Path, repo_root: Path) -> List[str]:
+    """Find Python tests related to ``source_path`` using legacy heuristics."""
     # --- Build canonical signature from source path ---
     # Strip known prefixes: "src", "lib"
     skip_prefixes = {'src', 'lib'}
@@ -195,6 +182,78 @@ def find_related_test_files(
                 related_tests.append(str(test_file.relative_to(repo_root)))
 
     return related_tests
+
+
+def _find_related_non_python_tests(source_path: Path, repo_root: Path) -> List[str]:
+    """Find likely related non-Python test files using common naming conventions.
+
+    These are discovery hints only.  Non-Python post-verification still runs the
+    backend's project-level test command unless a backend-specific selector layer
+    explicitly supports scoped execution.
+    """
+    suffix = source_path.suffix.lower()
+    stem = source_path.stem
+    parent = repo_root / source_path.parent
+    tests_dir = repo_root / "tests"
+
+    if suffix == ".go":
+        return _existing_relative_paths(repo_root, [parent / f"{stem}_test.go"])
+
+    if suffix == ".rs":
+        return _existing_relative_paths(repo_root, [
+            parent / f"{stem}_test.rs",
+            tests_dir / f"{stem}.rs",
+            tests_dir / f"{stem}_test.rs",
+        ])
+
+    if suffix in {".ts", ".tsx", ".js", ".jsx"}:
+        variants = [
+            f"{stem}.test{suffix}",
+            f"{stem}.spec{suffix}",
+        ]
+        return _existing_relative_paths(repo_root, [
+            *(parent / name for name in variants),
+            *(parent / "__tests__" / name for name in variants),
+            *(tests_dir / name for name in variants),
+            *(tests_dir / source_path.parent.name / name for name in variants),
+        ])
+
+    c_suffixes = {".c": [".c"], ".cpp": [".cpp", ".cc", ".cxx"], ".cc": [".cc", ".cpp", ".cxx"], ".cxx": [".cxx", ".cpp", ".cc"]}
+    if suffix in c_suffixes:
+        names = []
+        for ext in c_suffixes[suffix]:
+            names.extend([f"test_{stem}{ext}", f"{stem}_test{ext}"])
+        return _existing_relative_paths(repo_root, [
+            *(parent / name for name in names),
+            *(tests_dir / name for name in names),
+        ])
+
+    return []
+
+
+def find_related_test_files(
+    source_file: str,
+    repo_root: Path
+) -> List[str]:
+    """Find test files likely related to a source file.
+
+    Python keeps the legacy path-signature matching. Other languages use
+    conservative file-name conventions (Go ``*_test.go``, JS/TS
+    ``*.test.*``/``*.spec.*``, C/C++ ``test_*``/``*_test`` and Rust common
+    integration-test names). These results are discovery hints; backend-specific
+    test execution decides whether scoped execution is safe.
+
+    Args:
+        source_file: Path to the source file (relative to repo root)
+        repo_root: Repository root path
+
+    Returns:
+        List of related test file paths (relative to repo root)
+    """
+    source_path = Path(source_file)
+    if source_path.suffix == '.py':
+        return _find_related_python_tests(source_path, repo_root)
+    return _find_related_non_python_tests(source_path, repo_root)
 
 
 def extract_files_from_diff(diff_content: str) -> Tuple[List[str], List[str]]:
