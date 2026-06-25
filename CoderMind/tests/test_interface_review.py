@@ -271,3 +271,65 @@ def test_review_orphan_units_defaults_to_python_fence():
 def test_prune_orphan_interfaces_docstring_marks_outdated():
     assert "Outdated legacy helper" in prune_orphan_interfaces.__doc__
     assert "InterfacesStore.find_orphan_units" in prune_orphan_interfaces.__doc__
+
+
+def test_extract_signature_summary_go_struct_registered_as_class():
+    backend = get_backend("go")
+    code = "package store\n\ntype Repository struct {\n\tdb string\n}\n"
+
+    result = GlobalInterfaceRegistry._extract_signature_summary(
+        code,
+        unit_type="class",
+        bare_name="Repository",
+        backend=backend,
+    )
+
+    assert result != "Repository"
+    assert "Repository" in result
+    assert "struct" in result
+
+
+def test_extract_signature_summary_go_interface_registered_as_class():
+    backend = get_backend("go")
+    code = "package store\n\ntype Storer interface {\n\tLoad() string\n}\n"
+
+    result = GlobalInterfaceRegistry._extract_signature_summary(
+        code,
+        unit_type="class",
+        bare_name="Storer",
+        backend=backend,
+    )
+
+    assert result != "Storer"
+    assert "Storer" in result
+    assert "interface" in result
+
+
+def test_extract_signature_summary_unknown_type_resolves_by_name():
+    backend = get_backend("go")
+    code = "package main\n\nfunc Connect() error { return nil }\n"
+
+    result = GlobalInterfaceRegistry._extract_signature_summary(
+        code,
+        unit_type="unknown",
+        bare_name="Connect",
+        backend=backend,
+    )
+
+    assert result != "Connect"
+    assert "Connect" in result
+    assert "error" in result
+
+
+def test_extract_signature_summary_unknown_name_returns_bare_name():
+    backend = get_backend("go")
+    code = "package main\n\nfunc Connect() error { return nil }\n"
+
+    result = GlobalInterfaceRegistry._extract_signature_summary(
+        code,
+        unit_type="class",
+        bare_name="DoesNotExist",
+        backend=backend,
+    )
+
+    assert result == "DoesNotExist"

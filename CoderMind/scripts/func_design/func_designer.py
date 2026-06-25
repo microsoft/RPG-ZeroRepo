@@ -23,6 +23,7 @@ if str(_scripts_dir) not in sys.path:
     sys.path.insert(0, str(_scripts_dir))
 
 from common.trajectory import Trajectory, load_or_create_trajectory
+from common.language_meta import extract_language_metadata
 from common import (
     get_skeleton_tree_string,
     extract_functional_areas_from_skeleton,
@@ -264,7 +265,13 @@ class FuncDesigner:
         
         # Get base classes list
         base_classes_list = self.base_classes.get("base_classes", [])
-        
+
+        primary_language, _ = extract_language_metadata(self.skeleton)
+        if not primary_language:
+            primary_language = extract_language_metadata(self.data_flow)[0]
+        if not primary_language:
+            primary_language = extract_language_metadata(self.base_classes)[0]
+
         # Add step to trajectory
         step_id = None
         if self.trajectory:
@@ -278,7 +285,8 @@ class FuncDesigner:
             max_file_iterations=self.max_interface_iterations,
             logger=self.logger,
             trajectory=self.trajectory,
-            step_id=step_id
+            step_id=step_id,
+            target_language=primary_language,
         )
         
         # Run

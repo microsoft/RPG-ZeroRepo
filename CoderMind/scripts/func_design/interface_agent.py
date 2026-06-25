@@ -829,17 +829,37 @@ class GlobalInterfaceRegistry:
         if not units:
             return bare_name
 
-        # Find the matching top-level declaration.
+        def _format_unit_summary(unit: Any) -> str:
+            formatted = backend.format_signature(unit)
+            if formatted and formatted != bare_name:
+                return formatted
+            unit_code = (getattr(unit, "code", "") or "").strip()
+            for line in unit_code.splitlines():
+                stripped = line.strip()
+                if stripped:
+                    return stripped
+            return formatted or bare_name
+
+        # Find the matching top-level declaration. Prefer exact
+        # kind+name matches, then fall back to name-only matches for
+        # non-Python backends whose parser labels differ from registry
+        # prefixes (e.g. registry "class Foo" vs backend "struct Foo").
         target = next(
             (u for u in units
              if u.unit_type == unit_type and u.name == bare_name and u.parent is None),
             None,
         )
         if target is None:
-            return bare_name
+            target = next(
+                (u for u in units if u.name == bare_name and u.parent is None),
+                None,
+            )
+            if target is None:
+                return bare_name
+            return _format_unit_summary(target)
 
         if unit_type == "function":
-            return backend.format_signature(target)
+            return _format_unit_summary(target)
 
         # Class case: collect direct-child methods + format bases.
         # ``backend.list_code_units`` walks BFS so methods of this
@@ -864,7 +884,11 @@ class GlobalInterfaceRegistry:
 
         if methods:
             return f"{bare_name}{bases_str} [{', '.join(methods[:5])}]"
-        return f"{bare_name}{bases_str}"
+        if bases_str:
+            return f"{bare_name}{bases_str}"
+        if backend.name != "python":
+            return _format_unit_summary(target)
+        return bare_name
 
 
 # ============================================================================
@@ -2526,11 +2550,19 @@ class InterfaceOrchestrator:
         file_container: Dict[str, Any],
     ) -> bool:
         """Return True when existing subtree interfaces cover all features."""
+        file_container = {
+            path: result for path, result in file_container.items()
+            if path != "__new_features__"
+        }
+
         expected_features: Set[str] = set()
         for file_node in file_nodes:
             expected_features.update(file_node.get("feature_paths", []))
         if not expected_features:
-            return False
+            return all(
+                file_node.get("path", "") in file_container
+                for file_node in file_nodes
+            )
 
         produced_features: Set[str] = set()
         for result in file_container.values():
