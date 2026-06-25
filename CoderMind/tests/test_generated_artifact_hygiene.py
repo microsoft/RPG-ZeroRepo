@@ -73,6 +73,9 @@ def test_generated_artifact_path_policy_covers_common_outputs() -> None:
     allowed = [
         "src/app.py",
         "src/build_config.py",
+        "src/env/config.py",
+        "src/venv/settings.py",
+        "src/.venv/config.py",
         "configs/build/build_contract.c",
         "configs/build/build_contract.h",
         "CMakeLists.txt",

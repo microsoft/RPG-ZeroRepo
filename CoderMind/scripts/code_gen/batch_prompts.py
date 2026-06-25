@@ -423,14 +423,14 @@ def _dynamic_c_family_syntax_command(
     include_flags: List[str] = []
     for index, part in enumerate(command):
         if part == "-I" and index + 1 < len(command):
-            include_flags.extend(["-I", "$PWD"])
+            include_flags.append('-I "$PWD"')
     standard = "-std=c++17" if backend.name == "cpp" else "-std=c99"
     patterns = (
         r'\( -name "*.cpp" -o -name "*.cc" -o -name "*.cxx" \)'
         if backend.name == "cpp"
         else r'-name "*.c"'
     )
-    include_text = " ".join(shlex.quote(part) for part in include_flags)
+    include_text = " ".join(include_flags)
     return (
         "bash -lc "
         + shlex.quote(
@@ -1011,7 +1011,7 @@ def build_resume_prompt(
         post_verify_section = (
             "\n\n## ⚠ False-positive PASS detected\n"
             "Your previous attempt ended with `BATCH_RESULT: PASS` and the\n"
-            "PYTEST_SUMMARY line {agent_summary_repr}, but the runner's\n"
+            f"PYTEST_SUMMARY line {agent_summary_repr}, but the runner's\n"
             "independent test-command re-run reported the failure shown below.\n"
             "Possible causes you must investigate:\n"
             "* You did not actually run the exact test command before declaring PASS.\n"

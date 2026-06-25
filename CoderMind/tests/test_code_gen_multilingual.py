@@ -120,6 +120,30 @@ def test_cpp_codegen_prompt_aligns_cmake_command_with_post_verify(monkeypatch, t
     assert "ctest --test-dir build --output-on-failure" in prompt
 
 
+def test_cpp_syntax_prompt_expands_repo_include_path(monkeypatch, tmp_path: Path) -> None:
+    _set_language(monkeypatch, tmp_path, "cpp")
+    task = _task("src/tasklite_cli/task.cpp")
+
+    prompt = batch_prompts.build_tdd_prompt(_state(task), task, tmp_path)
+
+    assert '-I "$PWD"' in prompt
+    assert "-I '$PWD'" not in prompt
+
+
+def test_resume_prompt_includes_agent_pytest_summary() -> None:
+    prompt = batch_prompts.build_resume_prompt(
+        "Original prompt",
+        attempt_number=2,
+        failure_reason="Post-verification failed",
+        last_test_output="1 failed in 0.10s",
+        sub_agent_claimed_pass=True,
+        agent_pytest_summary="1 passed in 0.10s",
+    )
+
+    assert "PYTEST_SUMMARY line `1 passed in 0.10s`" in prompt
+    assert "{agent_summary_repr}" not in prompt
+
+
 def test_non_python_integration_prompt_uses_native_entry_point(monkeypatch, tmp_path: Path) -> None:
     # Regression for the bug where every language was told "Do NOT create
     # main.py", planting a Python file name into Go/JS/C projects.
