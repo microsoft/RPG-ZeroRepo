@@ -35,6 +35,7 @@ from common.utils import (
     is_test_file,
     get_node_range_robust,
     extract_source_by_lines,
+    is_skip_dir,
     path_has_skip_dir,
 )
 
@@ -84,7 +85,7 @@ def _exclude_irrelevant_for_build(file_id: str) -> bool:
     if path_obj.suffix.lower() in EXT_BLACKLIST:
         return False
 
-    if path_has_skip_dir(file_id):
+    if is_skip_dir(path_obj.name) or path_has_skip_dir(file_id):
         return False
 
     if path_obj.name in FILE_BLACKLIST:
@@ -697,13 +698,13 @@ class DependencyGraph:
         except Exception as exc:  # pragma: no cover - defensive
             logger.debug("[add_file:lp_error] %s: %s", nid, exc)
             return True
-        self._parse_lp_file_result(nid, result)
-        # NOTE: ``_parse_lp_invoke_dependencies`` is deliberately NOT
-        # called here. Cross-file invoke resolution needs the global
-        # unit registry to be in its final state, which is only
-        # guaranteed after ``_rerun_semantic_passes`` runs at the end
-        # of ``update_files``. That helper will re-discover this file's
-        # language attr and replay both the file-result + invoke pass.
+        self._parse_lp_file_result(nid, result, include_dependencies=False)
+        # NOTE: dependency edges are deliberately NOT added here. Cross-file
+        # resolution needs the global unit registry to be in its final state,
+        # which is only guaranteed after ``_rerun_semantic_passes`` runs at
+        # the end of ``update_files``. That helper will re-discover this
+        # file's language attr and replay both the file-result + dependency
+        # passes.
         return True
 
     def _wipe_semantic_edges(self) -> int:

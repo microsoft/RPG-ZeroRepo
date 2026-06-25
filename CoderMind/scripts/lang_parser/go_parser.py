@@ -272,7 +272,9 @@ class GoParser(BaseLanguageParser):
                 continue
             clean = strip_string_literals(line).split("//", 1)[0]
             if clean.lstrip().startswith("func "):
-                continue
+                if "{" not in clean:
+                    continue
+                clean = clean.split("{", 1)[1]
             source_ref = self._source_reference_for_line(path, units, line_number)
 
             for match in _SELECTOR_CALL_RE.finditer(clean):

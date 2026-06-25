@@ -45,6 +45,7 @@ _COMMONJS_FUNCTION_RE = re.compile(
     rf"^\s*(?:module\.exports\.|exports\.)(?P<name>{_IDENTIFIER})\s*=\s*(?:async\s+)?function\b"
 )
 _NEW_EXPRESSION_RE = re.compile(rf"\bnew\s+(?P<name>{_IDENTIFIER})\s*(?:<[^>]+>)?\(")
+_MEMBER_CALL_RE = re.compile(rf"(?<![\w$])(?P<qualifier>{_IDENTIFIER})\.(?P<name>{_IDENTIFIER})\s*(?:<[^>]+>)?\(")
 _DIRECT_CALL_RE = re.compile(rf"(?<![\w$.])(?P<name>{_IDENTIFIER})\s*(?:<[^>]+>)?\(")
 _CALL_KEYWORDS = frozenset({
     "if", "for", "while", "switch", "catch", "function", "return", "typeof",
@@ -350,6 +351,25 @@ class ECMAScriptParser(BaseLanguageParser):
                         "constructor",
                         import_bindings.get(name),
                     )
+
+            for match in _MEMBER_CALL_RE.finditer(clean):
+                qualifier = match.group("qualifier")
+                name = match.group("name")
+                binding = import_bindings.get(qualifier)
+                if not binding or binding.get("kind") != "namespace":
+                    continue
+                namespace_binding = dict(binding)
+                namespace_binding["imported"] = name
+                namespace_binding["namespace"] = qualifier
+                self._append_invoke_dependency(
+                    dependencies,
+                    seen,
+                    source_ref,
+                    name,
+                    line_number,
+                    "namespace_member",
+                    namespace_binding,
+                )
 
             for match in _DIRECT_CALL_RE.finditer(clean):
                 name = match.group("name")
