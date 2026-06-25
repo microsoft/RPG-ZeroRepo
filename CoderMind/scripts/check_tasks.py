@@ -338,7 +338,10 @@ def check_state(input_path: Path, output_path: Path) -> Dict[str, Any]:
     if not cross_validation["is_consistent"]:
         warning_count = len(cross_validation["warnings"])
         result["type"] = "warning"
-        result["message"] = f"tasks.json exists but has {warning_count} unit mismatches with interfaces."
+        result["message"] = (
+            f"tasks.json exists but has {warning_count} unit mismatches with interfaces. "
+            "This is a cross-stage contract violation; plan.py will rebuild tasks and downstream stages."
+        )
     else:
         result["type"] = "update"
         result["message"] = f"Valid tasks.json exists with {stats['total_tasks']} tasks and {stats['total_units']} units."

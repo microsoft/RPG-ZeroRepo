@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Any
 
 from .backend import ToolchainUnavailable
+from .file_deps import FileDependencyEdge, resolved_c_family_edges
 from .prompt_hints import PromptHints
 from .project_tasks import ProjectTaskContext, ProjectTaskTemplates
 from .unit_kind import classify_unit_kind
@@ -51,6 +52,13 @@ class CppBackend:
             or basename.endswith(("_test.cpp", "_test.cc", "_test.cxx"))
             or basename.startswith("test_") and basename.endswith((".cpp", ".cc", ".cxx"))
         )
+
+    def file_dependency_edges(
+        self,
+        files: list[str],
+        file_sources: dict[str, str],
+    ) -> list[FileDependencyEdge]:
+        return resolved_c_family_edges(files, file_sources, language=self.name)
 
     def package_marker_filename(self) -> str | None:
         return None

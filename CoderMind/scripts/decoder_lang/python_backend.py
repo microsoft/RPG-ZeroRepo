@@ -18,6 +18,7 @@ from pathlib import Path
 from typing import Any
 
 from .backend import ToolchainUnavailable
+from .file_deps import FileDependencyEdge, resolved_python_edges
 from .prompt_hints import PromptHints
 from .project_tasks import ProjectTaskContext, ProjectTaskTemplates
 from .unit_kind import classify_unit_kind
@@ -78,6 +79,13 @@ class PythonBackend:
             return True
         basename = normalised.rsplit("/", 1)[-1]
         return basename.startswith("test_") or basename.endswith("_test.py")
+
+    def file_dependency_edges(
+        self,
+        files: list[str],
+        file_sources: dict[str, str],
+    ) -> list[FileDependencyEdge]:
+        return resolved_python_edges(files, file_sources)
 
     def package_marker_filename(self) -> str | None:
         return "__init__.py"

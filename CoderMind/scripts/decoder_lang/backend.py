@@ -31,6 +31,7 @@ from typing import (
 
 from common.language_meta import extract_language_metadata
 
+from .file_deps import FileDependencyEdge
 from .prompt_hints import PromptHints
 from .project_tasks import ProjectTaskContext, ProjectTaskTemplates
 from .test_result import EnvHandle, TestRunResult
@@ -109,6 +110,20 @@ class LanguageBackend(Protocol):
     def package_marker_content(self, pkg_path: str) -> str | None:
         """Initial body for the marker file, or ``None`` if the marker
         does not exist for this language."""
+
+    def file_dependency_edges(
+        self,
+        files: list[str],
+        file_sources: dict[str, str],
+    ) -> list[FileDependencyEdge]:
+        """Return language-specific file dependency edges.
+
+        Each edge means ``dependency`` must be implemented before
+        ``dependent``.  Backends should resolve only language-native,
+        file-level relationships they understand (imports, includes,
+        module declarations) and leave unresolved or cross-language
+        relationships absent so the planner can preserve input order.
+        """
 
     def is_valid_module_identifier(self, segment: str) -> bool:
         """Check whether ``segment`` is a legal module / package name

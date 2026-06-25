@@ -257,10 +257,11 @@ def probe(invoker: list[str]) -> list[StageState]:
 def decide(states: list[StageState], force: bool) -> None:
     """Mark each state's ``will_run`` / ``reason`` in place.
 
-    Rule: only ``type == "update"`` is complete. Any warning means the
-    artifact exists but violates a cross-stage contract, so the stage is
-    rerun and downstream artifacts are rebuilt from it. ``--force`` flips
-    every stage to ``will_run``.
+    Rule: only ``type == "update"`` is complete. ``type == "warning"`` is
+    explicitly NOT a completed state: it means the artifact exists but
+    violates a cross-stage contract, so this stage is rerun and downstream
+    artifacts are rebuilt from it. ``--force`` flips every stage to
+    ``will_run``.
     """
     cascade = False
     for state in states:
@@ -277,7 +278,10 @@ def decide(states: list[StageState], force: bool) -> None:
             state.reason = "up-to-date"
         else:
             state.will_run = True
-            state.reason = f"type={state.type}"
+            if state.type == "warning":
+                state.reason = "warning: cross-stage contract violation; rebuild stage and downstream"
+            else:
+                state.reason = f"type={state.type}"
             cascade = True
 
 

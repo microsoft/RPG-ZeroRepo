@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Any
 
 from .backend import ToolchainUnavailable
+from .file_deps import FileDependencyEdge, resolved_go_edges
 from .prompt_hints import PromptHints
 from .project_tasks import ProjectTaskContext, ProjectTaskTemplates
 from .unit_kind import classify_unit_kind
@@ -64,6 +65,13 @@ class GoBackend:
         normalised = path.replace("\\", "/")
         basename = normalised.rsplit("/", 1)[-1]
         return basename.endswith("_test.go")
+
+    def file_dependency_edges(
+        self,
+        files: list[str],
+        file_sources: dict[str, str],
+    ) -> list[FileDependencyEdge]:
+        return resolved_go_edges(files, file_sources)
 
     def package_marker_filename(self) -> str | None:
         # Go packages are directories; no marker file required.
@@ -416,23 +424,33 @@ Repository purpose: {context.repo_info}
 
 **Goal:** Create a production-quality Go CLI entry point that lets users run the complete product through documented commands.
 
-**Files to create:**
-1. `{command_path}` - Main package for the CLI command.
+**Go entry-point rules:**
+1. The executable package MUST be `package main`.
+2. It MUST define `func main()`.
+3. Keep `main.go` thin: parse CLI arguments, handle user-facing errors, and delegate business logic to existing project packages.
+4. Do NOT duplicate domain logic in `main.go`.
+
+**Files to create/update:**
+1. `{command_path}` - command entry file.
+   - Prefer the conventional `cmd/<name>/main.go` layout for CLI applications.
+   - If `{command_path}` already exists, extend it in place.
+   - Do NOT create a second command package unless the project explicitly requires multiple commands.
 
 **Critical Rules:**
-- Do NOT re-implement business logic in `main.go`. Import and delegate to internal packages already defined in the project.
 - Every import must reference real packages and symbols from this module.
 - Use idiomatic Go error handling with explicit non-zero exits on user-facing failures.
 - Keep output plain text unless the requirements explicitly ask otherwise.
-- This is the ONLY `package main` / `func main()` in the repository. If `{command_path}` already exists, extend it in place — do NOT create a second command package.
-2. Provide `--help` output and subcommands/options that expose all major CLI features.
-3. Delegate to implemented internal packages for task storage and task lifecycle behavior.
+
+**Requirements:**
+1. Use `package main` and define `func main()`.
+2. Provide `--help` output and documented commands/options that expose all major CLI features.
+3. Import and call real packages/symbols from this module.
 4. Handle invalid commands, invalid ids, missing arguments, and runtime errors clearly.
 5. Verify with `go run ./{command_dir} --help` and `go test ./...`.
 
 **Important:**
 - Read `docs/` first and faithfully expose the requested behavior.
-- Do NOT create Python package entry points for this Go project.
+- Reuse `{command_path}`; do NOT create Python package entry points or another Go command package for this Go project.
 """,
             readme=f"""Update the README.md for the repository: {context.repo_name}
 Repository purpose: {context.repo_info}

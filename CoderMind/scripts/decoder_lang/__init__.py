@@ -39,6 +39,7 @@ from .backend import (
 )
 from .c_backend import CBackend
 from .cpp_backend import CppBackend
+from .file_deps import FileDependencyEdge, infer_language_from_path
 from .go_backend import GoBackend
 from .javascript_backend import JavaScriptBackend
 from .prompt_directive import language_directive, with_language_directive
@@ -63,6 +64,7 @@ register_backend(CppBackend)
 
 __all__ = [
     "EnvHandle",
+    "FileDependencyEdge",
     "CBackend",
     "CppBackend",
     "GoBackend",
@@ -79,6 +81,7 @@ __all__ = [
     "TypeScriptBackend",
     "default_find_existing_entry",
     "get_backend",
+    "infer_language_from_path",
     "language_directive",
     "list_backends",
     "register_backend",

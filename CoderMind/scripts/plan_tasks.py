@@ -14,7 +14,6 @@ Output: .cmind/tasks.json (ordered implementation tasks)
 import json
 import logging
 import argparse
-import ast
 from pathlib import Path
 from datetime import datetime
 from typing import Dict, Any, List, Optional, Set
@@ -24,7 +23,7 @@ from collections import Counter, defaultdict, deque
 from common.trajectory import Trajectory, load_or_create_trajectory
 from common import LLMClient
 from common.language_meta import extract_language_metadata, metadata_with_languages
-from decoder_lang import ProjectTaskContext, get_backend
+from decoder_lang import FileDependencyEdge, ProjectTaskContext, get_backend, infer_language_from_path
 from rpg import uuid8
 
 # Import centralized paths
@@ -168,159 +167,6 @@ class PlannedTask:
         return obj
 
 
-def _file_path_to_module_name(file_path: str) -> str:
-    """Convert a Python file path to its importable module name."""
-    normalized = file_path.replace("\\", "/")
-    if normalized.endswith(".py"):
-        normalized = normalized[:-3]
-    return _normalize_module_name(normalized.replace("/", "."))
-
-
-def _normalize_module_name(module_name: Optional[str]) -> str:
-    """Normalize module names so equivalent import styles map to the same file."""
-    if not module_name:
-        return ""
-
-    normalized = module_name.strip()
-    while normalized.startswith("."):
-        normalized = normalized[1:]
-    if normalized.startswith("src."):
-        normalized = normalized[4:]
-    return normalized
-
-
-def _resolve_relative_import(module_name: str, level: int, current_file: str) -> Optional[str]:
-    """Resolve a relative import target to an absolute module name."""
-    current_module = _file_path_to_module_name(current_file)
-    package_parts = current_module.split(".")[:-1]
-
-    if level <= 0:
-        return _normalize_module_name(module_name)
-
-    if level > len(package_parts):
-        return None
-
-    anchor_parts = package_parts[: len(package_parts) - level + 1]
-    if module_name:
-        anchor_parts.extend(module_name.split("."))
-    return _normalize_module_name(".".join(anchor_parts))
-
-
-def _is_type_checking_test(test_node: ast.AST) -> bool:
-    """Return True when an if-test represents TYPE_CHECKING."""
-    if isinstance(test_node, ast.Name):
-        return test_node.id == "TYPE_CHECKING"
-    if isinstance(test_node, ast.Attribute):
-        return test_node.attr == "TYPE_CHECKING"
-    return False
-
-
-def _iter_import_nodes(tree: ast.AST, inside_type_checking: bool = False):
-    """Yield import nodes together with whether they are TYPE_CHECKING-only."""
-    for node in ast.iter_child_nodes(tree):
-        child_inside_type_checking = inside_type_checking
-        if isinstance(node, ast.If) and _is_type_checking_test(node.test):
-            child_inside_type_checking = True
-
-        if isinstance(node, (ast.Import, ast.ImportFrom)):
-            yield node, inside_type_checking
-
-        yield from _iter_import_nodes(node, child_inside_type_checking)
-
-
-def _extract_imported_modules(file_code: str, current_file: str) -> Set[str]:
-    """Extract runtime imported module names from code, excluding TYPE_CHECKING-only imports."""
-    if not file_code.strip():
-        return set()
-
-    try:
-        tree = ast.parse(file_code)
-    except SyntaxError:
-        return set()
-
-    imported_modules: Set[str] = set()
-
-    for node, inside_type_checking in _iter_import_nodes(tree):
-        if inside_type_checking:
-            continue
-        if isinstance(node, ast.Import):
-            for alias in node.names:
-                if alias.name:
-                    imported_modules.add(_normalize_module_name(alias.name))
-        elif isinstance(node, ast.ImportFrom):
-            resolved_module = _resolve_relative_import(node.module, node.level, current_file)
-            if resolved_module:
-                imported_modules.add(resolved_module)
-
-            if node.module:
-                base_module = _resolve_relative_import(node.module, node.level, current_file)
-            else:
-                base_module = _resolve_relative_import("", node.level, current_file)
-
-            if base_module:
-                for alias in node.names:
-                    if alias.name == "*":
-                        continue
-                    imported_modules.add(_normalize_module_name(f"{base_module}.{alias.name}"))
-
-    return imported_modules
-
-
-def _extract_imported_stems_via_parser(file_path: str, file_code: str) -> Set[str]:
-    """Extract imported file stems for non-Python languages via ``lang_parser``.
-
-    Python intra-subtree ordering uses dotted-module matching
-    (:func:`_extract_imported_modules`).  Other languages express imports very
-    differently (Go import paths, Rust ``use`` paths, JS/TS ``from './x.js'``,
-    C/C++ ``#include "x.h"``), so an ``ast.parse`` of their source just yields
-    nothing and the topo-sort silently degrades to the LLM's raw order.
-
-    Here we let ``lang_parser`` (which understands all supported languages)
-    extract the import targets, then reduce each to its basename stem so the
-    caller can match it against the basenames of the subtree's own files. This
-    is intentionally conservative: it only links files whose import target
-    shares a basename with a sibling file, which is the common intra-module
-    case and never raises across languages.
-    """
-    if not file_code.strip():
-        return set()
-    try:
-        from lang_parser import get_parser_for_file
-    except ImportError:
-        return set()
-    parser = get_parser_for_file(file_path)
-    if parser is None:
-        return set()
-    try:
-        result = parser.parse_file(file_path, file_code)
-    except Exception:
-        return set()
-
-    stems: Set[str] = set()
-    for dep in getattr(result, "dependencies", []) or []:
-        if getattr(dep, "relation", None) != "imports":
-            continue
-        target = (getattr(dep, "dst", None) or getattr(dep, "symbol", None) or "")
-        if not isinstance(target, str) or not target.strip():
-            continue
-        # Reduce an import target to a comparable basename stem:
-        #   "./store.js" -> "store",  "tasklite/internal/store" -> "store",
-        #   "crate::store::Task" -> "store" (last path-ish segment),
-        #   "store.h" -> "store".
-        token = target.replace("\\", "/").strip().strip('"').strip("'")
-        token = token.split("/")[-1]
-        token = token.split("::")[-1]
-        token = token.rsplit(".", 1)[0] if "." in token else token
-        if token:
-            stems.add(token)
-    return stems
-
-
-def _file_basename_stem(file_path: str) -> str:
-    """Return the lowercase basename without extension for cross-language matching."""
-    return Path(file_path).stem.lower()
-
-
 def _load_dependency_source_code(file_path: str, interface_file_code: str) -> str:
     """Load source code for dependency analysis, combining repo and interface inputs."""
     code_parts: List[str] = []
@@ -336,6 +182,77 @@ def _load_dependency_source_code(file_path: str, interface_file_code: str) -> st
         code_parts.append(interface_file_code)
     return "\n\n".join(code_parts)
 
+
+def _infer_backend_name_for_file(file_path: str, fallback_language: Optional[str] = None) -> str:
+    """Infer the backend name for a file without relying on subtree primary language."""
+    inferred = infer_language_from_path(file_path)
+    if inferred:
+        return inferred
+    return (fallback_language or "python").lower()
+
+
+def _subtree_file_sources(
+    files: List[str],
+    subtree_interfaces: Dict[str, Dict[str, Any]],
+) -> Dict[str, str]:
+    """Build source-code map used by backend file-dependency resolvers."""
+    sources: Dict[str, str] = {}
+    for file_path in files:
+        interface_file_code = subtree_interfaces.get(file_path, {}).get("file_code", "")
+        sources[file_path] = _load_dependency_source_code(file_path, interface_file_code)
+    return sources
+
+
+def _edges_to_toposort_input(edges: List[FileDependencyEdge]) -> Dict[str, Set[str]]:
+    dependency_edges: Dict[str, Set[str]] = defaultdict(set)
+    for edge in edges:
+        dependency_edges[edge.dependency].add(edge.dependent)
+    return dependency_edges
+
+
+def _serialize_dependency_edges(edges: List[FileDependencyEdge]) -> List[Dict[str, Any]]:
+    return [
+        {
+            "dependency": edge.dependency,
+            "dependent": edge.dependent,
+            "reason": edge.reason,
+            "confidence": edge.confidence,
+            "detail": edge.detail,
+        }
+        for edge in edges
+    ]
+
+
+def _language_summary(language_to_files: Dict[str, List[str]]) -> Dict[str, int]:
+    return {language: len(files) for language, files in sorted(language_to_files.items())}
+
+
+def _sort_files_with_backend_edges(
+    files: List[str],
+    backend_name: str,
+    file_sources: Dict[str, str],
+) -> tuple[List[str], List[FileDependencyEdge], bool]:
+    """Sort a same-language file group with its backend's dependency edges."""
+    backend = get_backend(backend_name)
+    edges = backend.file_dependency_edges(files, file_sources)
+    corrected = _topologically_sort_files(files, _edges_to_toposort_input(edges))
+    if corrected is None:
+        return files, edges, True
+    return corrected, edges, False
+
+
+def _merge_sorted_language_groups(
+    original_files: List[str],
+    file_to_language: Dict[str, str],
+    sorted_by_language: Dict[str, List[str]],
+) -> List[str]:
+    """Fill each original language slot with the next sorted file from that language."""
+    queues = {language: deque(files) for language, files in sorted_by_language.items()}
+    merged: List[str] = []
+    for file_path in original_files:
+        language = file_to_language[file_path]
+        merged.append(queues[language].popleft())
+    return merged
 
 def _topologically_sort_files(
     files_order: List[str],
@@ -387,9 +304,18 @@ def correct_intra_subtree_file_order(
     logger: Optional[logging.Logger] = None,
     language: Optional[str] = None,
 ) -> tuple[List[str], Dict[str, Any]]:
-    """Correct file order using imports declared in interface skeleton code."""
+    """Correct file order with per-file language backend dependency rules."""
     logger = logger or logging.getLogger(__name__)
     available_files = [file_path for file_path in files_order if file_path in subtree_interfaces]
+    file_to_language = {
+        file_path: _infer_backend_name_for_file(file_path, language)
+        for file_path in available_files
+    }
+    language_to_files: Dict[str, List[str]] = defaultdict(list)
+    for file_path in available_files:
+        language_to_files[file_to_language[file_path]].append(file_path)
+    languages = _language_summary(language_to_files)
+
     if len(available_files) <= 1:
         return available_files, {
             "original_files_order": list(available_files),
@@ -397,68 +323,83 @@ def correct_intra_subtree_file_order(
             "changed": False,
             "dependency_edges": [],
             "reason": "single_file_or_empty_subtree",
+            "languages": languages,
+            "language_groups": languages,
+            "cycle_detected": False,
+            "has_unresolved_or_ambiguous_edges": False,
+            "has_weak_edges": False,
         }
 
-    # Python matches imports by dotted module path; other languages match by
-    # file basename stem (Go/Rust/TS/JS/C/C++ import syntaxes differ too much
-    # for a single dotted-path scheme).
-    is_python = (language or "python").lower() == "python"
+    file_sources = _subtree_file_sources(available_files, subtree_interfaces)
+    all_edges: List[FileDependencyEdge] = []
+    cycles_by_language: Dict[str, bool] = {}
 
-    module_to_file = {
-        _file_path_to_module_name(file_path): file_path
-        for file_path in available_files
-    }
-    stem_to_file: Dict[str, str] = {}
-    for file_path in available_files:
-        stem_to_file.setdefault(_file_basename_stem(file_path), file_path)
-    dependency_edges: Dict[str, Set[str]] = defaultdict(set)
-    dependency_pairs: List[Dict[str, str]] = []
-    seen_dependency_pairs: Set[tuple[str, str, str]] = set()
-
-    for file_path in available_files:
-        file_code = _load_dependency_source_code(
-            file_path=file_path,
-            interface_file_code=subtree_interfaces[file_path].get("file_code", ""),
+    if len(language_to_files) == 1:
+        backend_name = next(iter(language_to_files))
+        corrected_order, edges, cycle_detected = _sort_files_with_backend_edges(
+            available_files,
+            backend_name,
+            file_sources,
         )
-        if is_python:
-            imported = sorted(_extract_imported_modules(file_code, file_path))
-            resolve = module_to_file.get
-        else:
-            imported = sorted(_extract_imported_stems_via_parser(file_path, file_code))
-            resolve = lambda stem: stem_to_file.get(stem)  # noqa: E731
-
-        for module_name in imported:
-            dependency_file = resolve(module_name)
-            if not dependency_file or dependency_file == file_path:
-                continue
-            dependency_edges[dependency_file].add(file_path)
-            dependency_key = (dependency_file, file_path, module_name)
-            if dependency_key not in seen_dependency_pairs:
-                seen_dependency_pairs.add(dependency_key)
-                dependency_pairs.append({
-                    "dependency": dependency_file,
-                    "dependent": file_path,
-                    "module": module_name,
-                })
-
-    corrected_order = _topologically_sort_files(available_files, dependency_edges)
-    if corrected_order is None:
-        logger.warning(
-            "[TaskPlanner] Detected cyclic or invalid intra-subtree imports in '%s'; keeping original file order.",
-            subtree_name,
-        )
-        return available_files, {
+        all_edges.extend(edges)
+        if cycle_detected:
+            logger.warning(
+                "[TaskPlanner] Detected cyclic or invalid %s file dependencies in '%s'; keeping original file order.",
+                backend_name,
+                subtree_name,
+            )
+            corrected_order = available_files
+        changed = corrected_order != available_files
+        if changed:
+            logger.info(
+                "[TaskPlanner] Corrected files_order for subtree '%s' using %s backend dependencies: %s -> %s",
+                subtree_name,
+                backend_name,
+                available_files,
+                corrected_order,
+            )
+        return corrected_order, {
             "original_files_order": list(available_files),
-            "corrected_files_order": list(available_files),
-            "changed": False,
-            "dependency_edges": dependency_pairs,
-            "reason": "cycle_detected_fallback_to_original_order",
+            "corrected_files_order": list(corrected_order),
+            "changed": changed,
+            "dependency_edges": _serialize_dependency_edges(all_edges),
+            "reason": "backend_file_dependencies",
+            "languages": languages,
+            "language_groups": languages,
+            "cycle_detected": cycle_detected,
+            "has_unresolved_or_ambiguous_edges": any(
+                edge.confidence in {"unresolved", "ambiguous"}
+                for edge in all_edges
+            ),
+            "has_weak_edges": any(edge.confidence == "weak" for edge in all_edges),
         }
 
+    sorted_by_language: Dict[str, List[str]] = {}
+    for backend_name, language_files in language_to_files.items():
+        sorted_group, edges, cycle_detected = _sort_files_with_backend_edges(
+            language_files,
+            backend_name,
+            file_sources,
+        )
+        all_edges.extend(edges)
+        cycles_by_language[backend_name] = cycle_detected
+        sorted_by_language[backend_name] = language_files if cycle_detected else sorted_group
+        if cycle_detected:
+            logger.warning(
+                "[TaskPlanner] Detected cyclic or invalid %s file dependencies in mixed-language subtree '%s'; keeping that language group's original order.",
+                backend_name,
+                subtree_name,
+            )
+
+    corrected_order = _merge_sorted_language_groups(
+        available_files,
+        file_to_language,
+        sorted_by_language,
+    )
     changed = corrected_order != available_files
     if changed:
         logger.info(
-            "[TaskPlanner] Corrected files_order for subtree '%s': %s -> %s",
+            "[TaskPlanner] Corrected files_order for mixed-language subtree '%s' within language groups only: %s -> %s",
             subtree_name,
             available_files,
             corrected_order,
@@ -468,8 +409,18 @@ def correct_intra_subtree_file_order(
         "original_files_order": list(available_files),
         "corrected_files_order": list(corrected_order),
         "changed": changed,
-        "dependency_edges": dependency_pairs,
-        "reason": "import_toposort" if is_python else "import_toposort_by_stem",
+        "dependency_edges": _serialize_dependency_edges(all_edges),
+        "reason": "mixed_language_grouped_sort",
+        "languages": languages,
+        "language_groups": languages,
+        "cycles_by_language": cycles_by_language,
+        "cycle_detected": any(cycles_by_language.values()),
+        "has_unresolved_or_ambiguous_edges": any(
+            edge.confidence in {"unresolved", "ambiguous"}
+            for edge in all_edges
+        ),
+        "has_weak_edges": any(edge.confidence == "weak" for edge in all_edges),
+        "cross_language_policy": "preserve_original_language_slots_no_cross_language_edges",
     }
 
 
@@ -1355,62 +1306,9 @@ class TaskPlanner:
         if templates is not None:
             return templates.dependencies
 
-        if self.backend.name == "go":
-            module_name = self._go_module_name()
-            return f"""Generate or update Go module dependency files for the repository: {self.repo_name}
+        if self.backend.name != "python":
+            raise RuntimeError(f"{self.backend.name} backend must provide project task templates")
 
-**Files to create/update:**
-1. `go.mod` - Go module declaration using module path `{module_name}`
-2. `go.sum` - Only if external dependencies are introduced
-
-**Instructions:**
-1. Prefer the Go standard library. Do not add third-party dependencies unless the implemented code already requires them.
-2. If there are no external dependencies, create a minimal `go.mod` with a current Go version.
-3. If dependencies are needed, run `go mod tidy` after adding imports.
-4. Verify the module with `go test ./...`.
-
-**Important:**
-- Do NOT create Python dependency files for a Go project.
-- Keep the module compact and local to this repository.
-- The fixture expects standard-library-only code unless the implementation proves otherwise.
-"""
-        if self.backend.name == "rust":
-            package_name = self._package_slug(separator="-")
-            return f"""Generate or update Rust Cargo dependency files for the repository: {self.repo_name}
-
-**Files to create/update:**
-1. `Cargo.toml` - Cargo package declaration using package name `{package_name}`
-2. `Cargo.lock` - Only if dependency resolution creates it
-
-**Instructions:**
-1. Prefer the Rust standard library for CLI parsing and file handling unless implemented code already requires a crate.
-2. Include `serde` and `serde_json` when JSON serialization is implemented.
-3. Use edition `2021` unless the implemented code requires another stable edition.
-4. Run `cargo test` after updating dependencies.
-
-**Important:**
-- Do NOT create Python dependency files for a Rust project.
-- Keep dependency choices minimal and justified by actual imports.
-"""
-        if self.backend.name == "typescript":
-            package_name = self._package_slug(separator="-")
-            return f"""Generate or update Node.js/TypeScript dependency files for the repository: {self.repo_name}
-
-**Files to create/update:**
-1. `package.json` - Package metadata, scripts, and dependencies using package name `{package_name}`
-2. `tsconfig.json` - TypeScript compiler configuration for Node.js
-3. `package-lock.json` - Only if dependency installation creates it
-
-**Instructions:**
-1. Prefer Node.js standard APIs for local file and CLI behavior.
-2. Add TypeScript tooling and a minimal test runner only when needed by the implemented code.
-3. Provide scripts for `npm start`, `npm test`, and type checking when appropriate.
-4. Run `npm test` after updating dependencies.
-
-**Important:**
-- Do NOT create Python dependency files for a TypeScript project.
-- Keep dependencies minimal and aligned with actual imports.
-"""
         return f"""Generate or update the dependency management files for the repository: {self.repo_name}
 
 **Files to create/update:**
@@ -1458,90 +1356,8 @@ package3>=3.0.0  # For feature X
         if templates is not None:
             return templates.main_entry
 
-        if self.backend.name == "go":
-            command_path = self._resolve_go_command_path()
-            return f"""Create the Go command entry point for the repository: {self.repo_name}
-Repository purpose: {self.repo_info}
-
-**Goal:** Create a production-quality Go CLI entry point that lets users run the complete product through documented commands.
-
-**Files to create:**
-1. `{command_path}` - Main package for the CLI command.
-
-**Critical Rules:**
-- Do NOT re-implement business logic in `main.go`. Import and delegate to internal packages already defined in the project.
-- Every import must reference real packages and symbols from this module.
-- Use idiomatic Go error handling with explicit non-zero exits on user-facing failures.
-- Keep output plain text unless the requirements explicitly ask otherwise.
-- This is the ONLY `package main` / `func main()` in the repository. If `{command_path}` already exists, extend it in place — do NOT create a second command package.
-
-**Requirements:**
-1. Use `package main` and a `main()` function.
-2. Provide `--help` output and subcommands/options that expose all major CLI features.
-3. Delegate to implemented internal packages for task storage and task lifecycle behavior.
-4. Handle invalid commands, invalid ids, missing arguments, and runtime errors clearly.
-5. Verify with `go run ./{command_path.rsplit('/', 1)[0]} --help` and `go test ./...`.
-
-**Important:**
-- Read `docs/` first and faithfully expose the requested behavior.
-- Do NOT create Python package entry points for this Go project.
-"""
-
-        if self.backend.name == "rust":
-            return f"""Create the Rust command entry point for the repository: {self.repo_name}
-Repository purpose: {self.repo_info}
-
-**Goal:** Create a production-quality Cargo CLI entry point that lets users run the complete product through documented commands.
-
-**Files to create:**
-1. `src/main.rs` - Binary entry point for the CLI.
-2. `src/lib.rs` (optional) - Library module that exposes reusable task/store logic.
-
-**Critical Rules:**
-- Do NOT re-implement business logic in `main.rs`. Delegate to modules already defined in the crate.
-- Every `use` path must reference real modules and symbols.
-- Use idiomatic `Result`-based error handling and explicit non-zero exits for user-facing failures.
-- Keep output plain text unless the requirements explicitly ask otherwise.
-
-**Requirements:**
-1. Provide a `main()` function in `src/main.rs`.
-2. Expose all major CLI commands and options described in `docs/`.
-3. Delegate storage and task lifecycle behavior to implemented modules.
-4. Handle invalid commands, invalid ids, missing arguments, and runtime errors clearly.
-5. Verify with `cargo run -- --help` and `cargo test`.
-
-**Important:**
-- Read `docs/` first and faithfully expose the requested behavior.
-- Do NOT create Python package entry points for this Rust project.
-"""
-
-        if self.backend.name == "typescript":
-            return f"""Create the TypeScript command entry point for the repository: {self.repo_name}
-Repository purpose: {self.repo_info}
-
-**Goal:** Create a production-quality Node.js CLI entry point that lets users run the complete product through documented commands.
-
-**Files to create:**
-1. `src/index.ts` - CLI entry point exported or referenced by package scripts.
-2. `src/cli.ts` (optional) - Command parsing and dispatch separated from domain logic.
-
-**Critical Rules:**
-- Do NOT re-implement business logic in `index.ts`. Import and delegate to implemented modules.
-- Every import must reference real files and exported symbols.
-- Use explicit error handling and non-zero process exits for user-facing failures.
-- Keep output plain text unless the requirements explicitly ask otherwise.
-
-**Requirements:**
-1. Expose all major CLI commands and options described in `docs/`.
-2. Wire `package.json` scripts so users can run the CLI with `npm start -- --help`.
-3. Delegate storage and task lifecycle behavior to implemented modules.
-4. Handle invalid commands, invalid ids, missing arguments, and runtime errors clearly.
-5. Verify with `npm start -- --help` and `npm test`.
-
-**Important:**
-- Read `docs/` first and faithfully expose the requested behavior.
-- Do NOT create Python package entry points for this TypeScript project.
-"""
+        if self.backend.name != "python":
+            raise RuntimeError(f"{self.backend.name} backend must provide project task templates")
 
         # Infer the main package name from the interfaces subtree structure
         package_name = self._get_package_name()
@@ -1692,39 +1508,6 @@ if __name__ == "__main__":
             return self.repo_name.lower().replace("-", "_").replace(" ", "_")
         return "project"
 
-    def _go_module_name(self) -> str:
-        """Infer a compact Go module or command name from repository metadata."""
-        raw = self.repo_name or "project"
-        candidate = raw.lower().replace(" ", "-").replace("_", "-")
-        candidate = _re.sub(r"[^a-z0-9-]+", "-", candidate).strip("-")
-        return candidate or "project"
-
-    def _resolve_go_command_path(self) -> str:
-        """Return the Go entry-point path, reusing the skeleton's own if present.
-
-        The skeleton frequently already places the program entry under
-        ``cmd/<name>/main.go`` (e.g. ``cmd/todo/main.go``). Generating a
-        second ``cmd/<repo-slug>/main.go`` from the synthetic MAIN_ENTRY
-        task then yields two ``func main()`` packages. To keep a single
-        entry source, reuse an existing ``cmd/*/main.go`` discovered in
-        the planned interfaces; only fall back to the backend's canonical
-        ``cmd/<module>/main.go`` when the skeleton declared no command
-        package.
-        """
-        subtrees_data = self.interfaces.get("subtrees", {})
-        for st_data in subtrees_data.values():
-            container = st_data.get("interfaces", st_data.get("files", {}))
-            for fpath in container:
-                norm = str(fpath).replace("\\", "/")
-                parts = norm.split("/")
-                if (
-                    len(parts) == 3
-                    and parts[0] == "cmd"
-                    and parts[2] == "main.go"
-                ):
-                    return norm
-        return self.backend.entry_point_path(self._go_module_name())
-
     def _package_slug(self, separator: str = "-") -> str:
         """Infer a compact package name from repository metadata."""
         raw = self.repo_name or "project"
@@ -1739,130 +1522,9 @@ if __name__ == "__main__":
         if templates is not None:
             return templates.readme
 
-        if self.backend.name == "go":
-            module_name = self._go_module_name()
-            return f"""Update the README.md for the repository: {self.repo_name}
-Repository purpose: {self.repo_info}
+        if self.backend.name != "python":
+            raise RuntimeError(f"{self.backend.name} backend must provide project task templates")
 
-**Goal:** Replace the placeholder README with comprehensive documentation for the actual Go CLI implementation.
-
-**Sections to include:**
-
-## 1. Project Title & Description
-- Clear, concise description of what the CLI does
-- Key commands and capabilities
-
-## 2. Installation
-- Go version prerequisite
-- Clone/build instructions
-- Module setup using `go mod tidy` when needed
-
-## 3. Usage
-- How to run the CLI with `go run ./cmd/{module_name} --help`
-- Common command examples with expected plain-text output
-- Data file options and local persistence behavior if applicable
-
-## 4. Project Structure
-- Brief overview of `cmd/`, `internal/`, and test files
-- Key packages and their purposes
-
-## 5. Development
-- How to run tests with `go test ./...`
-- How to format code with `gofmt`
-
-**Instructions:**
-1. Read the `docs/` directory for the original requirements.
-2. Explore the actual Go codebase to understand what was implemented.
-3. Run `go run ./cmd/{module_name} --help` if the command exists.
-4. Reference actual package names, types, and functions.
-
-**Important:**
-- Do NOT document Python commands, Python test runners, or Python dependency files for this Go project.
-- Base everything on the actual implemented code, not assumptions.
-- Keep the tone professional and concise.
-"""
-        if self.backend.name == "rust":
-            return f"""Update the README.md for the repository: {self.repo_name}
-Repository purpose: {self.repo_info}
-
-**Goal:** Replace the placeholder README with comprehensive documentation for the actual Rust CLI implementation.
-
-**Sections to include:**
-
-## 1. Project Title & Description
-- Clear, concise description of what the CLI does
-- Key commands and capabilities
-
-## 2. Installation
-- Rust/Cargo prerequisite
-- Clone/build instructions
-- Dependency setup with `cargo build`
-
-## 3. Usage
-- How to run the CLI with `cargo run -- --help`
-- Common command examples with expected plain-text output
-- Data file options and local persistence behavior if applicable
-
-## 4. Project Structure
-- Brief overview of `src/`, modules, and tests
-- Key modules and their purposes
-
-## 5. Development
-- How to run tests with `cargo test`
-- How to format code with `cargo fmt`
-
-**Instructions:**
-1. Read the `docs/` directory for the original requirements.
-2. Explore the actual Rust codebase to understand what was implemented.
-3. Run `cargo run -- --help` if the binary exists.
-4. Reference actual module names, structs, traits, enums, and functions.
-
-**Important:**
-- Do NOT document Python commands, Python test runners, or Python dependency files for this Rust project.
-- Base everything on the actual implemented code, not assumptions.
-- Keep the tone professional and concise.
-"""
-        if self.backend.name == "typescript":
-            return f"""Update the README.md for the repository: {self.repo_name}
-Repository purpose: {self.repo_info}
-
-**Goal:** Replace the placeholder README with comprehensive documentation for the actual TypeScript CLI implementation.
-
-**Sections to include:**
-
-## 1. Project Title & Description
-- Clear, concise description of what the CLI does
-- Key commands and capabilities
-
-## 2. Installation
-- Node.js/npm prerequisite
-- Clone/install instructions using `npm install`
-- TypeScript build or runtime notes if applicable
-
-## 3. Usage
-- How to run the CLI with `npm start -- --help`
-- Common command examples with expected plain-text output
-- Data file options and local persistence behavior if applicable
-
-## 4. Project Structure
-- Brief overview of `src/`, `tests/`, and configuration files
-- Key modules and their purposes
-
-## 5. Development
-- How to run tests with `npm test`
-- How to type-check or build the project
-
-**Instructions:**
-1. Read the `docs/` directory for the original requirements.
-2. Explore the actual TypeScript codebase to understand what was implemented.
-3. Run `npm start -- --help` if the script exists.
-4. Reference actual module names, exported types, classes, and functions.
-
-**Important:**
-- Do NOT document Python commands, Python test runners, or Python dependency files for this TypeScript project.
-- Base everything on the actual implemented code, not assumptions.
-- Keep the tone professional and concise.
-"""
         return f"""Update the README.md for the repository: {self.repo_name}
 Repository purpose: {self.repo_info}
 

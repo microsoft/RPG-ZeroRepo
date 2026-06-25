@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Any
 
 from .backend import ToolchainUnavailable
+from .file_deps import FileDependencyEdge, resolved_rust_edges
 from .prompt_hints import PromptHints
 from .project_tasks import ProjectTaskContext, ProjectTaskTemplates
 from .unit_kind import classify_unit_kind
@@ -41,6 +42,13 @@ class RustBackend:
         normalised = path.replace("\\", "/")
         basename = normalised.rsplit("/", 1)[-1]
         return "/tests/" in f"/{normalised}" or basename.endswith("_test.rs")
+
+    def file_dependency_edges(
+        self,
+        files: list[str],
+        file_sources: dict[str, str],
+    ) -> list[FileDependencyEdge]:
+        return resolved_rust_edges(files, file_sources)
 
     def package_marker_filename(self) -> str | None:
         return None
