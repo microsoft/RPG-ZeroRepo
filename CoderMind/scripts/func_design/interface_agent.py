@@ -14,7 +14,7 @@ import json
 import logging
 import ast
 import re
-from typing import Dict, List, Optional, Tuple, Any, Set
+from typing import Dict, List, Optional, Tuple, Any, Set, Iterator
 from collections import defaultdict, deque
 from pydantic import BaseModel, Field, model_validator
 
@@ -333,9 +333,7 @@ class DependencyCollector:
 
         local_calls: Dict[str, Set[str]] = defaultdict(set)
         for caller, node, owner_class in caller_nodes:
-            for child in ast.walk(node):
-                if not isinstance(child, ast.Call):
-                    continue
+            for child in _iter_calls_in_own_scope(node):
                 callee_name = _python_call_name(child.func)
                 if not callee_name:
                     continue
@@ -571,6 +569,17 @@ def _extract_name_from_node(node: ast.expr) -> Optional[str]:
     elif isinstance(node, ast.Attribute):
         return node.attr
     return None
+
+
+def _iter_calls_in_own_scope(scope_node: ast.AST) -> "Iterator[ast.Call]":
+    """Yield ``Call`` nodes inside ``scope_node`` without descending into
+    nested function/class/lambda scopes, whose calls belong to them."""
+    for child in ast.iter_child_nodes(scope_node):
+        if isinstance(child, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef, ast.Lambda)):
+            continue
+        if isinstance(child, ast.Call):
+            yield child
+        yield from _iter_calls_in_own_scope(child)
 
 
 def _python_call_name(node: ast.expr) -> Optional[str]:

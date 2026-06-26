@@ -506,12 +506,16 @@ def cmake_reconfigure(env: Any) -> None:
     if not cmake or not (root / "CMakeLists.txt").exists():
         return
     try:
-        subprocess.run(
+        configure = subprocess.run(
             [cmake, "-S", str(root), "-B", str(root / "build")],
             cwd=str(root),
             capture_output=True,
             timeout=120,
         )
+        if configure.returncode != 0:
+            # A failed configure leaves a stale/partial build dir; skip the
+            # build so a later ctest surfaces the real configure failure.
+            return
         subprocess.run(
             [cmake, "--build", str(root / "build")],
             cwd=str(root),

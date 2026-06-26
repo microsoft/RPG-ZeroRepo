@@ -13,19 +13,21 @@ from typing import Iterable, List
 
 
 def dedup_code_blocks(codes: Iterable[str]) -> List[str]:
-    """Return ``codes`` with blank and duplicate (stripped) blocks removed.
+    """Return ``codes`` with blank and duplicate blocks removed.
 
-    Order of first appearance is preserved. Comparison is on the
+    Order of first appearance is preserved. Duplicates are detected on the
     whitespace-stripped block so trivially different indentation does not
-    defeat dedup; the stripped form is returned so the join is clean.
+    defeat dedup, but each surviving block keeps its own leading indentation
+    (only trailing whitespace is trimmed) so indented unit slices stay valid
+    when joined into ``file_code``.
     """
     seen: set[str] = set()
     unique: List[str] = []
     for code in codes:
-        stripped = code.strip()
-        if stripped and stripped not in seen:
-            seen.add(stripped)
-            unique.append(stripped)
+        key = code.strip()
+        if key and key not in seen:
+            seen.add(key)
+            unique.append(code.rstrip())
     return unique
 
 
