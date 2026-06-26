@@ -517,7 +517,10 @@ def test_go_main_entry_reuses_existing_command_package() -> None:
         repo_info="Go web todo.",
     )
 
-    assert planner._resolve_go_command_path() == "cmd/todo/main.go"
+    # Go command-path resolution moved to the backend
+    # (``go_backend.find_existing_entry``); the planner reuses it when
+    # building the synthetic MAIN_ENTRY task.
+    assert get_backend("go").find_existing_entry(interfaces) == "cmd/todo/main.go"
     main_entry = planner._build_main_entry_task()
     assert "cmd/todo/main.go" in main_entry
     assert "cmd/demo-go-web-todo/main.go" not in main_entry
@@ -539,7 +542,10 @@ def test_go_main_entry_falls_back_when_no_command_package() -> None:
         repo_info="Go CLI.",
     )
 
-    assert planner._resolve_go_command_path() == "cmd/tasklite/main.go"
+    # No cmd/*/main.go in the skeleton → the backend reports no existing entry
+    # and the planner falls back to the canonical cmd/<module>/main.go.
+    assert get_backend("go").find_existing_entry(interfaces) is None
+    assert "cmd/tasklite/main.go" in planner._build_main_entry_task()
 
 
 def test_rust_backend_accepts_basic_declarations() -> None:
@@ -648,10 +654,13 @@ export function resolveStorePath(override?: string): string;
 def test_file_ordering_uses_imports_for_go() -> None:
     # Regression: non-Python file ordering previously degraded to the raw LLM
     # order because dependency extraction used Python AST only. Go imports must
-    # now drive the topological sort (store before its cli importer).
+    # now drive the topological sort (store before its cli importer). The
+    # backend resolves module imports through go.mod, so the module manifest
+    # is part of the ordered file set.
     from plan_tasks import correct_intra_subtree_file_order
 
     interfaces = {
+        "go.mod": {"file_code": "module tasklite\n\ngo 1.21\n"},
         "internal/store/store.go": {
             "file_code": "package store\n\ntype Store struct{}\nfunc New() *Store { return &Store{} }\n",
         },
@@ -661,14 +670,14 @@ def test_file_ordering_uses_imports_for_go() -> None:
     }
     corrected, diag = correct_intra_subtree_file_order(
         subtree_name="Core",
-        files_order=["cmd/app/cli.go", "internal/store/store.go"],
+        files_order=["cmd/app/cli.go", "internal/store/store.go", "go.mod"],
         subtree_interfaces=interfaces,
         language="go",
     )
 
-    assert corrected == ["internal/store/store.go", "cmd/app/cli.go"]
+    assert corrected == ["internal/store/store.go", "cmd/app/cli.go", "go.mod"]
     assert diag["changed"] is True
-    assert diag["reason"] == "import_toposort_by_stem"
+    assert diag["reason"] == "backend_file_dependencies"
 
 
 def test_file_ordering_keeps_python_dotted_module_path() -> None:
@@ -686,5 +695,5 @@ def test_file_ordering_keeps_python_dotted_module_path() -> None:
     )
 
     assert corrected == ["src/app/store.py", "src/app/cli.py"]
-    assert diag["reason"] == "import_toposort"
+    assert diag["reason"] == "backend_file_dependencies"
 

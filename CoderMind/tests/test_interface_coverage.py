@@ -420,7 +420,7 @@ def test_apply_fixes_add_dependency_is_language_agnostic() -> None:
     assert enhanced_data_flow["invocation_edges"][0]["callee"] == "NewStore"
 
 
-def test_apply_fixes_skips_add_interface_for_non_python() -> None:
+def test_apply_fixes_records_advisory_add_interface_for_non_python() -> None:
     reviewer = _make_reviewer("go")
     registry = GlobalInterfaceRegistry(backend=get_backend_for("go"))
     interfaces_data = {
@@ -449,11 +449,18 @@ def test_apply_fixes_skips_add_interface_for_non_python() -> None:
         rpg_features={"CLI/run"},
     )
 
-    # add_interface is skipped for non-Python and NOT counted as unapplied,
-    # so the review can still pass on structural grounds.
+    # add_interface stub synthesis is Python-only. For other languages the
+    # request is recorded as an advisory manual follow-up rather than silently
+    # dropped, so the review can still pass on structural grounds.
     assert stats["applied_fixes"] == 0
     assert stats["applied_edges"] == 0
-    assert stats["unapplied"] == []
+    assert len(stats["unapplied"]) == 1
+    advisory = stats["unapplied"][0]
+    assert advisory["action"] == "add_interface"
+    assert advisory["unit_name"] == "function Run"
+    assert advisory["advisory"] is True
+    assert advisory["manual_follow_up"] is True
+    assert advisory["unsupported_for_language"] == "go"
     # No Go stub was injected into the interface file.
     cli = interfaces_data["subtrees"]["Core"]["interfaces"]["internal/cli.go"]
     assert cli["units"] == []
