@@ -436,7 +436,9 @@ def _dynamic_c_family_syntax_command(
         + shlex.quote(
             "mapfile -d '' sources < <(find . "
             r"\( -path './.git' -o -path './.cmind' -o -path './build' "
-            r"-o -path './node_modules' -o -path './target' \) -prune "
+            r"-o -path './node_modules' -o -path './target' "
+            r"-o -path './dist' -o -path './coverage' -o -path './.venv' "
+            r"-o -path './venv' -o -path './CMakeFiles' \) -prune "
             f"-o -type f {patterns} -print0); "
             f"if (( ${{#sources[@]}} == 0 )); then echo 'No {backend.prompt_hints().display_name} source files found' >&2; exit 1; fi; "
             f"{compiler} {standard} {include_text} -Wall -Wextra -fsyntax-only \"${{sources[@]}}\""

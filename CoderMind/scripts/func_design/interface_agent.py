@@ -573,9 +573,11 @@ def _extract_name_from_node(node: ast.expr) -> Optional[str]:
 
 def _iter_calls_in_own_scope(scope_node: ast.AST) -> "Iterator[ast.Call]":
     """Yield ``Call`` nodes inside ``scope_node`` without descending into
-    nested function/class/lambda scopes, whose calls belong to them."""
+    nested ``def``/``class`` scopes, whose calls are attributed to their own
+    unit. Lambdas are not separate units, so their calls remain attributed to
+    the enclosing scope."""
     for child in ast.iter_child_nodes(scope_node):
-        if isinstance(child, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef, ast.Lambda)):
+        if isinstance(child, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
             continue
         if isinstance(child, ast.Call):
             yield child

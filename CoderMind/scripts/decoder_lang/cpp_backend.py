@@ -21,7 +21,7 @@ _PLACEHOLDER_RE = re.compile(
     r"(?is)\b(?:TODO|PLACEHOLDER|NOT IMPLEMENTED|throw\s+std::logic_error|abort\s*\()"
 )
 _COMPILE_ONLY_COMMAND_RE = re.compile(
-    r"(?m)^\s*\S*(?:c\+\+|g\+\+|clang\+\+)(?=\s).*\s-c\s"
+    r"(?m)^\s*\S*(?:c\+\+|g\+\+|clang\+\+)(?:-[\w.]+)?(?=\s).*\s-c\s"
 )
 _TEST_EXECUTION_RE = re.compile(
     r"(?im)(^|\s)(?:PASS|FAIL)(?:\s|:)|^\s*ok\b|^\s*1\.\.|"

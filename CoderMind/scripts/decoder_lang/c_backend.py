@@ -20,7 +20,7 @@ _C_IDENT_INVALID = re.compile(r"[^A-Za-z0-9_]")
 _PLACEHOLDER_RE = re.compile(
     r"(?is)\b(?:TODO|PLACEHOLDER|NOT IMPLEMENTED|abort\s*\(|assert\s*\(\s*0\s*\))"
 )
-_COMPILE_ONLY_COMMAND_RE = re.compile(r"(?m)^\s*\S*(?:cc|gcc|clang)(?=\s).*\s-c\s")
+_COMPILE_ONLY_COMMAND_RE = re.compile(r"(?m)^\s*\S*(?:cc|gcc|clang)(?:-[\w.]+)?(?=\s).*\s-c\s")
 _TEST_EXECUTION_RE = re.compile(
     r"(?im)(^|\s)(?:PASS|FAIL)(?:\s|:)|^\s*ok\b|^\s*1\.\.|"
     r"test result:|\btests? passed\b|^\s*running\s+\d+\s+tests?"
