@@ -46,7 +46,20 @@ def _serialized_feature_payload(data: dict[str, Any]) -> dict[str, Any]:
 
 
 def _serialized_feature_edges(data: dict[str, Any]) -> int:
-    return _count_serialized_items(_serialized_feature_payload(data).get("edges", []))
+    edges = _serialized_feature_payload(data).get("edges", [])
+    if isinstance(edges, list):
+        # Flat-format RPGs may include hierarchy edges; exclude them so counts
+        # match the edges actually persisted by RPG.to_dict().
+        return sum(
+            1
+            for e in edges
+            if not (
+                isinstance(e, dict)
+                and str(e.get("relation", "")).lower()
+                in ("contains", "composes", "contains_base_class")
+            )
+        )
+    return _count_serialized_items(edges)
 
 
 def _serialized_dep_graph(data: dict[str, Any]) -> dict[str, Any]:
