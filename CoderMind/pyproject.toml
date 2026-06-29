@@ -1,6 +1,6 @@
 [project]
 name = "cmind-cli"
-version = "0.1.3"
+version = "0.1.9"
 description = "CoderMind CLI - A tool to generate feature trees for repository planning and code generation."
 requires-python = ">=3.12"
 dependencies = [
