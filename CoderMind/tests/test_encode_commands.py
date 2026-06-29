@@ -111,7 +111,17 @@ class TestCheckEncode:
         cmind_data = tmp_path / ".cmind" / "data"
         cmind_data.mkdir(parents=True)
         rpg_file = cmind_data / "rpg.json"
-        rpg_file.write_text(json.dumps(_make_rpg_data(), indent=2))
+        rpg_data = _make_rpg_data()
+        rpg_data["dep_graph"] = {
+            "nodes": {
+                "main.py": {"type": "file"},
+                "main.py:hello": {"type": "function"},
+            },
+            "edges": [
+                {"src": "main.py", "dst": "main.py:hello", "attrs": {"type": "contains"}},
+            ],
+        }
+        rpg_file.write_text(json.dumps(rpg_data, indent=2))
 
         from rpg_encoder.check_encode import check_encode
         result = check_encode()
@@ -120,6 +130,8 @@ class TestCheckEncode:
         assert result["stats"]["repo_name"] == "test_repo"
         assert result["stats"]["node_count"] == 2
         assert result["stats"]["edge_count"] == 1
+        assert result["stats"]["dep_nodes"] == 2
+        assert result["stats"]["dep_edges"] == 1
 
     def test_error_state_invalid_rpg(self, tmp_path, monkeypatch):
         """When rpg.json exists but has invalid format, return type=error."""
@@ -348,6 +360,8 @@ class TestTemplates:
             content = f.read()
         assert "check_encode.py" in content
         assert "update_graphs.py update-rpg" in content
+        assert "Dependency graph Nodes: <dep_nodes> (delta: <dep_nodes_delta>)" in content
+        assert "Dependency graph Edges: <dep_edges> (delta: <dep_edges_delta>)" in content
 
 
 # ============================================================================

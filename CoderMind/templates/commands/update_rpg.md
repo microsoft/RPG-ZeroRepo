@@ -45,8 +45,9 @@ Inspect the `type` field in the JSON output:
   corrupt; the user may need to delete it and rerun `/cmind.encode`.
 * **`init`** → no `rpg.json` yet. Tell the user to run `/cmind.encode`
   first to create the baseline graph, then terminate.
-* **`update`** → display `result.stats.repo_name` / `node_count` /
-  `edge_count` and proceed to Step 2.
+* **`update`** → display `result.stats.repo_name`, Feature graph
+  `node_count` / `edge_count`, and Dependency graph `dep_nodes` /
+  `dep_edges`, then proceed to Step 2.
 
 Also verify there is at least one previous commit (the update needs
 `HEAD~1` as baseline):
@@ -80,8 +81,10 @@ not need to redirect output.
 RPG update complete!
   Repository: <repo_name>
   Previous ref: <prev_ref>
-  Nodes: <node_count> (delta: <nodes_delta>)
-  Edges: <edge_count> (delta: <edges_delta>)
+  Feature graph Nodes: <node_count> (delta: <nodes_delta>)
+  Feature graph Edges: <edge_count> (delta: <edges_delta>)
+  Dependency graph Nodes: <dep_nodes> (delta: <dep_nodes_delta>)
+  Dependency graph Edges: <dep_edges> (delta: <dep_edges_delta>)
   Aligned to dep_graph: <aligned>
   Functional areas: <functional_areas>
   Saved to: <output_path>

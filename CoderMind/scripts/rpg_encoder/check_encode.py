@@ -64,6 +64,24 @@ def load_json(path: Path) -> Dict[str, Any] | None:
     return None
 
 
+def _count_graph_items(value: Any) -> int:
+    return len(value) if isinstance(value, (list, dict)) else 0
+
+
+def _embedded_dep_graph(data: Dict[str, Any]) -> Dict[str, Any]:
+    dep_graph = data.get("dep_graph")
+    if isinstance(dep_graph, dict):
+        return dep_graph
+
+    rpg_data = data.get("rpg")
+    if isinstance(rpg_data, dict) and isinstance(rpg_data.get("structure"), dict):
+        dep_graph = rpg_data["structure"].get("dep_graph")
+        if isinstance(dep_graph, dict):
+            return dep_graph
+
+    return {}
+
+
 def get_rpg_stats(data: Dict[str, Any]) -> Dict[str, Any]:
     """Extract basic statistics from RPG JSON data."""
     stats: Dict[str, Any] = {}
@@ -71,21 +89,11 @@ def get_rpg_stats(data: Dict[str, Any]) -> Dict[str, Any]:
 
     # Count nodes
     nodes = data.get("nodes", [])
-    if isinstance(nodes, list):
-        stats["node_count"] = len(nodes)
-    elif isinstance(nodes, dict):
-        stats["node_count"] = len(nodes)
-    else:
-        stats["node_count"] = 0
+    stats["node_count"] = _count_graph_items(nodes)
 
     # Count edges
     edges = data.get("edges", [])
-    if isinstance(edges, list):
-        stats["edge_count"] = len(edges)
-    elif isinstance(edges, dict):
-        stats["edge_count"] = len(edges)
-    else:
-        stats["edge_count"] = 0
+    stats["edge_count"] = _count_graph_items(edges)
 
     # Check for nested rpg.structure format
     rpg_data = data.get("rpg", {})
@@ -94,8 +102,12 @@ def get_rpg_stats(data: Dict[str, Any]) -> Dict[str, Any]:
         if isinstance(structure, dict):
             nodes_s = structure.get("nodes", [])
             edges_s = structure.get("edges", [])
-            stats["node_count"] = len(nodes_s) if isinstance(nodes_s, (list, dict)) else 0
-            stats["edge_count"] = len(edges_s) if isinstance(edges_s, (list, dict)) else 0
+            stats["node_count"] = _count_graph_items(nodes_s)
+            stats["edge_count"] = _count_graph_items(edges_s)
+
+    dep_graph = _embedded_dep_graph(data)
+    stats["dep_nodes"] = _count_graph_items(dep_graph.get("nodes", []))
+    stats["dep_edges"] = _count_graph_items(dep_graph.get("edges", []))
 
     # Check for tree format with 'root' key (nested children structure)
     root = data.get("root")

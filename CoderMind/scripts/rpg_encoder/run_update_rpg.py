@@ -17,6 +17,7 @@ import os
 import sys
 import argparse
 from pathlib import Path
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
@@ -31,6 +32,59 @@ from common.paths import (  # noqa: E402
     WORKSPACE_ROOT,
 )
 from common.rpg_io import atomic_write_rpg  # noqa: E402
+
+
+def _count_serialized_items(value: Any) -> int:
+    return len(value) if isinstance(value, (list, dict)) else 0
+
+
+def _serialized_feature_payload(data: dict[str, Any]) -> dict[str, Any]:
+    rpg_data = data.get("rpg")
+    if isinstance(rpg_data, dict) and isinstance(rpg_data.get("structure"), dict):
+        return rpg_data["structure"]
+    return data
+
+
+def _serialized_feature_edges(data: dict[str, Any]) -> int:
+    return _count_serialized_items(_serialized_feature_payload(data).get("edges", []))
+
+
+def _serialized_dep_graph(data: dict[str, Any]) -> dict[str, Any]:
+    dep_graph = data.get("dep_graph")
+    if isinstance(dep_graph, dict):
+        return dep_graph
+    payload = _serialized_feature_payload(data)
+    dep_graph = payload.get("dep_graph")
+    return dep_graph if isinstance(dep_graph, dict) else {}
+
+
+def _serialized_dep_stats(data: dict[str, Any]) -> dict[str, int]:
+    dep_graph = _serialized_dep_graph(data)
+    return {
+        "nodes": _count_serialized_items(dep_graph.get("nodes", [])),
+        "edges": _count_serialized_items(dep_graph.get("edges", [])),
+    }
+
+
+def _serialized_dep_to_rpg_map_size(data: dict[str, Any]) -> int:
+    dep_to_rpg_map = data.get("_dep_to_rpg_map")
+    if isinstance(dep_to_rpg_map, dict):
+        return len(dep_to_rpg_map)
+
+    nodes = _serialized_dep_graph(data).get("nodes", {})
+    if isinstance(nodes, dict):
+        return sum(
+            1
+            for attrs in nodes.values()
+            if isinstance(attrs, dict) and attrs.get("rpg_nodes")
+        )
+    if isinstance(nodes, list):
+        return sum(
+            1
+            for attrs in nodes
+            if isinstance(attrs, dict) and attrs.get("rpg_nodes")
+        )
+    return 0
 
 
 def run_update_rpg(
@@ -111,7 +165,8 @@ def run_update_rpg(
         # Record pre-update stats + previous git meta so we can report
         # how the sync baseline advanced.
         pre_nodes = len(rpg.nodes)
-        pre_edges = len(rpg.edges)
+        pre_edges = _serialized_feature_edges(data)
+        pre_dep_stats = _serialized_dep_stats(data)
         pre_commit = (rpg.git_meta or {}).get("head_commit")
 
         # === Step 1: LLM-driven feature graph refactor ===
@@ -184,7 +239,8 @@ def run_update_rpg(
 
         # Collect stats
         post_nodes = len(updated_rpg.nodes)
-        post_edges = len(updated_rpg.edges)
+        post_edges = _serialized_feature_edges(result_data)
+        post_dep_stats = _serialized_dep_stats(result_data)
 
         stats = {
             "repo_name": repo_name,
@@ -194,6 +250,11 @@ def run_update_rpg(
             "edge_count": post_edges,
             "nodes_delta": post_nodes - pre_nodes,
             "edges_delta": post_edges - pre_edges,
+            "dep_nodes": post_dep_stats["nodes"],
+            "dep_edges": post_dep_stats["edges"],
+            "dep_nodes_delta": post_dep_stats["nodes"] - pre_dep_stats["nodes"],
+            "dep_edges_delta": post_dep_stats["edges"] - pre_dep_stats["edges"],
+            "dep_to_rpg_map_size": _serialized_dep_to_rpg_map_size(result_data),
             "aligned": enrich_stats.get("aligned", 0),
             "groups_pathed": enrich_stats.get("groups_pathed", 0),
             "l1_pathed": enrich_stats.get("l1_pathed", 0),

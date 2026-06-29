@@ -388,7 +388,15 @@ def test_run_update_rpg_advances_meta_git_and_runs_align(update_rpg_workspace, m
 
     # dep_graph is embedded in rpg.json (single source of truth)
     assert "dep_graph" in persisted
-    assert persisted["dep_graph"]["nodes"]
+    dep_graph = persisted["dep_graph"]
+    assert dep_graph["nodes"]
+    assert result["edge_count"] == len(persisted["edges"])
+    assert result["nodes_delta"] == 0
+    assert result["edges_delta"] == 0
+    assert result["dep_nodes"] == len(dep_graph["nodes"])
+    assert result["dep_edges"] == len(dep_graph["edges"])
+    assert result["dep_nodes_delta"] == 0
+    assert result["dep_edges_delta"] == 0
 
 
 def test_run_update_rpg_dep_graph_path_default_matches_constant(monkeypatch, tmp_path):
