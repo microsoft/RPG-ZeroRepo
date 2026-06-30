@@ -58,7 +58,19 @@ from typing import Any, Optional
 # Sub-scripts live in the same directory as this file (bundled under
 # cmind_cli/core_pack/scripts/ in the installed wheel).
 _SCRIPTS_DIR = Path(__file__).resolve().parent
+if str(_SCRIPTS_DIR) not in sys.path:
+    sys.path.insert(0, str(_SCRIPTS_DIR))
 
+from common.paths import (
+    BASE_CLASSES_FILE,
+    DATA_FLOW_FILE,
+    DATA_FLOW_VIZ_FILE,
+    INTERFACES_FILE,
+    SKELETON_FILE,
+    SKELETON_SUMMARY_FILE,
+    TASKS_FILE,
+)
+from common.run_report import write_command_report
 
 # ---------------------------------------------------------------------------
 # Stage table — single source of truth for the pipeline.
@@ -278,10 +290,7 @@ def decide(states: list[StageState], force: bool) -> None:
             state.reason = "up-to-date"
         else:
             state.will_run = True
-            if state.type == "warning":
-                state.reason = "warning: cross-stage contract violation; rebuild stage and downstream"
-            else:
-                state.reason = f"type={state.type}"
+            state.reason = f"type={state.type}"
             cascade = True
 
 
@@ -290,6 +299,88 @@ def decide(states: list[StageState], force: bool) -> None:
 # ---------------------------------------------------------------------------
 
 _GLYPH = {"update": "✓", "init": "·", "warning": "!", "error": "✗"}
+
+
+def _stage_rows(states: list[StageState]) -> list[dict[str, Any]]:
+    rows: list[dict[str, Any]] = []
+    for state in states:
+        rows.append({
+            "name": state.stage.name,
+            "status": "run" if state.will_run else "skip",
+            "type": state.type,
+            "done": state.done,
+            "reason": state.reason or state.message,
+            "message": state.message,
+        })
+    return rows
+
+
+def _plan_artifacts() -> list[dict[str, Any]]:
+    paths = {
+        "skeleton": SKELETON_FILE,
+        "skeleton_summary": SKELETON_SUMMARY_FILE,
+        "data_flow": DATA_FLOW_FILE,
+        "data_flow_viz": DATA_FLOW_VIZ_FILE,
+        "base_classes": BASE_CLASSES_FILE,
+        "interfaces": INTERFACES_FILE,
+        "tasks": TASKS_FILE,
+    }
+    return [
+        {"label": label, "path": str(path), "status": "available" if path.exists() else "missing"}
+        for label, path in paths.items()
+    ]
+
+
+def _write_plan_report(
+    states: list[StageState],
+    *,
+    mode: str,
+    elapsed: float | None = None,
+    post_steps: list[dict[str, Any]] | None = None,
+) -> str | None:
+    try:
+        done = sum(1 for s in states if s.done)
+        runnable = sum(1 for s in states if s.will_run)
+        cards = [
+            {"label": "mode", "value": mode},
+            {"label": "stages", "value": len(states)},
+            {"label": "done", "value": done},
+            {"label": "to run", "value": runnable},
+            {"label": "skipped", "value": len(states) - runnable},
+        ]
+        if elapsed is not None:
+            cards.append({"label": "elapsed", "value": f"{elapsed:.1f}s"})
+        if post_steps is not None:
+            cards.append({"label": "post steps", "value": len(post_steps)})
+        timeline = _stage_rows(states)
+        for post in post_steps or []:
+            timeline.append({
+                "name": post.get("name", "post-step"),
+                "status": "ok" if post.get("returncode") == 0 else "warning",
+                "reason": f"exit {post.get('returncode')}",
+            })
+        report_path = write_command_report(
+            "plan",
+            title="CoderMind plan Explain View",
+            status=mode,
+            summary_cards=cards,
+            stages=timeline,
+            artifacts=_plan_artifacts(),
+            verification=[
+                {"name": s.stage.name, "status": s.type, "detail": s.message or s.reason}
+                for s in states
+            ],
+            evidence={
+                "mode": mode,
+                "elapsed": elapsed,
+                "stages": _stage_rows(states),
+                "post_steps": post_steps or [],
+                "artifacts": _plan_artifacts(),
+            },
+        )
+        return str(report_path)
+    except Exception:
+        return None
 
 
 def _format_table(states: list[StageState]) -> str:
@@ -322,6 +413,7 @@ def _emit_check_only_json(states: list[StageState]) -> None:
     done = sum(1 for s in states if s.done)
     total = len(states)
     next_pending = next((s.stage.name for s in states if not s.done), None)
+    report_path = _write_plan_report(states, mode="check-only")
     payload = {
         "total": total,
         "done": done,
@@ -332,10 +424,14 @@ def _emit_check_only_json(states: list[StageState]) -> None:
                 "type": s.type,
                 "message": s.message,
                 "done": s.done,
+                "will_run": s.will_run,
+                "reason": s.reason,
             }
             for s in states
         ],
     }
+    if report_path:
+        payload["report_path"] = report_path
     print(json.dumps(payload, indent=2))
 
 
@@ -436,6 +532,9 @@ def main(argv: Optional[list[str]] = None) -> int:
             _emit_check_only_json(states)
         else:
             _print_probe_summary(states)
+            report_path = _write_plan_report(states, mode="check-only")
+            if report_path:
+                print(f"Report: {report_path}")
         return 0
 
     # --- Step: prerequisite check -----------------------------------------
@@ -521,15 +620,20 @@ def main(argv: Optional[list[str]] = None) -> int:
     # --- Step: post-pipeline helpers --------------------------------------
     print()
     print("Running post-pipeline helpers ...")
+    post_results: list[dict[str, Any]] = []
     for post in POST_STEPS:
         print(f"▶  {post}")
         rc = _run_stage(invoker, post, [])
+        post_results.append({"name": post, "returncode": rc})
         if rc != 0:
             print(f"   warning: {post} exited with {rc} (continuing)")
 
     total_elapsed = time.monotonic() - started
+    report_path = _write_plan_report(states, mode="complete", elapsed=total_elapsed, post_steps=post_results)
     print()
     print(f"Plan complete in {total_elapsed:.1f}s.")
+    if report_path:
+        print(f"Report: {report_path}")
     print("Next: `/cmind.code_gen` to generate source code.")
     print("Graph: see the 'Writing visualization to:' line above for the generated HTML path.")
     return 0

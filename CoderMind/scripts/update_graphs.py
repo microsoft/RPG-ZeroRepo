@@ -34,6 +34,7 @@ if str(SCRIPTS_DIR) not in sys.path:
 
 from common.paths import REPO_RPG_FILE, DEP_GRAPH_FILE, RPG_HTML_FILE, HOOK_CALLS_LOG  # noqa: E402
 from common.rpg_io import atomic_write_rpg, safe_load_rpg  # noqa: E402
+from common.run_report import write_command_report  # noqa: E402
 
 
 # Shared message used by every subcommand that requires an existing
@@ -77,6 +78,49 @@ def _log_hook_call(hook_type: str, result: dict) -> None:
             f.write(json.dumps(record, ensure_ascii=False) + "\n")
     except Exception:
         pass
+
+
+def _change_count(value: object) -> int:
+    if isinstance(value, int):
+        return value
+    if isinstance(value, (list, tuple, set, dict)):
+        return len(value)
+    return 0
+
+
+def _attach_update_report(result: dict) -> dict:
+    try:
+        changed_total = sum(
+            _change_count(result.get(key))
+            for key in ("modified", "added", "deleted", "renamed")
+        )
+        viz_status = result.get("viz_error") or ("ok" if result.get("viz_path") else "not recorded")
+        report_path = write_command_report(
+            "update_rpg",
+            title="CoderMind update_rpg Explain View",
+            status=result.get("mode") or result.get("status"),
+            summary_cards=[
+                {"label": "mode", "value": result.get("mode", "")},
+                {"label": "reason", "value": result.get("reason") or result.get("error", "")},
+                {"label": "changed files", "value": changed_total},
+                {"label": "RPG nodes", "value": result.get("rpg_nodes", "")},
+                {"label": "dep nodes", "value": result.get("dep_nodes", "")},
+                {"label": "dep edges", "value": result.get("dep_edges", "")},
+                {"label": "visualization", "value": result.get("viz_path") or result.get("viz_error", "")},
+            ],
+            stages=[
+                {"name": "git delta", "status": result.get("mode", ""), "reason": f"{changed_total} changed files"},
+                {"name": "sync graph", "status": result.get("status", result.get("mode", "")), "reason": result.get("reason", "")},
+                {"name": "visualize", "status": "ok" if result.get("viz_path") else "error" if result.get("viz_error") else "skipped", "reason": result.get("viz_path") or result.get("viz_error", "")},
+            ],
+            artifacts={"rpg_json": result.get("rpg_path"), "rpg_html": result.get("viz_path")},
+            verification={"update_rpg": result.get("status", result.get("mode")), "viz": viz_status},
+            evidence=result,
+        )
+        result["report_path"] = str(report_path)
+    except Exception as exc:
+        result["report_error"] = str(exc)
+    return result
 
 
 def _refresh_rpg_html(rpg_path: Path) -> dict:
@@ -364,12 +408,12 @@ def cmd_sync(
     # instead so the hook log shows exactly what's wrong and how to fix
     # it.
     if not rpg_path.is_file():
-        return {
+        return _attach_update_report({
             "mode": "sync",
             "error": _RPG_MISSING_MSG.format(rpg_path=rpg_path),
             "rpg_path": str(rpg_path),
             "duration": round(time.time() - t0, 3),
-        }
+        })
 
     svc = RPGService.load(str(rpg_path))
 
@@ -427,6 +471,7 @@ def cmd_sync(
         "viz_error": viz_result.get("viz_error"),
         "duration": round(time.time() - t0, 3),
     }
+    _attach_update_report(sync_out)
     _log_hook_call("sync", sync_out)
     return sync_out
 
@@ -458,11 +503,11 @@ def cmd_update_rpg(
     t0 = time.time()
 
     if not rpg_path.is_file():
-        return {
+        return _attach_update_report({
             "mode": "update-rpg",
             "error": _RPG_MISSING_MSG.format(rpg_path=rpg_path),
             "rpg_path": str(rpg_path),
-        }
+        })
 
     # Check git has enough history
     try:
@@ -472,10 +517,11 @@ def cmd_update_rpg(
             stderr=subprocess.DEVNULL,
         ).decode().strip()
     except (subprocess.CalledProcessError, FileNotFoundError):
-        return {
+        return _attach_update_report({
             "mode": "update-rpg",
             "error": "Need at least 2 commits for incremental update (no HEAD~1)",
-        }
+            "rpg_path": str(rpg_path),
+        })
 
     # Prune orphaned worktrees from previous runs that were killed.
     subprocess.call(
@@ -495,10 +541,12 @@ def cmd_update_rpg(
             text=True,
         )
         if wt_proc.returncode != 0:
-            return {
+            return _attach_update_report({
                 "mode": "update-rpg",
                 "error": f"git worktree add failed for {prev_ref}: {wt_proc.stderr.strip()}",
-            }
+                "rpg_path": str(rpg_path),
+                "prev_ref": prev_ref,
+            })
 
         from rpg_encoder.run_update_rpg import run_update_rpg
 
@@ -524,6 +572,7 @@ def cmd_update_rpg(
                 result["viz_error"] = viz_result["viz_error"]
 
         result["duration"] = round(time.time() - t0, 3)
+        _attach_update_report(result)
         _log_hook_call("update-rpg", result)
         return result
 

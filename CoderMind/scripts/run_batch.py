@@ -65,6 +65,7 @@ from common.paths import (
     cmd_for,
     REPO_DIR,
 )
+from common.run_report import write_command_report
 from code_gen.context_collector import build_dependency_context
 from code_gen.prompts import (
     build_test_prompt_from_batch,
@@ -923,8 +924,53 @@ def run_batch(
 # CLI
 # ============================================================================
 
+def _write_batch_report(result: Dict[str, Any]) -> Optional[str]:
+    if result.get("type") not in {"batch_complete", "batch_failed", "final_test", "complete"}:
+        return None
+    try:
+        stats = result.get("stats") or {}
+        report_path = write_command_report(
+            "code_gen",
+            title="CoderMind code_gen Batch View",
+            status=result.get("type"),
+            summary_cards=[
+                {"label": "result", "value": result.get("type", "")},
+                {"label": "success", "value": result.get("success", "")},
+                {"label": "batch", "value": result.get("batch_id", "")},
+                {"label": "attempts", "value": result.get("attempts_used", "")},
+                {"label": "duration", "value": f"{result.get('total_duration', 0):.1f}s" if "total_duration" in result else ""},
+                {"label": "completed", "value": stats.get("completed", "")},
+                {"label": "failed", "value": stats.get("failed", result.get("failed", ""))},
+            ],
+            stages=[
+                {"name": "batch", "status": result.get("type"), "reason": result.get("failure_reason") or result.get("message", "")},
+                {"name": "verification", "status": result.get("success"), "reason": f"passed={result.get('passed', '')} failed={result.get('failed', '')} errors={result.get('errors', '')}"},
+                {"name": "next_action", "status": "available" if result.get("next_action") else "missing", "reason": result.get("next_action", "")},
+            ],
+            artifacts={
+                "feature_spec": FEATURE_SPEC_FILE,
+                "tasks": TASKS_FILE,
+                "code_gen_state": STATE_FILE,
+                "rpg_json": REPO_RPG_FILE,
+            },
+            verification=[
+                {"name": "result", "status": result.get("success", result.get("type"))},
+                {"name": "pytest", "status": result.get("passed", ""), "detail": f"failed={result.get('failed', '')}, errors={result.get('errors', '')}"},
+            ],
+            evidence={"result": result},
+        )
+        return str(report_path)
+    except Exception as exc:
+        result["report_error"] = str(exc)
+        return None
+
+
 def print_result(result: Dict[str, Any], json_output: bool = False) -> None:
     """Print result to stdout and log it."""
+    report_path = _write_batch_report(result)
+    if report_path:
+        result["report_path"] = report_path
+
     # Always log the result as JSON for the file log
     logger.info("Batch result: %s", json.dumps(result, indent=2))
 
@@ -961,6 +1007,9 @@ def print_result(result: Dict[str, Any], json_output: bool = False) -> None:
 
     if "next_action" in result:
         print(f"\n   ->  {result['next_action']}")
+
+    if result.get("report_path"):
+        print(f"\n   Report: {result['report_path']}")
 
 
 def main() -> int:

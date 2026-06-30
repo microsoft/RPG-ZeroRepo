@@ -43,6 +43,7 @@ from common.paths import (  # noqa: E402
     RPG_FILE,
     REPO_DIR,
     RPG_EDIT_PLAN_FILE,
+    RPG_EDIT_CODE_RESULT_FILE,
     DATA_DIR,
     WORKSPACE_ROOT,
     cmd_for,
@@ -50,6 +51,14 @@ from common.paths import (  # noqa: E402
 from common.logging_setup import setup_file_logging  # noqa: E402
 
 logger = logging.getLogger(__name__)
+
+
+def _write_code_result(result: Dict[str, Any]) -> None:
+    RPG_EDIT_CODE_RESULT_FILE.parent.mkdir(parents=True, exist_ok=True)
+    RPG_EDIT_CODE_RESULT_FILE.write_text(
+        json.dumps(result, indent=2, ensure_ascii=False),
+        encoding="utf-8",
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -684,6 +693,7 @@ def main() -> int:
         max_iterations=args.max_iterations,
         timeout=args.timeout,
     )
+    _write_code_result(result)
 
     if args.json:
         print(json.dumps(result, indent=2, ensure_ascii=False))

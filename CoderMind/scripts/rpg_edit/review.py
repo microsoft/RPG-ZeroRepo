@@ -34,9 +34,160 @@ SCRIPTS_DIR = Path(__file__).resolve().parent.parent
 if str(SCRIPTS_DIR) not in sys.path:
     sys.path.insert(0, str(SCRIPTS_DIR))
 
-from common.paths import REPO_DIR, cmd_for, RPG_EDIT_PLAN_FILE, RPG_EDIT_IMPACT_FILE  # noqa: E402
+from common.paths import (  # noqa: E402
+    REPO_DIR,
+    cmd_for,
+    RPG_EDIT_PLAN_FILE,
+    RPG_EDIT_IMPACT_FILE,
+    RPG_EDIT_VALIDATE_FILE,
+    RPG_EDIT_LOCATE_FILE,
+    RPG_EDIT_CODE_RESULT_FILE,
+    RPG_EDIT_REVIEW_RESULT_FILE,
+)
+from common.run_report import write_command_report  # noqa: E402
 
 logger = logging.getLogger(__name__)
+
+
+def _write_review_result(result: Dict[str, Any]) -> None:
+    RPG_EDIT_REVIEW_RESULT_FILE.parent.mkdir(parents=True, exist_ok=True)
+    RPG_EDIT_REVIEW_RESULT_FILE.write_text(
+        json.dumps(result, indent=2, ensure_ascii=False),
+        encoding="utf-8",
+    )
+
+
+def _load_json_artifact(path: Optional[Path]) -> Any:
+    if path is None or not path.exists():
+        return None
+    try:
+        return json.loads(path.read_text(encoding="utf-8"))
+    except Exception as exc:
+        return {"_error": str(exc), "_path": str(path)}
+
+
+def _load_review_artifacts(plan_path: Path, impact_path: Optional[Path]) -> Dict[str, Any]:
+    return {
+        "validate": _load_json_artifact(RPG_EDIT_VALIDATE_FILE),
+        "locate": _load_json_artifact(RPG_EDIT_LOCATE_FILE),
+        "plan": _load_json_artifact(plan_path),
+        "impact": _load_json_artifact(impact_path),
+        "code_result": _load_json_artifact(RPG_EDIT_CODE_RESULT_FILE),
+    }
+
+
+def _artifact_links(plan_path: Path, impact_path: Optional[Path]) -> List[Dict[str, Any]]:
+    paths = {
+        "validate": RPG_EDIT_VALIDATE_FILE,
+        "locate": RPG_EDIT_LOCATE_FILE,
+        "plan": plan_path,
+        "impact": impact_path,
+        "code_result": RPG_EDIT_CODE_RESULT_FILE,
+        "review_result": RPG_EDIT_REVIEW_RESULT_FILE,
+    }
+    links: List[Dict[str, Any]] = []
+    for label, path in paths.items():
+        if path is None:
+            continue
+        status = "available" if path.exists() or label == "review_result" else "missing"
+        links.append({"label": label, "path": str(path), "status": status})
+    return links
+
+
+def _selected_candidate_rows(artifacts: Dict[str, Any]) -> List[Dict[str, Any]]:
+    locate = artifacts.get("locate") if isinstance(artifacts.get("locate"), dict) else {}
+    plan = artifacts.get("plan") if isinstance(artifacts.get("plan"), dict) else {}
+    affected = set(plan.get("affected_nodes") or [])
+    candidates = locate.get("results") or []
+    if affected:
+        candidates = [c for c in candidates if c.get("node_id") in affected]
+    return [c for c in candidates if isinstance(c, dict)]
+
+
+def _dep_node_rows(candidates: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    rows: List[Dict[str, Any]] = []
+    for candidate in candidates:
+        for dep_id in candidate.get("dep_nodes") or []:
+            rows.append({
+                "node_id": dep_id,
+                "source_feature": candidate.get("node_id"),
+                "path": candidate.get("meta_path"),
+            })
+    return rows
+
+
+def _review_summary_cards(result: Dict[str, Any], artifacts: Dict[str, Any]) -> List[Dict[str, Any]]:
+    plan = artifacts.get("plan") if isinstance(artifacts.get("plan"), dict) else {}
+    locate = artifacts.get("locate") if isinstance(artifacts.get("locate"), dict) else {}
+    code_result = artifacts.get("code_result") if isinstance(artifacts.get("code_result"), dict) else {}
+    return [
+        {"label": "review", "value": result.get("type", "review")},
+        {"label": "success", "value": result.get("success", result.get("type") == "skipped")},
+        {"label": "iterations", "value": len(result.get("iterations") or [])},
+        {"label": "files", "value": len(code_result.get("files_modified") or [])},
+        {"label": "candidates", "value": len(locate.get("results") or [])},
+        {"label": "affected nodes", "value": len(plan.get("affected_nodes") or [])},
+        {"label": "suggestions", "value": len(result.get("suggestions") or [])},
+    ]
+
+
+def _review_timeline(result: Dict[str, Any], artifacts: Dict[str, Any]) -> List[Dict[str, Any]]:
+    validate = artifacts.get("validate") if isinstance(artifacts.get("validate"), dict) else None
+    locate = artifacts.get("locate") if isinstance(artifacts.get("locate"), dict) else None
+    plan = artifacts.get("plan") if isinstance(artifacts.get("plan"), dict) else None
+    impact = artifacts.get("impact") if isinstance(artifacts.get("impact"), dict) else None
+    code_result = artifacts.get("code_result") if isinstance(artifacts.get("code_result"), dict) else None
+    return [
+        {"name": "validate", "status": validate.get("type") if validate else "missing", "reason": validate.get("message", "") if validate else "artifact not found"},
+        {"name": "locate", "status": locate.get("type") if locate else "missing", "reason": f"{len(locate.get('results') or [])} candidates" if locate else "artifact not found"},
+        {"name": "plan", "status": "available" if plan else "missing", "reason": f"{len(plan.get('code_changes') or [])} code changes" if plan else "artifact not found"},
+        {"name": "impact", "status": impact.get("type", "available") if impact else "missing", "reason": f"{len((impact.get('results') or {}))} impact result sets" if impact else "artifact not found"},
+        {"name": "code", "status": code_result.get("last_status") if code_result else "missing", "reason": code_result.get("last_error") or f"success={code_result.get('success')}" if code_result else "artifact not found"},
+        {"name": "review", "status": result.get("type"), "reason": result.get("reason") or f"success={result.get('success')}"},
+    ]
+
+
+def _review_verification(result: Dict[str, Any], artifacts: Dict[str, Any]) -> List[Dict[str, Any]]:
+    checks: List[Dict[str, Any]] = []
+    validate = artifacts.get("validate") if isinstance(artifacts.get("validate"), dict) else None
+    code_result = artifacts.get("code_result") if isinstance(artifacts.get("code_result"), dict) else None
+    if validate:
+        checks.append({"name": "validate", "status": validate.get("type"), "detail": validate.get("message", "")})
+    if code_result:
+        checks.append({"name": "code", "status": code_result.get("success"), "detail": code_result.get("last_error") or code_result.get("last_status")})
+    checks.append({"name": "review", "status": result.get("success", result.get("type") == "skipped"), "detail": result.get("reason") or result.get("type")})
+    for iteration in result.get("iterations") or []:
+        checks.append({
+            "name": f"review iteration {iteration.get('iteration')}",
+            "status": iteration.get("post_pytest_passed"),
+            "detail": iteration.get("agent_detail", ""),
+        })
+    return checks
+
+
+def _publish_review_report(result: Dict[str, Any], plan_path: Path, impact_path: Optional[Path]) -> Dict[str, Any]:
+    _write_review_result(result)
+    artifacts = _load_review_artifacts(plan_path, impact_path)
+    candidates = _selected_candidate_rows(artifacts)
+    try:
+        report_path = write_command_report(
+            "rpg_edit",
+            title="CoderMind rpg_edit Explain View",
+            status=str(result.get("type", "review")),
+            summary_cards=_review_summary_cards(result, artifacts),
+            stages=_review_timeline(result, artifacts),
+            rpg_nodes=candidates,
+            dep_nodes=_dep_node_rows(candidates),
+            artifacts=_artifact_links(plan_path, impact_path),
+            verification=_review_verification(result, artifacts),
+            evidence={"artifacts": artifacts, "review_result": result},
+        )
+        result["report_path"] = str(report_path)
+    except Exception as exc:
+        result["report_error"] = str(exc)
+    _write_review_result(result)
+    return result
+
 
 # ---------------------------------------------------------------------------
 # Review prompt template
@@ -546,7 +697,7 @@ def impact_review(
                 all_suggestions.append(s)
     if all_suggestions:
         results["suggestions"] = all_suggestions
-    return results
+    return _publish_review_report(results, plan_path, impact_path)
 
 
 # ---------------------------------------------------------------------------
@@ -583,6 +734,7 @@ def main():
 
     if not args.plan.exists():
         result = {"type": "error", "message": f"Plan not found: {args.plan}"}
+        result = _publish_review_report(result, args.plan, args.impact)
         print(json.dumps(result) if args.json else f"Error: {result['message']}")
         return 1
 
@@ -599,12 +751,14 @@ def main():
         if total_callers == 0 and affected_files <= 1:
             result = {
                 "type": "skipped",
+                "success": True,
                 "reason": f"Impact too small for sub-agent review "
                           f"(callers={total_callers}, files={affected_files}). "
                           f"Agent self-review is sufficient.",
             }
+            result = _publish_review_report(result, args.plan, args.impact)
             print(json.dumps(result, indent=2) if args.json else
-                  f"Skipped: {result['reason']}")
+                  f"Skipped: {result['reason']}\nReport: {result.get('report_path', '')}")
             return 0
 
     result = impact_review(
@@ -615,10 +769,16 @@ def main():
         timeout=args.timeout,
     )
 
-    print(json.dumps(result, indent=2) if args.json else
-          f"Review {'PASSED' if result['success'] else 'FAILED'} "
-          f"({len(result['iterations'])} iterations, "
-          f"{result['total_duration']:.1f}s)")
+    if args.json:
+        print(json.dumps(result, indent=2))
+    else:
+        print(
+            f"Review {'PASSED' if result['success'] else 'FAILED'} "
+            f"({len(result['iterations'])} iterations, "
+            f"{result['total_duration']:.1f}s)"
+        )
+        if result.get("report_path"):
+            print(f"Report: {result['report_path']}")
     return 0 if result["success"] else 1
 
 
