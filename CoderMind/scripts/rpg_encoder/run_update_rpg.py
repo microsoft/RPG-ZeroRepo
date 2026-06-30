@@ -228,8 +228,7 @@ def run_update_rpg(
         # to a full rebuild (rebase / diverged path).
         meta_git_advanced = False
         try:
-            ws_root = WORKSPACE_ROOT
-            current = read_head(ws_root)
+            current = read_head(cur_repo_dir)
             if current:
                 updated_rpg.set_git_meta(
                     head_commit=current["head_commit"],

@@ -548,11 +548,15 @@ def cmd_update_rpg(
                 "prev_ref": prev_ref,
             })
 
+        from common.git_utils import git_workspace_prefix
         from rpg_encoder.run_update_rpg import run_update_rpg
+
+        git_prefix = git_workspace_prefix(workspace_root)
+        last_repo_dir = os.path.join(worktree_dir, git_prefix) if git_prefix else worktree_dir
 
         result = run_update_rpg(
             rpg_file=str(rpg_path),
-            last_repo_dir=worktree_dir,
+            last_repo_dir=last_repo_dir,
             cur_repo_dir=workspace_root,
             dep_graph_path=str(dep_graph_path),
         )

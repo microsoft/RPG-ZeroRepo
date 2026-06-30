@@ -565,6 +565,34 @@ def read_head(repo_dir: str | Path) -> Optional[dict]:
     }
 
 
+def git_workspace_prefix(workspace_dir: str | Path) -> str:
+    """Return the path from the git root to ``workspace_dir``.
+
+    Returns ``""`` when ``workspace_dir`` is the git root or when git metadata
+    cannot be read. This keeps callers safe outside git repositories.
+    """
+    if not workspace_dir:
+        return ""
+    workspace_path = Path(workspace_dir)
+    if not workspace_path.is_dir():
+        return ""
+
+    git_root = _run_git_readonly(
+        ["rev-parse", "--show-toplevel"],
+        workspace_path,
+    )
+    if not git_root:
+        return ""
+
+    try:
+        rel = workspace_path.resolve().relative_to(Path(git_root).resolve())
+    except ValueError:
+        return ""
+
+    rel_str = rel.as_posix()
+    return "" if rel_str == "." else rel_str
+
+
 # ---------------------------------------------------------------------------
 # Diff helpers — produce ``(modified, renames)`` from various git scopes.
 # ---------------------------------------------------------------------------
@@ -669,14 +697,14 @@ def staged_changes(
     if not repo_path.is_dir():
         return [], {}
     raw = _run_git_readonly(
-        ["diff", "--cached", "--name-status", "-M", "HEAD"],
+        ["diff", "--cached", "--relative", "--name-status", "-M", "HEAD"],
         repo_path,
     )
     if raw is None:
         # ``HEAD`` may not exist yet (unborn branch); try without it so
         # the very first commit's staged files still get picked up.
         raw = _run_git_readonly(
-            ["diff", "--cached", "--name-status", "-M"],
+            ["diff", "--cached", "--relative", "--name-status", "-M"],
             repo_path,
         )
     return _parse_name_status(raw)
@@ -706,7 +734,7 @@ def working_tree_changes(
         return [], {}
 
     raw = _run_git_readonly(
-        ["diff", "--name-status", "-M", "HEAD"],
+        ["diff", "--relative", "--name-status", "-M", "HEAD"],
         repo_path,
     )
     modified, renames = _parse_name_status(raw)
@@ -749,7 +777,7 @@ def changed_files_between(
     if not repo_path.is_dir():
         return [], {}
     raw = _run_git_readonly(
-        ["diff", "--name-status", "-M", f"{old_ref}..{new_ref}"],
+        ["diff", "--relative", "--name-status", "-M", f"{old_ref}..{new_ref}"],
         repo_path,
     )
     return _parse_name_status(raw)

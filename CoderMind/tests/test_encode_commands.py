@@ -273,6 +273,57 @@ class TestRunUpdateRpg:
         assert result["status"] == "error"
         assert "not found" in result["error"]
 
+    def test_meta_git_reads_explicit_cur_repo_dir(self, tmp_path):
+        from rpg_encoder.run_update_rpg import run_update_rpg
+
+        last_repo = tmp_path / "last"
+        cur_repo = tmp_path / "current"
+        last_repo.mkdir()
+        cur_repo.mkdir()
+        rpg_file = tmp_path / "rpg.json"
+        rpg_file.write_text(json.dumps({
+            "repo_name": "test_repo",
+            "repo_info": "",
+            "root": {
+                "id": "test_repo_L0",
+                "name": "test_repo",
+                "node_type": "repo",
+                "level": 0,
+                "meta": {"type_name": "directory", "path": "."},
+                "children": [],
+            },
+            "edges": [],
+        }))
+
+        calls = []
+
+        def fake_read_head(repo_dir):
+            calls.append(Path(repo_dir))
+            return {
+                "head_commit": "a" * 40,
+                "head_short": "aaaaaaa",
+                "head_branch": "main",
+                "head_timestamp": "2026-06-30T00:00:00+00:00",
+            }
+
+        with patch(
+            "rpg_encoder.rpg_evolution.RPGEvolution.process_diff",
+            side_effect=lambda **kwargs: kwargs["last_rpg"],
+        ), patch(
+            "rpg.service.RPGService.enrich_from_code",
+            return_value={},
+        ), patch("common.git_utils.read_head", side_effect=fake_read_head):
+            result = run_update_rpg(
+                rpg_file=str(rpg_file),
+                last_repo_dir=str(last_repo),
+                cur_repo_dir=str(cur_repo),
+            )
+
+        assert result["status"] == "success"
+        assert result["meta_git_advanced"] is True
+        assert result["new_commit"] == "a" * 40
+        assert calls == [cur_repo.resolve()]
+
     def test_missing_last_repo_dir(self, tmp_rpg_file):
         """Should return error when last repo dir doesn't exist."""
         from rpg_encoder.run_update_rpg import run_update_rpg
