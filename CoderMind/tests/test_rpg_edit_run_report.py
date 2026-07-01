@@ -86,6 +86,7 @@ def test_review_publish_report_returns_report_path(tmp_path: Path, monkeypatch) 
     plan_path = tmp_path / "plan.json"
     impact_path = tmp_path / "impact.json"
     code_path = tmp_path / "code.json"
+    apply_path = tmp_path / "apply.json"
     review_path = tmp_path / "review.json"
     report_path = tmp_path / "report.html"
     rpg_path = tmp_path / "rpg.json"
@@ -111,6 +112,27 @@ def test_review_publish_report_returns_report_path(tmp_path: Path, monkeypatch) 
         encoding="utf-8",
     )
     code_path.write_text(json.dumps({"success": True, "commit_sha": "abc123", "files_modified": ["a.py"], "last_status": "complete"}), encoding="utf-8")
+    backup_path = tmp_path / "rpg.before-edit-123.json"
+    apply_path.write_text(
+        json.dumps({
+            "type": "success",
+            "backup_timestamp": "123",
+            "backups": {"rpg": str(backup_path)},
+            "applied_features": [{"node_id": "n1", "action": "modified"}],
+            "dep_graph_refreshed": True,
+            "rollback_path": str(backup_path),
+            "rollback_command": "cmind script rpg_edit/apply.py --rollback 123",
+            "before_state": {
+                "head_commit": "before123",
+                "head_short": "before1",
+                "head_branch": "rpg-edit/test",
+                "head_timestamp": "2026-06-30T12:00:00+00:00",
+            },
+            "confirmed": True,
+            "test_result": {"passed": True, "output": ""},
+        }),
+        encoding="utf-8",
+    )
     rpg_path.write_text(
         json.dumps({
             "repo_name": "test",
@@ -129,6 +151,7 @@ def test_review_publish_report_returns_report_path(tmp_path: Path, monkeypatch) 
     monkeypatch.setattr(review, "RPG_EDIT_LOCATE_FILE", locate_path)
     monkeypatch.setattr(review, "RPG_EDIT_IMPACT_FILE", impact_path)
     monkeypatch.setattr(review, "RPG_EDIT_CODE_RESULT_FILE", code_path)
+    monkeypatch.setattr(review, "RPG_EDIT_APPLY_RESULT_FILE", apply_path)
     monkeypatch.setattr(review, "RPG_EDIT_REVIEW_RESULT_FILE", review_path)
     monkeypatch.setattr(review, "REPO_RPG_FILE", rpg_path)
     monkeypatch.setattr(review, "REPORTS_DIR", tmp_path)
@@ -140,13 +163,35 @@ def test_review_publish_report_returns_report_path(tmp_path: Path, monkeypatch) 
         return [{"file": "a.py", "change_type": "modify", "diff": "+new <unsafe>"}]
 
     monkeypatch.setattr(review, "file_diffs_between", fake_file_diffs_between)
+    monkeypatch.setattr(
+        review,
+        "read_head",
+        lambda repo_dir: {
+            "head_commit": "current123",
+            "head_short": "current",
+            "head_branch": "current-branch",
+            "head_timestamp": "2026-06-30T12:30:00+00:00",
+        },
+    )
 
     def fake_write_command_report(run):
         data = run.to_dict()
         review_artifact = next(
             item for item in data["artifacts"] if item["label"] == "review_result"
         )
+        apply_artifact = next(
+            item for item in data["artifacts"] if item["label"] == "apply_result"
+        )
         assert review_artifact["status"] == "available"
+        assert apply_artifact["status"] == "available"
+        decision = data["user_decisions"][0]
+        assert decision["decision"] == "apply"
+        assert decision["branch"] == "rpg-edit/test"
+        assert decision["before_state"]["head_commit"] == "before123"
+        assert decision["rollback_path"] == str(backup_path)
+        assert decision["confirmed"] is True
+        assert decision["apply_status"] == "success"
+        assert decision["test_status"] == "passed"
         assert data["retrievals"][0]["tool"] == str(locate_path)
         assert data["retrievals"][0]["query"] == "a.py"
         assert "locate score=1.0" in data["retrievals"][0]["hits"][0]["reason"]
@@ -177,6 +222,7 @@ def test_review_report_reconstructs_affected_node_evidence_from_impact(tmp_path:
     plan_path = tmp_path / "plan.json"
     impact_path = tmp_path / "impact.json"
     code_path = tmp_path / "code.json"
+    apply_path = tmp_path / "apply.json"
     review_path = tmp_path / "review.json"
     report_path = tmp_path / "report.html"
     dep_id = "scripts/common/run_report.py:_render_artifacts"
@@ -189,16 +235,48 @@ def test_review_report_reconstructs_affected_node_evidence_from_impact(tmp_path:
         encoding="utf-8",
     )
     code_path.write_text(json.dumps({"success": True, "files_modified": ["scripts/common/run_report.py"], "last_status": "complete"}), encoding="utf-8")
+    apply_path.write_text(
+        json.dumps({
+            "type": "dep_refreshed",
+            "backup_timestamp": "456",
+            "backups": {"dep_graph": str(tmp_path / "dep_graph.before-edit-456.json")},
+            "applied_features": [],
+            "dep_graph_refreshed": True,
+            "rollback_command": "cmind script rpg_edit/apply.py --rollback 456",
+            "test_result": {"passed": False, "output": "failing test"},
+        }),
+        encoding="utf-8",
+    )
 
     monkeypatch.setattr(review, "RPG_EDIT_VALIDATE_FILE", validate_path)
     monkeypatch.setattr(review, "RPG_EDIT_LOCATE_FILE", locate_path)
     monkeypatch.setattr(review, "RPG_EDIT_IMPACT_FILE", impact_path)
     monkeypatch.setattr(review, "RPG_EDIT_CODE_RESULT_FILE", code_path)
+    monkeypatch.setattr(review, "RPG_EDIT_APPLY_RESULT_FILE", apply_path)
     monkeypatch.setattr(review, "RPG_EDIT_REVIEW_RESULT_FILE", review_path)
     monkeypatch.setattr(review, "_focused_graph_artifact", lambda candidates, artifacts: {})
+    monkeypatch.setattr(
+        review,
+        "read_head",
+        lambda repo_dir: {
+            "head_commit": "current456",
+            "head_short": "current",
+            "head_branch": "fallback-branch",
+            "head_timestamp": "2026-06-30T13:00:00+00:00",
+        },
+    )
 
     def fake_write_command_report(run):
         data = run.to_dict()
+        decision = data["user_decisions"][0]
+        assert decision["decision"] == "apply"
+        assert decision["branch"] == "fallback-branch"
+        assert decision["before_state"]["head_commit"] == "current456"
+        assert "confirmed" not in decision
+        assert decision["apply_status"] == "dep_refreshed"
+        assert decision["test_status"] == "failed"
+        assert decision["rollback_path"].endswith("dep_graph.before-edit-456.json")
+        assert any(item["label"] == "apply_result" for item in data["artifacts"])
         assert data["rpg_deltas"] == [{"node_id": "planned", "name": "Planned Node"}]
         assert data["dep_graph_deltas"] == [
             {"dep_node_id": dep_id, "path": "scripts/common/run_report.py", "source_feature": "planned"}

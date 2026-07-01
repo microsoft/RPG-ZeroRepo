@@ -37,6 +37,17 @@ def test_write_command_report_escapes_content_and_writes_sections(tmp_path: Path
             dep_graph_deltas=[DepGraphDeltaEvent(dep_node_id="a.py:f", path="a.py")],
             artifacts=[ArtifactEvent(label="plan", path=tmp_path / "plan.json")],
             verification=[VerificationEvent(name="pytest", status="passed")],
+            user_decisions=[
+                UserDecisionEvent(
+                    decision="apply <unsafe>",
+                    branch="rpg-edit/<branch>",
+                    before_state={"head_branch": "<main>", "head_commit": "abc<script>"},
+                    rollback_path="backup/<script>",
+                    confirmed=True,
+                    apply_status="success <ok>",
+                    test_status="passed <ok>",
+                )
+            ],
             evidence={"raw": "<script>evil()</script>"},
             timestamp="2026-06-30T12:34:56Z",
         ),
@@ -48,10 +59,24 @@ def test_write_command_report_escapes_content_and_writes_sections(tmp_path: Path
     html = report.read_text(encoding="utf-8")
     assert "Summary" in html
     assert "Stage timeline" in html
+    assert "Safety boundary" in html
     assert "Artifact links" in html
     assert "Evidence JSON" in html
+    assert "Before state" in html
+    assert "Confirmation" in html
+    assert "Branch" in html
+    assert "Apply status" in html
+    assert "Test status" in html
+    assert "Rollback path" in html
+    assert "apply &lt;unsafe&gt;" in html
+    assert "rpg-edit/&lt;branch&gt;" in html
+    assert "abc&lt;script&gt;" in html
+    assert "backup/&lt;script&gt;" in html
+    assert "success &lt;ok&gt;" in html
+    assert "passed &lt;ok&gt;" in html
     assert "&lt;script&gt;evil()&lt;/script&gt;" in html
     assert "<script>alert(1)</script>" not in html
+    assert "backup/<script>" not in html
 
 
 def test_write_command_report_renders_retrievals_code_deltas_and_focused_graph(tmp_path: Path) -> None:
@@ -190,7 +215,15 @@ def test_all_event_types_serialize_with_optional_fields(tmp_path: Path) -> None:
         DepGraphDeltaEvent(dep_node_id="a.py:f", path="a.py", source_feature="feature", change="modified"),
         CodeDeltaEvent(file="a.py", change_type="modify", before="old", after="new", diff="@@"),
         VerificationEvent(),
-        UserDecisionEvent(decision="apply", branch="rpg-edit/x", before_state={"clean": True}, rollback_path="backup", confirmed=True),
+        UserDecisionEvent(
+            decision="apply",
+            branch="rpg-edit/x",
+            before_state={"clean": True},
+            rollback_path="backup",
+            confirmed=True,
+            apply_status="success",
+            test_status="passed",
+        ),
         ArtifactEvent(label="artifact", path=available),
     ]
 
@@ -210,6 +243,8 @@ def test_all_event_types_serialize_with_optional_fields(tmp_path: Path) -> None:
     assert run["retrievals"][0]["tool"] == "grep"
     assert run["code_deltas"][0]["file"] == "a.py"
     assert run["user_decisions"][0]["confirmed"] is True
+    assert run["user_decisions"][0]["apply_status"] == "success"
+    assert run["user_decisions"][0]["test_status"] == "passed"
     assert run["artifacts"][0]["status"] == "available"
 
 

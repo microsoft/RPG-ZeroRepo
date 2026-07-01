@@ -44,6 +44,7 @@ from common.paths import (  # noqa: E402
     RPG_EDIT_VALIDATE_FILE,
     RPG_EDIT_LOCATE_FILE,
     RPG_EDIT_CODE_RESULT_FILE,
+    RPG_EDIT_APPLY_RESULT_FILE,
     RPG_EDIT_REVIEW_RESULT_FILE,
 )
 from common.run_events import (  # noqa: E402
@@ -54,9 +55,10 @@ from common.run_events import (  # noqa: E402
     RPGDeltaEvent,
     RetrievalEvent,
     StepEvent,
+    UserDecisionEvent,
     VerificationEvent,
 )
-from common.git_utils import file_diffs_between  # noqa: E402
+from common.git_utils import file_diffs_between, read_head  # noqa: E402
 from common.run_report import write_command_report  # noqa: E402
 
 logger = logging.getLogger(__name__)
@@ -86,6 +88,7 @@ def _load_review_artifacts(plan_path: Path, impact_path: Optional[Path]) -> Dict
         "plan": _load_json_artifact(plan_path),
         "impact": _load_json_artifact(impact_path),
         "code_result": _load_json_artifact(RPG_EDIT_CODE_RESULT_FILE),
+        "apply_result": _load_json_artifact(RPG_EDIT_APPLY_RESULT_FILE),
     }
 
 
@@ -96,6 +99,7 @@ def _artifact_links(plan_path: Path, impact_path: Optional[Path]) -> List[Dict[s
         "plan": plan_path,
         "impact": impact_path,
         "code_result": RPG_EDIT_CODE_RESULT_FILE,
+        "apply_result": RPG_EDIT_APPLY_RESULT_FILE,
         "review_result": RPG_EDIT_REVIEW_RESULT_FILE,
     }
     links: List[Dict[str, Any]] = []
@@ -339,6 +343,60 @@ def _review_verification(result: Dict[str, Any], artifacts: Dict[str, Any]) -> L
     return checks
 
 
+def _status_from_bool(value: Any) -> Optional[str]:
+    if value is True:
+        return "passed"
+    if value is False:
+        return "failed"
+    return None
+
+
+def _apply_status(apply_result: Dict[str, Any]) -> Any:
+    return apply_result.get("type") or apply_result.get("status") or "missing"
+
+
+def _test_status(result: Dict[str, Any], code_result: Dict[str, Any], apply_result: Dict[str, Any]) -> Any:
+    test_result = apply_result.get("test_result") if isinstance(apply_result.get("test_result"), dict) else {}
+    status = _status_from_bool(test_result.get("passed"))
+    if status:
+        return status
+    for iteration in reversed(result.get("iterations") or []):
+        if isinstance(iteration, dict):
+            status = _status_from_bool(iteration.get("post_pytest_passed"))
+            if status:
+                return status
+    if code_result.get("last_status"):
+        return code_result.get("last_status")
+    return _status_from_bool(result.get("success"))
+
+
+def _rollback_path(apply_result: Dict[str, Any]) -> Any:
+    if apply_result.get("rollback_path"):
+        return apply_result.get("rollback_path")
+    backups = apply_result.get("backups") if isinstance(apply_result.get("backups"), dict) else {}
+    return backups.get("rpg") or backups.get("dep_graph") or apply_result.get("rollback_command")
+
+
+def _user_decision(result: Dict[str, Any], artifacts: Dict[str, Any]) -> UserDecisionEvent:
+    apply_result = artifacts.get("apply_result") if isinstance(artifacts.get("apply_result"), dict) else {}
+    code_result = artifacts.get("code_result") if isinstance(artifacts.get("code_result"), dict) else {}
+    current_head = read_head(REPO_DIR)
+    before_state = apply_result.get("before_state") if apply_result.get("before_state") else current_head
+    branch = before_state.get("head_branch") if isinstance(before_state, dict) else None
+    if not branch and isinstance(current_head, dict):
+        branch = current_head.get("head_branch")
+    confirmed = apply_result.get("confirmed") if "confirmed" in apply_result else None
+    return UserDecisionEvent(
+        decision="apply",
+        branch=branch,
+        before_state=before_state,
+        rollback_path=_rollback_path(apply_result),
+        confirmed=confirmed,
+        apply_status=_apply_status(apply_result),
+        test_status=_test_status(result, code_result, apply_result),
+    )
+
+
 class _ReportPayload:
     def __init__(self, run: CommandRun, focused_graph: Dict[str, Any]):
         self.run = run
@@ -414,6 +472,7 @@ def _publish_review_report(result: Dict[str, Any], plan_path: Path, impact_path:
                 VerificationEvent(name=row.get("name", "verification"), status=row.get("status"), detail=row.get("detail"))
                 for row in _review_verification(result, artifacts)
             ],
+            user_decisions=[_user_decision(result, artifacts)],
             evidence=evidence,
         )
         report_path = write_command_report(_ReportPayload(report_run, focused_graph))

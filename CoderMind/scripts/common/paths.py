@@ -304,6 +304,7 @@ RPG_EDIT_IMPACT_FILE = DATA_DIR / "rpg_edit_impact.json"
 RPG_EDIT_VALIDATE_FILE = DATA_DIR / "rpg_edit_validate.json"
 RPG_EDIT_LOCATE_FILE = DATA_DIR / "rpg_edit_locate.json"
 RPG_EDIT_CODE_RESULT_FILE = DATA_DIR / "rpg_edit_code_result.json"
+RPG_EDIT_APPLY_RESULT_FILE = DATA_DIR / "rpg_edit_apply_result.json"
 RPG_EDIT_REVIEW_RESULT_FILE = DATA_DIR / "rpg_edit_review_result.json"
 
 
