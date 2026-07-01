@@ -227,6 +227,190 @@ def build_dep_tree(data: dict) -> dict:
             "children": [to_tree(r) for r in sorted(roots)]}
 
 
+def _id_set(values) -> set:
+    if values is None:
+        return set()
+    if isinstance(values, (str, bytes)):
+        values = [values]
+    return {str(value) for value in values if value not in (None, "")}
+
+
+def _collect_tree_ids(node: dict) -> set:
+    ids = set()
+    node_id = node.get("id")
+    if node_id not in (None, ""):
+        ids.add(str(node_id))
+    for child in node.get("children", []) or []:
+        ids.update(_collect_tree_ids(child))
+    return ids
+
+
+def _filter_tree(node: dict, keep_ids: set, *, keep_root: bool = True) -> dict | None:
+    children = [
+        child
+        for child in (_filter_tree(child, keep_ids, keep_root=False) for child in node.get("children", []) or [])
+        if child is not None
+    ]
+    node_id = str(node.get("id", ""))
+    if keep_root or node_id in keep_ids or children:
+        filtered = dict(node)
+        filtered["children"] = children
+        return filtered
+    return None
+
+
+def _expand_rpg_focus(data: dict, rpg_ids: set, dep_ids: set, include_neighbors: bool) -> set:
+    focus = set(rpg_ids)
+    dep_to_rpg = data.get("_dep_to_rpg_map", {}) if isinstance(data.get("_dep_to_rpg_map"), dict) else {}
+    for dep_id, mapped_rpg_ids in dep_to_rpg.items():
+        mapped = _id_set(mapped_rpg_ids)
+        if dep_id in dep_ids:
+            focus.update(mapped)
+        if focus.intersection(mapped):
+            dep_ids.add(str(dep_id))
+
+    if include_neighbors:
+        for edge in get_semantic_edges(data):
+            src = str(edge.get("src", ""))
+            dst = str(edge.get("dst", ""))
+            if src in focus or dst in focus:
+                focus.update([src, dst])
+    return focus
+
+
+def _dep_parent_map(dep_graph: dict) -> Dict[str, str]:
+    parent: Dict[str, str] = {}
+    for edge in dep_graph.get("edges", []) or []:
+        if edge.get("attrs", {}).get("type", "") in ("contains", "CONTAINS"):
+            parent[str(edge.get("dst", ""))] = str(edge.get("src", ""))
+    return {child: par for child, par in parent.items() if child and par}
+
+
+def _expand_dep_focus(data: dict, rpg_ids: set, dep_ids: set, include_neighbors: bool) -> set:
+    dep_graph = data.get("dep_graph", {}) if isinstance(data.get("dep_graph"), dict) else {}
+    raw_nodes = dep_graph.get("nodes", {}) if isinstance(dep_graph.get("nodes"), dict) else {}
+    focus = set(dep_ids)
+    dep_to_rpg = data.get("_dep_to_rpg_map", {}) if isinstance(data.get("_dep_to_rpg_map"), dict) else {}
+    for dep_id, mapped_rpg_ids in dep_to_rpg.items():
+        if rpg_ids.intersection(_id_set(mapped_rpg_ids)):
+            focus.add(str(dep_id))
+    for dep_id, attrs in raw_nodes.items():
+        if not isinstance(attrs, dict):
+            continue
+        mapped = _id_set(attrs.get("rpg_nodes"))
+        if mapped.intersection(rpg_ids):
+            focus.add(str(dep_id))
+        if str(dep_id) in focus:
+            rpg_ids.update(mapped)
+
+    if include_neighbors:
+        for edge in dep_graph.get("edges", []) or []:
+            edge_type = edge.get("attrs", {}).get("type", "")
+            if edge_type in ("contains", "CONTAINS"):
+                continue
+            src = str(edge.get("src", ""))
+            dst = str(edge.get("dst", ""))
+            if src in focus or dst in focus:
+                focus.update([src, dst])
+
+    parent = _dep_parent_map(dep_graph)
+    for dep_id in list(focus):
+        cur = dep_id
+        while cur in parent:
+            cur = parent[cur]
+            focus.add(cur)
+    for dep_id in list(focus):
+        attrs = raw_nodes.get(dep_id)
+        if isinstance(attrs, dict):
+            rpg_ids.update(_id_set(attrs.get("rpg_nodes")))
+        rpg_ids.update(_id_set(dep_to_rpg.get(dep_id)))
+    return focus
+
+
+def build_focused_graph_data(
+    data: dict,
+    *,
+    rpg_node_ids: List[str] | None = None,
+    dep_node_ids: List[str] | None = None,
+    include_neighbors: bool = True,
+) -> dict:
+    selected_rpg = _id_set(rpg_node_ids)
+    selected_dep = _id_set(dep_node_ids)
+    if not selected_rpg and not selected_dep:
+        return dict(data)
+
+    rpg_focus = _expand_rpg_focus(data, set(selected_rpg), set(selected_dep), include_neighbors)
+    dep_focus = _expand_dep_focus(data, rpg_focus, set(selected_dep), include_neighbors)
+    rpg_focus = _expand_rpg_focus(data, rpg_focus, dep_focus, include_neighbors=False)
+
+    tree = normalize_to_tree(data)
+    filtered_tree = _filter_tree(tree, rpg_focus) or {"id": "__root__", "name": "Focused graph", "children": []}
+    tree_ids = _collect_tree_ids(filtered_tree)
+    matched_rpg = sorted(selected_rpg.intersection(tree_ids))
+
+    semantic_edges = [
+        edge for edge in get_semantic_edges(data)
+        if str(edge.get("src", "")) in tree_ids and str(edge.get("dst", "")) in tree_ids
+    ]
+
+    dep_graph = data.get("dep_graph", {}) if isinstance(data.get("dep_graph"), dict) else {}
+    raw_nodes = dep_graph.get("nodes", {}) if isinstance(dep_graph.get("nodes"), dict) else {}
+    raw_edges = dep_graph.get("edges", []) if isinstance(dep_graph.get("edges"), list) else []
+    filtered_dep_nodes = {dep_id: attrs for dep_id, attrs in raw_nodes.items() if str(dep_id) in dep_focus}
+    filtered_dep_edges = [
+        edge for edge in raw_edges
+        if str(edge.get("src", "")) in dep_focus and str(edge.get("dst", "")) in dep_focus
+    ]
+    dep_ids = {str(dep_id) for dep_id in filtered_dep_nodes}
+    matched_dep = sorted(selected_dep.intersection(dep_ids))
+
+    dep_to_rpg = data.get("_dep_to_rpg_map", {}) if isinstance(data.get("_dep_to_rpg_map"), dict) else {}
+    filtered_map = {}
+    for dep_id, mapped_rpg_ids in dep_to_rpg.items():
+        if str(dep_id) not in dep_ids:
+            continue
+        mapped = [str(rpg_id) for rpg_id in mapped_rpg_ids if str(rpg_id) in tree_ids]
+        if mapped:
+            filtered_map[str(dep_id)] = mapped
+
+    focused = dict(data)
+    if isinstance(data.get("nodes"), list):
+        focused["nodes"] = [
+            dict(node) for node in data["nodes"]
+            if isinstance(node, dict) and str(node.get("id", "")) in tree_ids
+        ]
+    focused["root"] = filtered_tree
+    focused["edges"] = semantic_edges
+    focused["dep_graph"] = {**dep_graph, "nodes": filtered_dep_nodes, "edges": filtered_dep_edges}
+    focused["_dep_to_rpg_map"] = filtered_map
+    focused["_focused_graph"] = {
+        "selected_rpg_nodes": sorted(selected_rpg),
+        "selected_dep_nodes": sorted(selected_dep),
+        "matched_rpg_nodes": matched_rpg,
+        "matched_dep_nodes": matched_dep,
+        "rpg_node_count": len(tree_ids),
+        "dep_node_count": len(dep_ids),
+        "semantic_edge_count": len(semantic_edges),
+        "dep_edge_count": len(filtered_dep_edges),
+    }
+    return focused
+
+
+def generate_focused_html(
+    data: dict,
+    *,
+    rpg_node_ids: List[str] | None = None,
+    dep_node_ids: List[str] | None = None,
+    include_neighbors: bool = True,
+) -> str:
+    return generate_html(build_focused_graph_data(
+        data,
+        rpg_node_ids=rpg_node_ids,
+        dep_node_ids=dep_node_ids,
+        include_neighbors=include_neighbors,
+    ))
+
+
 def generate_html(data: dict) -> str:
     tree = normalize_to_tree(data)
     semantic_edges = get_semantic_edges(data)

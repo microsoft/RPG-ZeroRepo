@@ -54,6 +54,55 @@ def test_write_command_report_escapes_content_and_writes_sections(tmp_path: Path
     assert "<script>alert(1)</script>" not in html
 
 
+def test_write_command_report_renders_retrievals_code_deltas_and_focused_graph(tmp_path: Path) -> None:
+    graph = tmp_path / "focused.html"
+    graph.write_text("graph", encoding="utf-8")
+    long_diff = "diff --git a/a.py b/a.py\n" + "\n".join(
+        f"+line {i} <script>alert({i})</script>" for i in range(40)
+    )
+
+    report = write_command_report(
+        {
+            "command": "rpg_edit",
+            "retrievals": [
+                RetrievalEvent(
+                    query="a.py",
+                    tool="RPG_EDIT_LOCATE_FILE",
+                    hits=[{"node_id": "n1<script>", "reason": "score < 1"}],
+                    reason="selected <hit>",
+                ).to_dict()
+            ],
+            "code_deltas": [
+                CodeDeltaEvent(file="a.py", change_type="modify", diff=long_diff).to_dict()
+            ],
+            "focused_graph": {
+                "path": graph,
+                "status": "available",
+                "selected_rpg_nodes": ["n1"],
+                "selected_dep_nodes": ["a.py:f"],
+                "rpg_node_count": 2,
+                "dep_node_count": 1,
+            },
+            "timestamp": "fixed",
+        },
+        report_dir=tmp_path,
+    )
+
+    html = report.read_text(encoding="utf-8")
+    assert "Retrieval evidence" in html
+    assert "Code deltas" in html
+    assert "Focused graph evidence" in html
+    assert "RPG_EDIT_LOCATE_FILE" in html
+    assert "n1&lt;script&gt;" in html
+    assert "+line 0 &lt;script&gt;alert(0)&lt;/script&gt;" in html
+    assert "+line 0 <script>alert(0)</script>" not in html
+    assert "<details><summary>View diff</summary>" in html
+    assert "<details open" not in html
+    assert html.count("<h2>Focused graph evidence</h2>") == 1
+    assert "Graph artifact" in html
+    assert "Inspector metadata" in html
+
+
 def test_write_command_report_limits_summary_cards(tmp_path: Path) -> None:
     report = write_command_report(
         CommandRun(

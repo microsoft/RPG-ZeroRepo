@@ -36,6 +36,8 @@ if str(SCRIPTS_DIR) not in sys.path:
 
 from common.paths import (  # noqa: E402
     REPO_DIR,
+    REPORTS_DIR,
+    REPO_RPG_FILE,
     cmd_for,
     RPG_EDIT_PLAN_FILE,
     RPG_EDIT_IMPACT_FILE,
@@ -46,12 +48,15 @@ from common.paths import (  # noqa: E402
 )
 from common.run_events import (  # noqa: E402
     ArtifactEvent,
+    CodeDeltaEvent,
     CommandRun,
     DepGraphDeltaEvent,
     RPGDeltaEvent,
+    RetrievalEvent,
     StepEvent,
     VerificationEvent,
 )
+from common.git_utils import file_diffs_between  # noqa: E402
 from common.run_report import write_command_report  # noqa: E402
 
 logger = logging.getLogger(__name__)
@@ -132,6 +137,140 @@ def _selected_candidate_rows(artifacts: Dict[str, Any]) -> List[Dict[str, Any]]:
     return rows
 
 
+def _listify(value: Any) -> List[Any]:
+    if value in (None, ""):
+        return []
+    if isinstance(value, (list, tuple, set)):
+        return [item for item in value if item not in (None, "")]
+    return [value]
+
+
+def _retrieval_hit_reason(candidate: Dict[str, Any], impact: Dict[str, Any]) -> str:
+    parts: List[str] = []
+    if candidate.get("score") not in (None, ""):
+        parts.append(f"locate score={candidate.get('score')}")
+    if candidate.get("feature_path"):
+        parts.append(f"feature path={candidate.get('feature_path')}")
+    dep_count = len(_listify(candidate.get("dep_nodes")))
+    if dep_count:
+        parts.append(f"{dep_count} dep nodes")
+    if impact.get("error"):
+        parts.append(f"impact error={impact.get('error')}")
+    if impact.get("message"):
+        parts.append(str(impact.get("message")))
+    summary = impact.get("impact_summary") if isinstance(impact.get("impact_summary"), dict) else {}
+    callers = summary.get("total_callers", len(impact.get("callers") or []))
+    files = summary.get("affected_file_count", len(impact.get("affected_files") or []))
+    if callers or files:
+        parts.append(f"impact callers={callers}, affected_files={files}")
+    return "; ".join(parts) or "selected by review plan"
+
+
+def _retrieval_rows(artifacts: Dict[str, Any], candidates: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    rows: List[Dict[str, Any]] = []
+    locate = artifacts.get("locate") if isinstance(artifacts.get("locate"), dict) else {}
+    impact_results = _impact_results(artifacts)
+    if locate or candidates:
+        hits: List[Dict[str, Any]] = []
+        for candidate in candidates:
+            node_id = candidate.get("node_id")
+            impact = impact_results.get(node_id) if isinstance(impact_results.get(node_id), dict) else {}
+            hits.append({
+                "node_id": node_id,
+                "name": candidate.get("name"),
+                "path": candidate.get("path") or candidate.get("meta_path"),
+                "score": candidate.get("score"),
+                "reason": _retrieval_hit_reason(candidate, impact),
+            })
+        rows.append({
+            "query": locate.get("query", ""),
+            "tool": str(RPG_EDIT_LOCATE_FILE),
+            "reason": f"{len(hits)} selected from {len(locate.get('results') or [])} locate candidates",
+            "hits": hits,
+        })
+    if impact_results:
+        hits = []
+        for node_id, impact in impact_results.items():
+            impact = impact if isinstance(impact, dict) else {}
+            hits.append({
+                "node_id": node_id,
+                "name": impact.get("name"),
+                "reason": _retrieval_hit_reason({"node_id": node_id}, impact),
+            })
+        rows.append({
+            "query": ", ".join(str(node_id) for node_id in impact_results),
+            "tool": str(RPG_EDIT_IMPACT_FILE),
+            "reason": f"{len(impact_results)} impact result sets",
+            "hits": hits,
+        })
+    return rows
+
+
+def _code_delta_rows(artifacts: Dict[str, Any]) -> List[Dict[str, Any]]:
+    code_result = artifacts.get("code_result") if isinstance(artifacts.get("code_result"), dict) else {}
+    files = [str(path) for path in _listify(code_result.get("files_modified"))]
+    commit_sha = code_result.get("commit_sha")
+    rows: List[Dict[str, Any]] = []
+    if commit_sha:
+        try:
+            rows = file_diffs_between(
+                REPO_DIR,
+                to_commit=str(commit_sha),
+                files=files or None,
+                py_only=False,
+            )
+        except Exception as exc:
+            rows = [{"file": path, "change_type": "modify", "diff": "", "error": str(exc)} for path in files]
+    seen = {row.get("file") for row in rows}
+    for path in files:
+        if path not in seen:
+            rows.append({"file": path, "change_type": "modify", "diff": ""})
+    return rows
+
+
+def _focused_graph_output_path() -> Path:
+    REPORTS_DIR.mkdir(parents=True, exist_ok=True)
+    return REPORTS_DIR / f"rpg_edit_focused_graph_{time.time_ns()}.html"
+
+
+def _focused_graph_artifact(candidates: List[Dict[str, Any]], artifacts: Dict[str, Any]) -> Dict[str, Any]:
+    dep_rows = _dep_node_rows(candidates)
+    selected_rpg = sorted({str(row.get("node_id")) for row in candidates if row.get("node_id")})
+    selected_dep = sorted({str(row.get("node_id")) for row in dep_rows if row.get("node_id")})
+    if not selected_rpg and not selected_dep:
+        return {}
+
+    metadata: Dict[str, Any] = {
+        "status": "recorded",
+        "selected_rpg_nodes": selected_rpg,
+        "selected_dep_nodes": selected_dep,
+    }
+    rpg_data = _load_json_artifact(REPO_RPG_FILE)
+    if not isinstance(rpg_data, dict):
+        metadata.update({"status": "missing", "reason": f"RPG file not available: {REPO_RPG_FILE}"})
+        return metadata
+
+    try:
+        from rpg_visualize import build_focused_graph_data, generate_html
+
+        focused_data = build_focused_graph_data(
+            rpg_data,
+            rpg_node_ids=selected_rpg,
+            dep_node_ids=selected_dep,
+        )
+        focused_meta = focused_data.get("_focused_graph") if isinstance(focused_data.get("_focused_graph"), dict) else {}
+        metadata.update(focused_meta)
+        if not (focused_meta.get("matched_rpg_nodes") or focused_meta.get("matched_dep_nodes")):
+            metadata.update({"status": "unavailable", "reason": "selected nodes not found in current RPG"})
+            return metadata
+        graph_path = _focused_graph_output_path()
+        graph_path.write_text(generate_html(focused_data), encoding="utf-8")
+        metadata.update({"status": "available", "path": str(graph_path)})
+    except Exception as exc:
+        metadata.update({"status": "error", "reason": str(exc)})
+    return metadata
+
+
 def _dep_node_path(dep_id: Any) -> str:
     if dep_id in (None, ""):
         return ""
@@ -200,12 +339,32 @@ def _review_verification(result: Dict[str, Any], artifacts: Dict[str, Any]) -> L
     return checks
 
 
+class _ReportPayload:
+    def __init__(self, run: CommandRun, focused_graph: Dict[str, Any]):
+        self.run = run
+        self.focused_graph = focused_graph
+
+    def to_dict(self) -> Dict[str, Any]:
+        data = self.run.to_dict()
+        if self.focused_graph:
+            data["focused_graph"] = self.focused_graph
+        return data
+
+
 def _publish_review_report(result: Dict[str, Any], plan_path: Path, impact_path: Optional[Path]) -> Dict[str, Any]:
     _write_review_result(result)
     artifacts = _load_review_artifacts(plan_path, impact_path)
     candidates = _selected_candidate_rows(artifacts)
+    code_deltas = _code_delta_rows(artifacts)
+    focused_graph = _focused_graph_artifact(candidates, artifacts)
+    artifact_rows = _artifact_links(plan_path, impact_path)
+    if focused_graph.get("path"):
+        artifact_rows.append({"label": "focused_graph", "path": focused_graph["path"], "status": focused_graph.get("status")})
+    evidence = {"artifacts": artifacts, "review_result": result}
+    if focused_graph:
+        evidence["focused_graph"] = focused_graph
     try:
-        report_path = write_command_report(CommandRun(
+        report_run = CommandRun(
             command="rpg_edit",
             title="CoderMind rpg_edit Explain View",
             status=str(result.get("type", "review")),
@@ -233,16 +392,31 @@ def _publish_review_report(result: Dict[str, Any], plan_path: Path, impact_path:
                 )
                 for row in _dep_node_rows(candidates)
             ],
+            retrievals=[
+                RetrievalEvent(query=row.get("query"), tool=row.get("tool"), hits=row.get("hits"), reason=row.get("reason"))
+                for row in _retrieval_rows(artifacts, candidates)
+            ],
             artifacts=[
                 ArtifactEvent(label=row["label"], path=row["path"], status=row.get("status"))
-                for row in _artifact_links(plan_path, impact_path)
+                for row in artifact_rows
+            ],
+            code_deltas=[
+                CodeDeltaEvent(
+                    file=row.get("file"),
+                    change_type=row.get("change_type"),
+                    before=row.get("before"),
+                    after=row.get("after"),
+                    diff=row.get("diff"),
+                )
+                for row in code_deltas
             ],
             verification=[
                 VerificationEvent(name=row.get("name", "verification"), status=row.get("status"), detail=row.get("detail"))
                 for row in _review_verification(result, artifacts)
             ],
-            evidence={"artifacts": artifacts, "review_result": result},
-        ))
+            evidence=evidence,
+        )
+        report_path = write_command_report(_ReportPayload(report_run, focused_graph))
         result["report_path"] = str(report_path)
     except Exception as exc:
         result["report_error"] = str(exc)
