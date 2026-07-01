@@ -3,6 +3,7 @@ from __future__ import annotations
 import importlib.util
 import json
 import sys
+import types
 from pathlib import Path
 
 _REPO = Path(__file__).resolve().parents[1]
@@ -46,6 +47,35 @@ def test_code_result_is_persisted(tmp_path: Path, monkeypatch) -> None:
 
     data = json.loads(result_path.read_text(encoding="utf-8"))
     assert data == {"success": True, "commit_sha": "abc123"}
+
+
+def test_code_result_clears_recovered_subagent_error(tmp_path: Path, monkeypatch) -> None:
+    code = _load_script("rpg_edit_code_retry_test", _SCRIPTS / "rpg_edit" / "code.py")
+
+    plan_path = tmp_path / "plan.json"
+    plan_path.write_text(
+        json.dumps({"code_changes": [{"file_path": "a.py", "description": "update report"}]}),
+        encoding="utf-8",
+    )
+    calls = iter([
+        (None, "Sub-agent failed after 900.1s: timeout"),
+        ("CODE_STATUS: COMPLETE", None),
+    ])
+    fake_run_batch = types.ModuleType("run_batch")
+    fake_run_batch.dispatch_sub_agent = lambda *args, **kwargs: next(calls)
+    monkeypatch.setitem(sys.modules, "run_batch", fake_run_batch)
+    monkeypatch.setattr(code, "_format_rpg_target_nodes", lambda plan, rpg_path: "nodes")
+    monkeypatch.setattr(code, "_format_impact_context", lambda plan: "impact")
+    monkeypatch.setattr(code, "_commit_changes", lambda repo_path, summary, status: "abc123")
+
+    result = code.apply_code_changes(plan_path, tmp_path / "rpg.json", tmp_path, max_iterations=2, timeout=1)
+
+    assert result["success"] is True
+    assert result["last_status"] == "complete"
+    assert result["last_error"] is None
+    assert result["commit_sha"] == "abc123"
+    assert result["iterations"][0]["parsed_status"] == "llm_error"
+    assert result["iterations"][1]["parsed_status"] == "complete"
 
 
 def test_review_publish_report_returns_report_path(tmp_path: Path, monkeypatch) -> None:

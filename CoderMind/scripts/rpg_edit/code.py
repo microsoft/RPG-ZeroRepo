@@ -593,6 +593,7 @@ def apply_code_changes(
                 fp = c.get("file_path")
                 if fp and fp not in done_files:
                     done_files.append(fp)
+            last_error = None
             iter_info["detail"] = None
             break
         elif status == "partial":
