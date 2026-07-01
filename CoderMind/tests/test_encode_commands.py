@@ -324,6 +324,52 @@ class TestRunUpdateRpg:
         assert result["new_commit"] == "a" * 40
         assert calls == [cur_repo.resolve()]
 
+    def test_diff_summary_is_returned(self, tmp_rpg_file, tmp_path):
+        from rpg_encoder.run_update_rpg import run_update_rpg
+
+        last_repo = tmp_path / "last"
+        cur_repo = tmp_path / "current"
+        last_repo.mkdir()
+        cur_repo.mkdir()
+
+        def fake_process_diff(**kwargs):
+            rpg = kwargs["last_rpg"]
+            rpg._last_diff_summary = {
+                "added": 1,
+                "deleted": 0,
+                "modified": 2,
+                "renamed": 0,
+            }
+            rpg._last_diff_files = {
+                "added": ["a.py"],
+                "deleted": [],
+                "modified": ["b.py", "c.py"],
+                "renamed": [],
+            }
+            return rpg
+
+        with patch(
+            "rpg_encoder.rpg_evolution.RPGEvolution.process_diff",
+            side_effect=fake_process_diff,
+        ), patch(
+            "rpg.service.RPGService.enrich_from_code",
+            return_value={},
+        ), patch("common.git_utils.read_head", return_value=None):
+            result = run_update_rpg(
+                rpg_file=tmp_rpg_file,
+                last_repo_dir=str(last_repo),
+                cur_repo_dir=str(cur_repo),
+            )
+
+        assert result["status"] == "success"
+        assert result["diff_summary"] == {
+            "added": 1,
+            "deleted": 0,
+            "modified": 2,
+            "renamed": 0,
+        }
+        assert result["diff_files"]["modified"] == ["b.py", "c.py"]
+
     def test_missing_last_repo_dir(self, tmp_rpg_file):
         """Should return error when last repo dir doesn't exist."""
         from rpg_encoder.run_update_rpg import run_update_rpg
@@ -344,6 +390,57 @@ class TestRunUpdateRpg:
         )
         assert result["status"] == "error"
         assert "not found" in result["error"]
+
+
+# ============================================================================
+# Test: update_graphs report wiring
+# ============================================================================
+
+
+def test_attach_update_report_uses_update_rpg_result_fields(tmp_path, monkeypatch):
+    import update_graphs
+
+    captured = {}
+
+    def fake_write_command_report(command, **kwargs):
+        captured["command"] = command
+        captured.update(kwargs)
+        return tmp_path / "report.html"
+
+    monkeypatch.setattr(update_graphs, "write_command_report", fake_write_command_report)
+
+    result = update_graphs._attach_update_report({
+        "mode": "update-rpg",
+        "status": "success",
+        "output_path": "/tmp/rpg.json",
+        "node_count": 4504,
+        "nodes_delta": 2,
+        "dep_nodes": 2708,
+        "dep_nodes_delta": 46,
+        "dep_edges": 5498,
+        "dep_edges_delta": 103,
+        "diff_summary": {
+            "added": 0,
+            "deleted": 0,
+            "modified": 3,
+            "renamed": 0,
+        },
+        "git_delta": [
+            {"status": "M", "path": "scripts/a.py"},
+            {"status": "M", "path": "tests/test_a.py"},
+        ],
+        "viz_path": "/tmp/rpg.html",
+    })
+
+    cards = {card["label"]: card["value"] for card in captured["summary_cards"]}
+    assert result["report_path"] == str(tmp_path / "report.html")
+    assert cards["git files"] == 2
+    assert cards["semantic files"] == 3
+    assert cards["RPG nodes"] == "4504 (delta: +2)"
+    assert cards["dep graph"] == "nodes=2708 (delta: +46), edges=5498 (delta: +103)"
+    assert captured["artifacts"]["rpg_json"] == "/tmp/rpg.json"
+    assert captured["stages"][0]["reason"] == "2 changed files"
+    assert captured["stages"][1]["reason"] == "3 semantic files, modified=3"
 
 
 # ============================================================================

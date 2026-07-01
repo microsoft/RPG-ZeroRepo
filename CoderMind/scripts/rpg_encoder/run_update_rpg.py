@@ -253,6 +253,8 @@ def run_update_rpg(
         post_nodes = len(updated_rpg.nodes)
         post_edges = _serialized_feature_edges(result_data)
         post_dep_stats = _serialized_dep_stats(result_data)
+        diff_summary = getattr(updated_rpg, "_last_diff_summary", None)
+        diff_files = getattr(updated_rpg, "_last_diff_files", None)
 
         stats = {
             "repo_name": repo_name,
@@ -274,6 +276,10 @@ def run_update_rpg(
             "previous_commit": pre_commit,
             "new_commit": (updated_rpg.git_meta or {}).get("head_commit"),
         }
+        if isinstance(diff_summary, dict):
+            stats["diff_summary"] = diff_summary
+        if isinstance(diff_files, dict):
+            stats["diff_files"] = diff_files
         try:
             stats["functional_areas"] = len(updated_rpg.get_functional_areas())
         except Exception:

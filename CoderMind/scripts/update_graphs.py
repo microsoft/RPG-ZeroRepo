@@ -88,33 +88,150 @@ def _change_count(value: object) -> int:
     return 0
 
 
+def _diff_summary(result: dict) -> dict:
+    summary = result.get("diff_summary")
+    if isinstance(summary, dict):
+        return {
+            "added": _change_count(summary.get("added")),
+            "deleted": _change_count(summary.get("deleted")),
+            "modified": _change_count(summary.get("modified")),
+            "renamed": _change_count(summary.get("renamed")),
+        }
+    return {
+        key: _change_count(result.get(key))
+        for key in ("added", "deleted", "modified", "renamed")
+    }
+
+
+def _format_count_delta(value: object, delta: object) -> object:
+    if value in (None, ""):
+        return ""
+    if isinstance(delta, int):
+        return f"{value} (delta: {delta:+d})"
+    return value
+
+
+def _format_diff_summary(summary: dict) -> str:
+    total = sum(summary.values())
+    parts = [f"{total} semantic files"]
+    for key in ("added", "deleted", "modified", "renamed"):
+        count = summary.get(key, 0)
+        if count:
+            parts.append(f"{key}={count}")
+    return ", ".join(parts)
+
+
+def _git_delta_files(prev_ref: str, workspace_root: str) -> list[dict[str, str]]:
+    import subprocess
+
+    try:
+        output = subprocess.check_output(
+            ["git", "diff", "--name-status", f"{prev_ref}..HEAD", "--", "."],
+            cwd=workspace_root,
+            stderr=subprocess.DEVNULL,
+            text=True,
+        )
+    except (subprocess.CalledProcessError, FileNotFoundError):
+        return []
+    files: list[dict[str, str]] = []
+    for line in output.splitlines():
+        parts = line.split("\t")
+        if len(parts) >= 2:
+            files.append({"status": parts[0], "path": parts[-1]})
+    return files
+
+
 def _attach_update_report(result: dict) -> dict:
     try:
-        changed_total = sum(
-            _change_count(result.get(key))
-            for key in ("modified", "added", "deleted", "renamed")
+        semantic_summary = _diff_summary(result)
+        semantic_total = sum(semantic_summary.values())
+        git_delta = result.get("git_delta")
+        git_total = _change_count(git_delta) if git_delta is not None else ""
+        node_count = result.get("node_count", result.get("rpg_nodes", ""))
+        rpg_path = result.get("output_path") or result.get("rpg_path")
+        dep_summary = ""
+        if result.get("dep_nodes") not in (None, ""):
+            dep_summary = "nodes={}".format(
+                _format_count_delta(
+                    result.get("dep_nodes"),
+                    result.get("dep_nodes_delta"),
+                )
+            )
+            if result.get("dep_edges") not in (None, ""):
+                dep_summary += ", edges={}".format(
+                    _format_count_delta(
+                        result.get("dep_edges"),
+                        result.get("dep_edges_delta"),
+                    )
+                )
+        viz_status = result.get("viz_error") or (
+            "ok" if result.get("viz_path") else "not recorded"
         )
-        viz_status = result.get("viz_error") or ("ok" if result.get("viz_path") else "not recorded")
         report_path = write_command_report(
             "update_rpg",
             title="CoderMind update_rpg Explain View",
             status=result.get("mode") or result.get("status"),
             summary_cards=[
                 {"label": "mode", "value": result.get("mode", "")},
-                {"label": "reason", "value": result.get("reason") or result.get("error", "")},
-                {"label": "changed files", "value": changed_total},
-                {"label": "RPG nodes", "value": result.get("rpg_nodes", "")},
-                {"label": "dep nodes", "value": result.get("dep_nodes", "")},
-                {"label": "dep edges", "value": result.get("dep_edges", "")},
-                {"label": "visualization", "value": result.get("viz_path") or result.get("viz_error", "")},
+                {
+                    "label": "reason",
+                    "value": result.get("reason") or result.get("error", ""),
+                },
+                {"label": "git files", "value": git_total},
+                {"label": "semantic files", "value": semantic_total},
+                {
+                    "label": "RPG nodes",
+                    "value": _format_count_delta(
+                        node_count,
+                        result.get("nodes_delta"),
+                    ),
+                },
+                {"label": "dep graph", "value": dep_summary},
+                {
+                    "label": "visualization",
+                    "value": result.get("viz_path") or result.get("viz_error", ""),
+                },
             ],
             stages=[
-                {"name": "git delta", "status": result.get("mode", ""), "reason": f"{changed_total} changed files"},
-                {"name": "sync graph", "status": result.get("status", result.get("mode", "")), "reason": result.get("reason", "")},
-                {"name": "visualize", "status": "ok" if result.get("viz_path") else "error" if result.get("viz_error") else "skipped", "reason": result.get("viz_path") or result.get("viz_error", "")},
+                {
+                    "name": "git delta",
+                    "status": result.get("mode", ""),
+                    "reason": (
+                        f"{git_total} changed files"
+                        if git_total != ""
+                        else "not recorded"
+                    ),
+                },
+                {
+                    "name": "semantic delta",
+                    "status": result.get("mode", ""),
+                    "reason": _format_diff_summary(semantic_summary),
+                },
+                {
+                    "name": "sync graph",
+                    "status": result.get("status", result.get("mode", "")),
+                    "reason": result.get("reason", ""),
+                },
+                {
+                    "name": "visualize",
+                    "status": (
+                        "ok"
+                        if result.get("viz_path")
+                        else "error"
+                        if result.get("viz_error")
+                        else "skipped"
+                    ),
+                    "reason": result.get("viz_path") or result.get("viz_error", ""),
+                },
             ],
-            artifacts={"rpg_json": result.get("rpg_path"), "rpg_html": result.get("viz_path")},
-            verification={"update_rpg": result.get("status", result.get("mode")), "viz": viz_status},
+            artifacts={
+                "rpg_json": rpg_path,
+                "rpg_html": result.get("viz_path"),
+            },
+            verification={
+                "update_rpg": result.get("status", result.get("mode")),
+                "viz": viz_status,
+            },
             evidence=result,
         )
         result["report_path"] = str(report_path)
@@ -552,7 +669,12 @@ def cmd_update_rpg(
         from rpg_encoder.run_update_rpg import run_update_rpg
 
         git_prefix = git_workspace_prefix(workspace_root)
-        last_repo_dir = os.path.join(worktree_dir, git_prefix) if git_prefix else worktree_dir
+        last_repo_dir = (
+            os.path.join(worktree_dir, git_prefix)
+            if git_prefix
+            else worktree_dir
+        )
+        git_delta = _git_delta_files(prev_ref, workspace_root)
 
         result = run_update_rpg(
             rpg_file=str(rpg_path),
@@ -563,6 +685,7 @@ def cmd_update_rpg(
 
         result["mode"] = "update-rpg"
         result["prev_ref"] = prev_ref
+        result["git_delta"] = git_delta
 
         # Refresh ``rpg.html`` whenever the JSON was actually rewritten.
         # ``run_update_rpg`` returns ``status="success"`` on a normal
