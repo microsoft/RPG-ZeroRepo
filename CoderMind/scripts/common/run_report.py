@@ -47,6 +47,12 @@ def write_command_report(
     target_dir.mkdir(parents=True, exist_ok=True)
     report_path = _unique_report_path(target_dir / f"cmind_run_{safe_command}_{filename_ts}.html")
 
+    evidence = dict(data)
+    evidence_data = evidence.get("evidence") if isinstance(evidence.get("evidence"), Mapping) else {}
+    retrievals = data.get("retrievals") or evidence_data.get("retrievals")
+    code_deltas = data.get("code_deltas") or evidence_data.get("code_deltas")
+    focused_graph = data.get("focused_graph") or evidence_data.get("focused_graph")
+
     page_title = title or f"CoderMind {command} Explain View"
     html = _render_page(
         title=page_title,
@@ -55,11 +61,14 @@ def write_command_report(
         status=status,
         summary_cards=_normalize_cards(data.get("summary")),
         stages=_normalize_stages(data.get("steps")),
+        retrievals=_normalize_retrievals(retrievals),
         rpg_nodes=_normalize_nodes(data.get("rpg_deltas"), dep_graph=False),
         dep_nodes=_normalize_nodes(data.get("dep_graph_deltas"), dep_graph=True),
+        code_deltas=_normalize_code_deltas(code_deltas),
+        focused_graph=_normalize_focused_graph(focused_graph),
         artifacts=_normalize_artifacts(data.get("artifacts")),
         verification=_normalize_verification(data.get("verification")),
-        evidence=dict(data),
+        evidence=evidence,
     )
     report_path.write_text(html, encoding="utf-8")
     return report_path
@@ -141,6 +150,22 @@ def _normalize_stages(value: Any) -> list[dict[str, Any]]:
     return stages
 
 
+def _normalize_retrievals(value: Any) -> list[dict[str, Any]]:
+    retrievals: list[dict[str, Any]] = []
+    for item in _as_sequence(value):
+        if isinstance(item, Mapping):
+            hits = item.get("hits")
+            retrievals.append({
+                "query": item.get("query", ""),
+                "tool": item.get("tool", ""),
+                "reason": item.get("reason", ""),
+                "hits": _as_sequence(hits),
+            })
+        else:
+            retrievals.append({"query": item, "hits": []})
+    return retrievals
+
+
 def _normalize_nodes(value: Any, *, dep_graph: bool = False) -> list[dict[str, Any]]:
     nodes: list[dict[str, Any]] = []
     id_key = "dep_node_id" if dep_graph else "node_id"
@@ -151,6 +176,30 @@ def _normalize_nodes(value: Any, *, dep_graph: bool = False) -> list[dict[str, A
             entry = {id_key: item}
         nodes.append(entry)
     return nodes
+
+
+def _normalize_code_deltas(value: Any) -> list[dict[str, Any]]:
+    deltas: list[dict[str, Any]] = []
+    for item in _as_sequence(value):
+        if isinstance(item, Mapping):
+            deltas.append({
+                "file": item.get("file") or item.get("path") or "",
+                "change_type": item.get("change_type") or item.get("status") or "",
+                "before": item.get("before"),
+                "after": item.get("after"),
+                "diff": item.get("diff", ""),
+            })
+        else:
+            deltas.append({"file": item, "change_type": "recorded", "diff": ""})
+    return deltas
+
+
+def _normalize_focused_graph(value: Any) -> dict[str, Any]:
+    if value in (None, "", [], {}):
+        return {}
+    if isinstance(value, Mapping):
+        return dict(value)
+    return {"detail": value}
 
 
 def _normalize_artifacts(value: Any) -> list[dict[str, Any]]:
@@ -202,8 +251,11 @@ def _render_page(
     status: str | None,
     summary_cards: list[dict[str, Any]],
     stages: list[dict[str, Any]],
+    retrievals: list[dict[str, Any]],
     rpg_nodes: list[dict[str, Any]],
     dep_nodes: list[dict[str, Any]],
+    code_deltas: list[dict[str, Any]],
+    focused_graph: dict[str, Any],
     artifacts: list[dict[str, Any]],
     verification: list[dict[str, Any]],
     evidence: Mapping[str, Any],
@@ -238,6 +290,9 @@ h2 {{ margin:0 0 14px; font-size:18px; }}
 .stage-head {{ display:flex; flex-wrap:wrap; gap:8px; align-items:center; }}
 .badge {{ font-size:12px; border-radius:999px; background:#eef2f7; padding:2px 8px; color:#334155; }}
 .reason {{ color:var(--muted); margin-top:4px; }}
+.delta {{ border:1px solid var(--line); border-radius:12px; padding:12px; margin:10px 0; background:#fbfdff; }}
+.delta-head {{ display:flex; flex-wrap:wrap; gap:8px; align-items:center; margin-bottom:8px; }}
+.hit-list {{ margin:0; padding-left:18px; }}
 table {{ width:100%; border-collapse:collapse; font-size:14px; table-layout:fixed; }}
 th, td {{ border-top:1px solid var(--line); padding:8px 10px; text-align:left; vertical-align:top; overflow-wrap:anywhere; word-break:break-word; }}
 th {{ color:var(--muted); font-weight:600; background:#fbfdff; }}
@@ -258,8 +313,11 @@ details summary {{ cursor:pointer; color:var(--accent); font-weight:600; }}
 {_render_summary_cards(summary_cards)}
 {_render_timeline(stages)}
 {_render_verification(verification)}
+{_render_retrievals(retrievals)}
 {_render_node_table("Focused RPG node evidence", rpg_nodes)}
 {_render_node_table("Focused dependency node evidence", dep_nodes)}
+{_render_code_deltas(code_deltas)}
+{_render_focused_graph(focused_graph)}
 {_render_artifacts(artifacts)}
 {_render_evidence(evidence)}
 </main>
@@ -325,6 +383,88 @@ def _render_verification(checks: list[dict[str, Any]]) -> str:
             )
         body = "<table><thead><tr><th>Check</th><th>Status</th><th>Detail</th></tr></thead><tbody>" + "".join(rows) + "</tbody></table>"
     return f"<section><h2>Verification status</h2>{body}</section>"
+
+
+def _render_retrievals(retrievals: list[dict[str, Any]]) -> str:
+    if not retrievals:
+        return ""
+    rows = []
+    for retrieval in retrievals:
+        hits = retrieval.get("hits") or []
+        hit_items = []
+        for hit in hits:
+            if isinstance(hit, Mapping):
+                label = hit.get("node_id") or hit.get("dep_node_id") or hit.get("path") or hit.get("file") or hit.get("name") or "hit"
+                reason = hit.get("reason") or hit.get("score") or hit.get("status") or ""
+                hit_items.append(f"<li><code>{_h(label)}</code> {_h(reason)}</li>")
+            else:
+                hit_items.append(f"<li>{_h(hit)}</li>")
+        hits_html = "<span class=\"empty\">No hits recorded.</span>"
+        if hit_items:
+            hits_html = '<ul class="hit-list">' + "".join(hit_items) + "</ul>"
+        rows.append(
+            "<tr>"
+            f"<td>{_h(retrieval.get('tool', ''))}</td>"
+            f"<td>{_h(retrieval.get('query', ''))}</td>"
+            f"<td>{_h(retrieval.get('reason', ''))}</td>"
+            f"<td>{hits_html}</td>"
+            "</tr>"
+        )
+    body = "<table><thead><tr><th>Tool</th><th>Query</th><th>Reason</th><th>Hits</th></tr></thead><tbody>" + "".join(rows) + "</tbody></table>"
+    return f"<section><h2>Retrieval evidence</h2>{body}</section>"
+
+
+def _render_code_deltas(deltas: list[dict[str, Any]]) -> str:
+    if not deltas:
+        return ""
+    blocks = []
+    for delta in deltas:
+        diff = delta.get("diff", "")
+        diff_html = "<p class=\"empty\">No diff recorded.</p>"
+        if diff:
+            diff_html = f"<details><summary>View diff</summary><pre>{_h(diff)}</pre></details>"
+        before_after = ""
+        if delta.get("before") is not None or delta.get("after") is not None:
+            before_after = (
+                "<details><summary>Before/after</summary>"
+                f"<pre>{_h({'before': delta.get('before'), 'after': delta.get('after')})}</pre>"
+                "</details>"
+            )
+        blocks.append(
+            "<div class=\"delta\">"
+            "<div class=\"delta-head\">"
+            f"<code>{_h(delta.get('file', ''))}</code>"
+            f"<span class=\"badge\">{_h(delta.get('change_type', ''))}</span>"
+            "</div>"
+            f"{diff_html}{before_after}"
+            "</div>"
+        )
+    return f"<section><h2>Code deltas</h2>{''.join(blocks)}</section>"
+
+
+def _render_focused_graph(focused_graph: dict[str, Any]) -> str:
+    if not focused_graph:
+        return ""
+    path = focused_graph.get("path") or focused_graph.get("artifact_path") or focused_graph.get("html_path")
+    href = _artifact_href(path) if path else "#"
+    rows = [
+        ("Status", focused_graph.get("status", "recorded"), False),
+        ("Graph artifact", f"<a href=\"{_h_attr(href)}\">{_h(path or '')}</a>" if path else "", True),
+        ("Selected RPG nodes", ", ".join(str(v) for v in focused_graph.get("selected_rpg_nodes") or focused_graph.get("rpg_node_ids") or []), False),
+        ("Selected dependency nodes", ", ".join(str(v) for v in focused_graph.get("selected_dep_nodes") or focused_graph.get("dep_node_ids") or []), False),
+        ("Included RPG nodes", focused_graph.get("rpg_node_count") or focused_graph.get("rpg_nodes") or "", False),
+        ("Included dependency nodes", focused_graph.get("dep_node_count") or focused_graph.get("dep_nodes") or "", False),
+    ]
+    table_rows = []
+    for label, value, is_html in rows:
+        if value in (None, ""):
+            continue
+        rendered = str(value) if is_html else _h(value)
+        table_rows.append(f"<tr><th>{_h(label)}</th><td>{rendered}</td></tr>")
+    table = "<table><tbody>" + "".join(table_rows) + "</tbody></table>" if table_rows else "<p class=\"empty\">No focused graph metadata recorded.</p>"
+    metadata = json.dumps(focused_graph, indent=2, ensure_ascii=False, default=_json_default)
+    inspector = f"<details><summary>Inspector metadata</summary><pre>{_h(metadata)}</pre></details>"
+    return f"<section><h2>Focused graph evidence</h2>{table}{inspector}</section>"
 
 
 def _render_node_table(title: str, nodes: list[dict[str, Any]]) -> str:
