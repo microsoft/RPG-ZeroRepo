@@ -11,67 +11,34 @@ from typing import Any, Mapping, Sequence
 from urllib.parse import quote
 
 from common.paths import REPORTS_DIR
+from common.run_events import _to_plain
 
 _MAX_SUMMARY_CARDS = 7
 
 
 def write_command_report(
-    command: str | None = None,
-    payload: Any = None,
+    run: Any,
     *,
-    summary_cards: Any = None,
-    summary: Any = None,
-    stages: Any = None,
-    timeline: Any = None,
-    rpg_nodes: Any = None,
-    dep_nodes: Any = None,
-    artifacts: Any = None,
-    artifact_links: Any = None,
-    verification: Any = None,
-    evidence: Any = None,
-    evidence_json: Any = None,
-    status: str | None = None,
-    title: str | None = None,
     report_dir: str | Path | None = None,
     timestamp: str | datetime | None = None,
-    **extra: Any,
 ) -> Path:
     """Write a sanitized Explain View HTML report and return its path."""
-    if isinstance(payload, Mapping):
-        extra = {**dict(payload), **extra}
-    elif payload is not None:
-        extra.setdefault("payload", payload)
-    if command is None:
-        command = str(extra.pop("command", extra.pop("command_name", "command")))
-    summary_cards = summary_cards if summary_cards is not None else extra.pop("summary_cards", None)
-    summary = summary if summary is not None else extra.pop("summary", None)
-    stages = stages if stages is not None else extra.pop("stages", None)
-    timeline = timeline if timeline is not None else extra.pop("timeline", None)
-    rpg_nodes = rpg_nodes if rpg_nodes is not None else extra.pop("rpg_nodes", None)
-    dep_nodes = dep_nodes if dep_nodes is not None else extra.pop("dep_nodes", None)
-    artifacts = artifacts if artifacts is not None else extra.pop("artifacts", None)
-    artifact_links = artifact_links if artifact_links is not None else extra.pop("artifact_links", None)
-    verification = verification if verification is not None else extra.pop("verification", None)
-    evidence = evidence if evidence is not None else extra.pop("evidence", None)
-    evidence_json = evidence_json if evidence_json is not None else extra.pop("evidence_json", None)
-    status = status if status is not None else extra.pop("status", None)
-    title = title if title is not None else extra.pop("title", None)
-    report_dir = report_dir if report_dir is not None else extra.pop("report_dir", None)
-    timestamp = timestamp if timestamp is not None else extra.pop("timestamp", None)
-    summary_cards = summary_cards if summary_cards is not None else summary
-    stages = stages if stages is not None else timeline
-    artifacts = artifacts if artifacts is not None else artifact_links
-    evidence = evidence if evidence is not None else evidence_json
+    if hasattr(run, "to_dict"):
+        data = run.to_dict()
+    elif isinstance(run, Mapping):
+        data = dict(run)
+    else:
+        raise TypeError("write_command_report() expects a CommandRun or mapping")
 
-    if rpg_nodes is None:
-        rpg_nodes = extra.pop("rpg_node_evidence", None) or extra.pop("rpg_evidence", None)
-    if dep_nodes is None:
-        dep_nodes = extra.pop("dep_node_evidence", None) or extra.pop("dep_evidence", None)
-    if isinstance(evidence, Mapping):
-        if rpg_nodes is None:
-            rpg_nodes = _evidence_nodes(evidence.get("rpg_nodes")) or _evidence_nodes(evidence.get("rpg_node_evidence"))
-        if dep_nodes is None:
-            dep_nodes = _evidence_nodes(evidence.get("dep_nodes")) or _evidence_nodes(evidence.get("dep_node_evidence"))
+    data = _to_plain(data)
+    if not isinstance(data, Mapping):
+        raise TypeError("CommandRun.to_dict() must return a mapping")
+
+    command = str(data.get("command") or "command")
+    status = data.get("status")
+    title = data.get("title")
+    timestamp = timestamp if timestamp is not None else data.get("timestamp")
+    report_dir = report_dir if report_dir is not None else data.get("report_dir")
 
     generated_at = _display_timestamp(timestamp)
     filename_ts = _filename_timestamp(timestamp)
@@ -80,33 +47,19 @@ def write_command_report(
     target_dir.mkdir(parents=True, exist_ok=True)
     report_path = _unique_report_path(target_dir / f"cmind_run_{safe_command}_{filename_ts}.html")
 
-    aggregate_evidence = {
-        "command": command,
-        "status": status,
-        "summary_cards": summary_cards,
-        "stages": stages,
-        "rpg_nodes": rpg_nodes,
-        "dep_nodes": dep_nodes,
-        "artifacts": artifacts,
-        "verification": verification,
-        "evidence": evidence,
-    }
-    for key, value in extra.items():
-        aggregate_evidence[key] = value
-
     page_title = title or f"CoderMind {command} Explain View"
     html = _render_page(
         title=page_title,
         command=command,
         generated_at=generated_at,
         status=status,
-        summary_cards=_normalize_cards(summary_cards),
-        stages=_normalize_stages(stages),
-        rpg_nodes=_normalize_nodes(rpg_nodes),
-        dep_nodes=_normalize_nodes(dep_nodes),
-        artifacts=_normalize_artifacts(artifacts),
-        verification=_normalize_verification(verification),
-        evidence=aggregate_evidence,
+        summary_cards=_normalize_cards(data.get("summary")),
+        stages=_normalize_stages(data.get("steps")),
+        rpg_nodes=_normalize_nodes(data.get("rpg_deltas"), dep_graph=False),
+        dep_nodes=_normalize_nodes(data.get("dep_graph_deltas"), dep_graph=True),
+        artifacts=_normalize_artifacts(data.get("artifacts")),
+        verification=_normalize_verification(data.get("verification")),
+        evidence=dict(data),
     )
     report_path.write_text(html, encoding="utf-8")
     return report_path
@@ -153,7 +106,7 @@ def _as_sequence(value: Any) -> list[Any]:
     if isinstance(value, (str, bytes, Path)):
         return [value]
     if isinstance(value, Mapping):
-        return list(value.items())
+        return [value]
     if isinstance(value, Sequence):
         return list(value)
     return [value]
@@ -161,19 +114,13 @@ def _as_sequence(value: Any) -> list[Any]:
 
 def _normalize_cards(value: Any) -> list[dict[str, Any]]:
     cards: list[dict[str, Any]] = []
-    if isinstance(value, Mapping):
-        iterable = value.items()
-    else:
-        iterable = _as_sequence(value)
-    for item in iterable:
-        if isinstance(item, tuple) and len(item) == 2:
-            label, card_value = item
-            cards.append({"label": label, "value": card_value})
-        elif isinstance(item, Mapping):
-            label = item.get("label") or item.get("title") or item.get("name") or item.get("key") or "Summary"
-            card_value = item.get("value", item.get("count", item.get("text", "")))
-            detail = item.get("detail") or item.get("description")
-            cards.append({"label": label, "value": card_value, "detail": detail})
+    for item in _as_sequence(value):
+        if isinstance(item, Mapping):
+            cards.append({
+                "label": item.get("label") or "Summary",
+                "value": item.get("value", ""),
+                "detail": item.get("detail"),
+            })
         else:
             cards.append({"label": "Summary", "value": item})
     return cards[:_MAX_SUMMARY_CARDS]
@@ -182,68 +129,41 @@ def _normalize_cards(value: Any) -> list[dict[str, Any]]:
 def _normalize_stages(value: Any) -> list[dict[str, Any]]:
     stages: list[dict[str, Any]] = []
     for item in _as_sequence(value):
-        if isinstance(item, tuple) and len(item) == 2:
-            name, state = item
-            stages.append({"name": name, "status": state})
-        elif isinstance(item, Mapping):
-            name = item.get("name") or item.get("stage") or item.get("id") or "stage"
-            status = item.get("status") or item.get("state") or item.get("type") or item.get("action") or "recorded"
-            reason = item.get("reason") or item.get("message") or item.get("description") or ""
-            duration = item.get("duration") or item.get("elapsed") or item.get("elapsed_seconds")
-            stages.append({"name": name, "status": status, "reason": reason, "duration": duration})
+        if isinstance(item, Mapping):
+            stages.append({
+                "name": item.get("name") or "stage",
+                "status": item.get("status", "recorded"),
+                "reason": item.get("reason", ""),
+                "duration": item.get("duration"),
+            })
         else:
             stages.append({"name": item, "status": "recorded"})
     return stages
 
 
-def _evidence_nodes(value: Any) -> Any:
-    if isinstance(value, Mapping):
-        return value
-    if isinstance(value, Sequence) and not isinstance(value, (str, bytes, Path)):
-        return value
-    return None
-
-
-def _normalize_nodes(value: Any) -> list[dict[str, Any]]:
+def _normalize_nodes(value: Any, *, dep_graph: bool = False) -> list[dict[str, Any]]:
     nodes: list[dict[str, Any]] = []
+    id_key = "dep_node_id" if dep_graph else "node_id"
     for item in _as_sequence(value):
-        if isinstance(item, tuple) and len(item) == 2:
-            node_id, node_value = item
-            if isinstance(node_value, Mapping):
-                entry = {"node_id": node_id, **dict(node_value)}
-            else:
-                entry = {"node_id": node_id, "value": node_value}
-        elif isinstance(item, Mapping):
+        if isinstance(item, Mapping):
             entry = dict(item)
         else:
-            entry = {"node_id": item}
+            entry = {id_key: item}
         nodes.append(entry)
     return nodes
 
 
 def _normalize_artifacts(value: Any) -> list[dict[str, Any]]:
     artifacts: list[dict[str, Any]] = []
-    if isinstance(value, Mapping):
-        iterable = value.items()
-    else:
-        iterable = _as_sequence(value)
-    for item in iterable:
-        if isinstance(item, tuple) and len(item) == 2:
-            label, path = item
-            artifacts.append({"label": label, "path": path, "status": _artifact_status(path)})
-        elif isinstance(item, Mapping):
-            path = item.get("path") or item.get("href") or item.get("url") or item.get("file")
-            label = item.get("label") or item.get("name") or item.get("title")
-            if path is None:
-                path_items = [
-                    (key, item_value)
-                    for key, item_value in item.items()
-                    if key not in {"label", "name", "title", "status"}
-                ]
-                if len(path_items) == 1:
-                    label, path = path_items[0]
-            label = label or path or "artifact"
-            artifacts.append({"label": label, "path": path, "status": _artifact_status(path, item.get("status"))})
+    for item in _as_sequence(value):
+        if isinstance(item, Mapping):
+            path = item.get("path")
+            artifacts.append({
+                "label": item.get("label") or path or "artifact",
+                "path": path,
+                "status": _artifact_status(path, item.get("status")),
+                "detail": item.get("detail"),
+            })
         else:
             artifacts.append({"label": Path(str(item)).name or "artifact", "path": item, "status": _artifact_status(item)})
     return artifacts
@@ -262,24 +182,13 @@ def _artifact_status(path: Any, status: Any = None) -> Any:
 
 def _normalize_verification(value: Any) -> list[dict[str, Any]]:
     checks: list[dict[str, Any]] = []
-    if isinstance(value, Mapping) and not any(isinstance(v, Mapping) for v in value.values()):
-        for key, check_value in value.items():
-            checks.append({"name": key, "status": check_value})
-        return checks
-    if isinstance(value, Mapping):
-        iterable = value.items()
-    else:
-        iterable = _as_sequence(value)
-    for item in iterable:
-        if isinstance(item, tuple) and len(item) == 2:
-            name, check_value = item
-            if isinstance(check_value, Mapping):
-                checks.append({"name": name, **dict(check_value)})
-            else:
-                checks.append({"name": name, "status": check_value})
-        elif isinstance(item, Mapping):
-            name = item.get("name") or item.get("check") or item.get("label") or "verification"
-            checks.append({"name": name, **dict(item)})
+    for item in _as_sequence(value):
+        if isinstance(item, Mapping):
+            checks.append({
+                "name": item.get("name") or "verification",
+                "status": item.get("status", ""),
+                "detail": item.get("detail"),
+            })
         else:
             checks.append({"name": "verification", "status": item})
     return checks
@@ -409,9 +318,9 @@ def _render_verification(checks: list[dict[str, Any]]) -> str:
         for check in checks:
             rows.append(
                 "<tr>"
-                f"<td>{_h(check.get('name') or check.get('check') or 'verification')}</td>"
-                f"<td>{_h(check.get('status', check.get('success', '')))}</td>"
-                f"<td>{_h(check.get('detail') or check.get('message') or check.get('reason') or '')}</td>"
+                f"<td>{_h(check.get('name') or 'verification')}</td>"
+                f"<td>{_h(check.get('status', ''))}</td>"
+                f"<td>{_h(check.get('detail', ''))}</td>"
                 "</tr>"
             )
         body = "<table><thead><tr><th>Check</th><th>Status</th><th>Detail</th></tr></thead><tbody>" + "".join(rows) + "</tbody></table>"
@@ -421,20 +330,28 @@ def _render_verification(checks: list[dict[str, Any]]) -> str:
 def _render_node_table(title: str, nodes: list[dict[str, Any]]) -> str:
     if not nodes:
         body = "<p class=\"empty\">No node evidence recorded.</p>"
+    elif any("dep_node_id" in node for node in nodes):
+        rows = []
+        for node in nodes:
+            rows.append(
+                "<tr>"
+                f"<td><code>{_h(node.get('dep_node_id', ''))}</code></td>"
+                f"<td>{_h(node.get('path', ''))}</td>"
+                f"<td>{_h(node.get('source_feature', ''))}</td>"
+                f"<td>{_h(node.get('change', ''))}</td>"
+                "</tr>"
+            )
+        body = "<table><thead><tr><th>ID</th><th>Path</th><th>Source feature</th><th>Change</th></tr></thead><tbody>" + "".join(rows) + "</tbody></table>"
     else:
         rows = []
         for node in nodes:
-            node_id = node.get("node_id") or node.get("id") or node.get("dep_node") or ""
-            node_type = node.get("type_name") or node.get("node_type") or node.get("type") or ""
-            path = node.get("meta_path") or node.get("path") or node.get("file_path") or node.get("feature_path") or ""
-            score = node.get("score") or node.get("weight") or node.get("status") or ""
             rows.append(
                 "<tr>"
-                f"<td><code>{_h(node_id)}</code></td>"
+                f"<td><code>{_h(node.get('node_id', ''))}</code></td>"
                 f"<td>{_h(node.get('name', ''))}</td>"
-                f"<td>{_h(node_type)}</td>"
-                f"<td>{_h(path)}</td>"
-                f"<td>{_h(score)}</td>"
+                f"<td>{_h(node.get('type', ''))}</td>"
+                f"<td>{_h(node.get('path', ''))}</td>"
+                f"<td>{_h(node.get('score', ''))}</td>"
                 "</tr>"
             )
         body = "<table><thead><tr><th>ID</th><th>Name</th><th>Type</th><th>Path</th><th>Score/status</th></tr></thead><tbody>" + "".join(rows) + "</tbody></table>"

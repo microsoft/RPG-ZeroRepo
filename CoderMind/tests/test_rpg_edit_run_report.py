@@ -70,9 +70,10 @@ def test_review_publish_report_returns_report_path(tmp_path: Path, monkeypatch) 
     monkeypatch.setattr(review, "RPG_EDIT_CODE_RESULT_FILE", code_path)
     monkeypatch.setattr(review, "RPG_EDIT_REVIEW_RESULT_FILE", review_path)
 
-    def fake_write_command_report(*args, **kwargs):
+    def fake_write_command_report(run):
+        data = run.to_dict()
         review_artifact = next(
-            item for item in kwargs["artifacts"] if item["label"] == "review_result"
+            item for item in data["artifacts"] if item["label"] == "review_result"
         )
         assert review_artifact["status"] == "available"
         return report_path
@@ -112,10 +113,11 @@ def test_review_report_reconstructs_affected_node_evidence_from_impact(tmp_path:
     monkeypatch.setattr(review, "RPG_EDIT_CODE_RESULT_FILE", code_path)
     monkeypatch.setattr(review, "RPG_EDIT_REVIEW_RESULT_FILE", review_path)
 
-    def fake_write_command_report(*args, **kwargs):
-        assert kwargs["rpg_nodes"] == [{"node_id": "planned", "name": "Planned Node", "dep_nodes": [dep_id]}]
-        assert kwargs["dep_nodes"] == [
-            {"node_id": dep_id, "source_feature": "planned", "path": "scripts/common/run_report.py"}
+    def fake_write_command_report(run):
+        data = run.to_dict()
+        assert data["rpg_deltas"] == [{"node_id": "planned", "name": "Planned Node"}]
+        assert data["dep_graph_deltas"] == [
+            {"dep_node_id": dep_id, "path": "scripts/common/run_report.py", "source_feature": "planned"}
         ]
         return report_path
 

@@ -402,9 +402,8 @@ def test_attach_update_report_uses_update_rpg_result_fields(tmp_path, monkeypatc
 
     captured = {}
 
-    def fake_write_command_report(command, **kwargs):
-        captured["command"] = command
-        captured.update(kwargs)
+    def fake_write_command_report(run):
+        captured.update(run.to_dict())
         return tmp_path / "report.html"
 
     monkeypatch.setattr(update_graphs, "write_command_report", fake_write_command_report)
@@ -432,15 +431,16 @@ def test_attach_update_report_uses_update_rpg_result_fields(tmp_path, monkeypatc
         "viz_path": "/tmp/rpg.html",
     })
 
-    cards = {card["label"]: card["value"] for card in captured["summary_cards"]}
+    cards = {card["label"]: card["value"] for card in captured["summary"]}
+    artifacts = {artifact["label"]: artifact["path"] for artifact in captured["artifacts"]}
     assert result["report_path"] == str(tmp_path / "report.html")
     assert cards["git files"] == 2
     assert cards["semantic files"] == 3
     assert cards["RPG nodes"] == "4504 (delta: +2)"
     assert cards["dep graph"] == "nodes=2708 (delta: +46), edges=5498 (delta: +103)"
-    assert captured["artifacts"]["rpg_json"] == "/tmp/rpg.json"
-    assert captured["stages"][0]["reason"] == "2 changed files"
-    assert captured["stages"][1]["reason"] == "3 semantic files, modified=3"
+    assert artifacts["rpg_json"] == "/tmp/rpg.json"
+    assert captured["steps"][0]["reason"] == "2 changed files"
+    assert captured["steps"][1]["reason"] == "3 semantic files, modified=3"
 
 
 # ============================================================================

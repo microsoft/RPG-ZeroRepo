@@ -34,6 +34,7 @@ if str(SCRIPTS_DIR) not in sys.path:
 
 from common.paths import REPO_RPG_FILE, DEP_GRAPH_FILE, RPG_HTML_FILE, HOOK_CALLS_LOG  # noqa: E402
 from common.rpg_io import atomic_write_rpg, safe_load_rpg  # noqa: E402
+from common.run_events import ArtifactEvent, CommandRun, StepEvent, VerificationEvent  # noqa: E402
 from common.run_report import write_command_report  # noqa: E402
 
 
@@ -167,11 +168,11 @@ def _attach_update_report(result: dict) -> dict:
         viz_status = result.get("viz_error") or (
             "ok" if result.get("viz_path") else "not recorded"
         )
-        report_path = write_command_report(
-            "update_rpg",
+        report_path = write_command_report(CommandRun(
+            command="update_rpg",
             title="CoderMind update_rpg Explain View",
             status=result.get("mode") or result.get("status"),
-            summary_cards=[
+            summary=[
                 {"label": "mode", "value": result.get("mode", "")},
                 {
                     "label": "reason",
@@ -192,48 +193,48 @@ def _attach_update_report(result: dict) -> dict:
                     "value": result.get("viz_path") or result.get("viz_error", ""),
                 },
             ],
-            stages=[
-                {
-                    "name": "git delta",
-                    "status": result.get("mode", ""),
-                    "reason": (
+            steps=[
+                StepEvent(
+                    name="git delta",
+                    status=result.get("mode", ""),
+                    reason=(
                         f"{git_total} changed files"
                         if git_total != ""
                         else "not recorded"
                     ),
-                },
-                {
-                    "name": "semantic delta",
-                    "status": result.get("mode", ""),
-                    "reason": _format_diff_summary(semantic_summary),
-                },
-                {
-                    "name": "sync graph",
-                    "status": result.get("status", result.get("mode", "")),
-                    "reason": result.get("reason", ""),
-                },
-                {
-                    "name": "visualize",
-                    "status": (
+                ),
+                StepEvent(
+                    name="semantic delta",
+                    status=result.get("mode", ""),
+                    reason=_format_diff_summary(semantic_summary),
+                ),
+                StepEvent(
+                    name="sync graph",
+                    status=result.get("status", result.get("mode", "")),
+                    reason=result.get("reason", ""),
+                ),
+                StepEvent(
+                    name="visualize",
+                    status=(
                         "ok"
                         if result.get("viz_path")
                         else "error"
                         if result.get("viz_error")
                         else "skipped"
                     ),
-                    "reason": result.get("viz_path") or result.get("viz_error", ""),
-                },
+                    reason=result.get("viz_path") or result.get("viz_error", ""),
+                ),
             ],
-            artifacts={
-                "rpg_json": rpg_path,
-                "rpg_html": result.get("viz_path"),
-            },
-            verification={
-                "update_rpg": result.get("status", result.get("mode")),
-                "viz": viz_status,
-            },
+            artifacts=[
+                ArtifactEvent(label="rpg_json", path=rpg_path),
+                ArtifactEvent(label="rpg_html", path=result.get("viz_path")),
+            ],
+            verification=[
+                VerificationEvent(name="update_rpg", status=result.get("status", result.get("mode"))),
+                VerificationEvent(name="viz", status=viz_status),
+            ],
             evidence=result,
-        )
+        ))
         result["report_path"] = str(report_path)
     except Exception as exc:
         result["report_error"] = str(exc)

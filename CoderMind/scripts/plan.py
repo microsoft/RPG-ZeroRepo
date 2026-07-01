@@ -70,6 +70,7 @@ from common.paths import (
     SKELETON_SUMMARY_FILE,
     TASKS_FILE,
 )
+from common.run_events import ArtifactEvent, CommandRun, StepEvent, VerificationEvent
 from common.run_report import write_command_report
 
 # ---------------------------------------------------------------------------
@@ -352,32 +353,40 @@ def _write_plan_report(
             cards.append({"label": "elapsed", "value": f"{elapsed:.1f}s"})
         if post_steps is not None:
             cards.append({"label": "post steps", "value": len(post_steps)})
-        timeline = _stage_rows(states)
+        stage_rows = _stage_rows(states)
+        artifact_rows = _plan_artifacts()
+        steps = [
+            StepEvent(name=row["name"], status=row["status"], reason=row.get("reason", ""))
+            for row in stage_rows
+        ]
         for post in post_steps or []:
-            timeline.append({
-                "name": post.get("name", "post-step"),
-                "status": "ok" if post.get("returncode") == 0 else "warning",
-                "reason": f"exit {post.get('returncode')}",
-            })
-        report_path = write_command_report(
-            "plan",
+            steps.append(StepEvent(
+                name=post.get("name", "post-step"),
+                status="ok" if post.get("returncode") == 0 else "warning",
+                reason=f"exit {post.get('returncode')}",
+            ))
+        report_path = write_command_report(CommandRun(
+            command="plan",
             title="CoderMind plan Explain View",
             status=mode,
-            summary_cards=cards,
-            stages=timeline,
-            artifacts=_plan_artifacts(),
+            summary=cards,
+            steps=steps,
+            artifacts=[
+                ArtifactEvent(label=row["label"], path=row["path"], status=row.get("status"))
+                for row in artifact_rows
+            ],
             verification=[
-                {"name": s.stage.name, "status": s.type, "detail": s.message or s.reason}
+                VerificationEvent(name=s.stage.name, status=s.type, detail=s.message or s.reason)
                 for s in states
             ],
             evidence={
                 "mode": mode,
                 "elapsed": elapsed,
-                "stages": _stage_rows(states),
+                "stages": stage_rows,
                 "post_steps": post_steps or [],
-                "artifacts": _plan_artifacts(),
+                "artifacts": artifact_rows,
             },
-        )
+        ))
         return str(report_path)
     except Exception:
         return None

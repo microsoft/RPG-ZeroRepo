@@ -27,6 +27,7 @@ if str(_script_dir) not in sys.path:
 
 from common.paths import RPG_FILE, RPG_HTML_FILE, WORKSPACE_ROOT, ensure_cmind_dir  # noqa: E402
 from common.rpg_io import atomic_write_rpg  # noqa: E402
+from common.run_events import ArtifactEvent, CommandRun, StepEvent, VerificationEvent  # noqa: E402
 from common.run_report import write_command_report  # noqa: E402
 from common.trajectory import Trajectory  # noqa: E402
 
@@ -40,11 +41,11 @@ def _attach_encode_report(result: dict) -> dict:
             dep_summary.append(f"edges={result.get('dep_edges')}")
         if result.get("dep_to_rpg_map_size") is not None:
             dep_summary.append(f"mapped={result.get('dep_to_rpg_map_size')}")
-        report_path = write_command_report(
-            "encode",
+        report_path = write_command_report(CommandRun(
+            command="encode",
             title="CoderMind encode Explain View",
             status=result.get("status"),
-            summary_cards=[
+            summary=[
                 {"label": "repo", "value": result.get("repo_name", "unknown")},
                 {"label": "RPG nodes", "value": result.get("node_count", 0)},
                 {"label": "RPG edges", "value": result.get("edge_count", 0)},
@@ -53,20 +54,20 @@ def _attach_encode_report(result: dict) -> dict:
                 {"label": "visualization", "value": result.get("viz_path", result.get("viz_error", ""))},
                 {"label": "trajectory", "value": result.get("trajectory", "")},
             ],
-            stages=[
-                {"name": "parse_rpg", "status": "recorded", "reason": f"nodes={result.get('node_count', 0)}, edges={result.get('edge_count', 0)}"},
-                {"name": "dep_graph", "status": "recorded" if dep_summary else "not recorded", "reason": ", ".join(dep_summary)},
-                {"name": "save_rpg", "status": "recorded" if result.get("output_path") else "not recorded", "reason": result.get("output_path", "")},
-                {"name": "visualize", "status": "recorded" if result.get("viz_path") else "not recorded", "reason": result.get("viz_path") or result.get("viz_error", "")},
+            steps=[
+                StepEvent(name="parse_rpg", status="recorded", reason=f"nodes={result.get('node_count', 0)}, edges={result.get('edge_count', 0)}"),
+                StepEvent(name="dep_graph", status="recorded" if dep_summary else "not recorded", reason=", ".join(dep_summary)),
+                StepEvent(name="save_rpg", status="recorded" if result.get("output_path") else "not recorded", reason=result.get("output_path", "")),
+                StepEvent(name="visualize", status="recorded" if result.get("viz_path") else "not recorded", reason=result.get("viz_path") or result.get("viz_error", "")),
             ],
-            artifacts={
-                "rpg_json": result.get("output_path"),
-                "rpg_html": result.get("viz_path"),
-                "trajectory": result.get("trajectory"),
-            },
-            verification={"encode": result.get("status")},
+            artifacts=[
+                ArtifactEvent(label="rpg_json", path=result.get("output_path")),
+                ArtifactEvent(label="rpg_html", path=result.get("viz_path")),
+                ArtifactEvent(label="trajectory", path=result.get("trajectory")),
+            ],
+            verification=[VerificationEvent(name="encode", status=result.get("status"))],
             evidence=result,
-        )
+        ))
         result["report_path"] = str(report_path)
     except Exception as exc:
         result["report_error"] = str(exc)
