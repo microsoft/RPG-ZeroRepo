@@ -85,12 +85,12 @@ class GitRunner:
     def __init__(
         self,
         repo_path: str,
-        main_branch: str = "main",
+        main_branch: str = MAIN_BRANCH,
         logger: Optional[logging.Logger] = None
     ):
         self.repo_path = Path(repo_path)
         self.logger = logger or logging.getLogger(__name__)
-        self.main_branch = self.MAIN_BRANCH
+        self.main_branch = main_branch
 
         # Ensure repo exists and is a git repo
         self._ensure_git_repository()
@@ -149,7 +149,7 @@ class GitRunner:
         if not git_dir.exists():
             self.logger.info("Initializing git repository...")
             self.repo_path.mkdir(parents=True, exist_ok=True)
-            self.run_git(["init", "-b", self.MAIN_BRANCH])
+            self.run_git(["init", "-b", self.main_branch])
 
         # Configure safe directory
         self.run_git([
