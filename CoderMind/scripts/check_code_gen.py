@@ -29,6 +29,7 @@ from common.paths import (
     cmd_for,
     REPO_DIR,
 )
+from common.run_events import ArtifactEvent, CommandRun, StepEvent, VerificationEvent
 from common.run_report import write_command_report
 from common.execution_state import load_code_gen_state
 from common.execution_state import load_code_gen_state as _load_state, save_code_gen_state as _save_state
@@ -436,11 +437,11 @@ def determine_state(
 def _write_code_gen_report(result: Dict[str, Any]) -> str | None:
     try:
         stats = result.get("stats") or {}
-        report_path = write_command_report(
-            "code_gen",
+        report_path = write_command_report(CommandRun(
+            command="code_gen",
             title="CoderMind code_gen Progress View",
             status=result.get("type"),
-            summary_cards=[
+            summary=[
                 {"label": "state", "value": result.get("type", "")},
                 {"label": "total", "value": stats.get("total_tasks", 0)},
                 {"label": "completed", "value": stats.get("completed", 0)},
@@ -449,13 +450,16 @@ def _write_code_gen_report(result: Dict[str, Any]) -> str | None:
                 {"label": "current batch", "value": (result.get("current_batch") or {}).get("batch_id", "")},
                 {"label": "next batch", "value": result.get("next_batch", "")},
             ],
-            stages=[
-                {"name": "determine_state", "status": result.get("type"), "reason": result.get("message", "")},
-                {"name": "current_batch", "status": (result.get("current_batch") or {}).get("phase", "none"), "reason": (result.get("current_batch") or {}).get("file_path", "")},
-                {"name": "next_action", "status": "available" if result.get("next_action") else "missing", "reason": result.get("next_action", "")},
+            steps=[
+                StepEvent(name="determine_state", status=result.get("type"), reason=result.get("message", "")),
+                StepEvent(name="current_batch", status=(result.get("current_batch") or {}).get("phase", "none"), reason=(result.get("current_batch") or {}).get("file_path", "")),
+                StepEvent(name="next_action", status="available" if result.get("next_action") else "missing", reason=result.get("next_action", "")),
             ],
-            artifacts={"tasks": TASKS_FILE, "code_gen_state": STATE_FILE},
-            verification=[{"name": "state", "status": result.get("type"), "detail": result.get("message", "")}],
+            artifacts=[
+                ArtifactEvent(label="tasks", path=TASKS_FILE),
+                ArtifactEvent(label="code_gen_state", path=STATE_FILE),
+            ],
+            verification=[VerificationEvent(name="state", status=result.get("type"), detail=result.get("message", ""))],
             evidence={
                 "type": result.get("type"),
                 "stats": stats,
@@ -463,7 +467,7 @@ def _write_code_gen_report(result: Dict[str, Any]) -> str | None:
                 "next_batch": result.get("next_batch"),
                 "next_action": result.get("next_action"),
             },
-        )
+        ))
         return str(report_path)
     except Exception as exc:
         result["report_error"] = str(exc)

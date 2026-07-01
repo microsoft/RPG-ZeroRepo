@@ -44,6 +44,14 @@ from common.paths import (  # noqa: E402
     RPG_EDIT_CODE_RESULT_FILE,
     RPG_EDIT_REVIEW_RESULT_FILE,
 )
+from common.run_events import (  # noqa: E402
+    ArtifactEvent,
+    CommandRun,
+    DepGraphDeltaEvent,
+    RPGDeltaEvent,
+    StepEvent,
+    VerificationEvent,
+)
 from common.run_report import write_command_report  # noqa: E402
 
 logger = logging.getLogger(__name__)
@@ -197,18 +205,44 @@ def _publish_review_report(result: Dict[str, Any], plan_path: Path, impact_path:
     artifacts = _load_review_artifacts(plan_path, impact_path)
     candidates = _selected_candidate_rows(artifacts)
     try:
-        report_path = write_command_report(
-            "rpg_edit",
+        report_path = write_command_report(CommandRun(
+            command="rpg_edit",
             title="CoderMind rpg_edit Explain View",
             status=str(result.get("type", "review")),
-            summary_cards=_review_summary_cards(result, artifacts),
-            stages=_review_timeline(result, artifacts),
-            rpg_nodes=candidates,
-            dep_nodes=_dep_node_rows(candidates),
-            artifacts=_artifact_links(plan_path, impact_path),
-            verification=_review_verification(result, artifacts),
+            summary=_review_summary_cards(result, artifacts),
+            steps=[
+                StepEvent(name=row.get("name", "stage"), status=row.get("status"), reason=row.get("reason", ""))
+                for row in _review_timeline(result, artifacts)
+            ],
+            rpg_deltas=[
+                RPGDeltaEvent(
+                    node_id=row.get("node_id"),
+                    name=row.get("name"),
+                    type=row.get("type"),
+                    path=row.get("path") or row.get("meta_path"),
+                    score=row.get("score"),
+                )
+                for row in candidates
+            ],
+            dep_graph_deltas=[
+                DepGraphDeltaEvent(
+                    dep_node_id=row.get("node_id"),
+                    path=row.get("path"),
+                    source_feature=row.get("source_feature"),
+                    change=row.get("change"),
+                )
+                for row in _dep_node_rows(candidates)
+            ],
+            artifacts=[
+                ArtifactEvent(label=row["label"], path=row["path"], status=row.get("status"))
+                for row in _artifact_links(plan_path, impact_path)
+            ],
+            verification=[
+                VerificationEvent(name=row.get("name", "verification"), status=row.get("status"), detail=row.get("detail"))
+                for row in _review_verification(result, artifacts)
+            ],
             evidence={"artifacts": artifacts, "review_result": result},
-        )
+        ))
         result["report_path"] = str(report_path)
     except Exception as exc:
         result["report_error"] = str(exc)

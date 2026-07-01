@@ -8,26 +8,39 @@ _SCRIPTS = _REPO / "scripts"
 if str(_SCRIPTS) not in sys.path:
     sys.path.insert(0, str(_SCRIPTS))
 
+from common.run_events import (
+    ArtifactEvent,
+    CodeDeltaEvent,
+    CommandRun,
+    DepGraphDeltaEvent,
+    RPGDeltaEvent,
+    RetrievalEvent,
+    StepEvent,
+    UserDecisionEvent,
+    VerificationEvent,
+)
 from common.run_report import write_command_report
 
 
 def test_write_command_report_escapes_content_and_writes_sections(tmp_path: Path) -> None:
     report = write_command_report(
-        "rpg/edit <script>alert(1)</script>",
-        title="Title <unsafe>",
-        status="ok <bad>",
-        summary_cards=[
-            {"label": "node", "value": "<script>alert(1)</script>"},
-            {"label": "count", "value": 3},
-        ],
-        stages=[{"name": "locate <x>", "status": "done", "reason": "score > 1"}],
-        rpg_nodes=[{"node_id": "feature<script>", "name": "Explain", "meta_path": "a.py"}],
-        dep_nodes=[{"node_id": "a.py:f", "path": "a.py"}],
-        artifacts={"plan": tmp_path / "plan.json"},
-        verification={"pytest": "passed"},
-        evidence={"raw": "<script>evil()</script>"},
+        CommandRun(
+            command="rpg/edit <script>alert(1)</script>",
+            title="Title <unsafe>",
+            status="ok <bad>",
+            summary=[
+                {"label": "node", "value": "<script>alert(1)</script>"},
+                {"label": "count", "value": 3},
+            ],
+            steps=[StepEvent(name="locate <x>", status="done", reason="score > 1")],
+            rpg_deltas=[RPGDeltaEvent(node_id="feature<script>", name="Explain", path="a.py")],
+            dep_graph_deltas=[DepGraphDeltaEvent(dep_node_id="a.py:f", path="a.py")],
+            artifacts=[ArtifactEvent(label="plan", path=tmp_path / "plan.json")],
+            verification=[VerificationEvent(name="pytest", status="passed")],
+            evidence={"raw": "<script>evil()</script>"},
+            timestamp="2026-06-30T12:34:56Z",
+        ),
         report_dir=tmp_path,
-        timestamp="2026-06-30T12:34:56Z",
     )
 
     assert report.parent == tmp_path
@@ -43,10 +56,12 @@ def test_write_command_report_escapes_content_and_writes_sections(tmp_path: Path
 
 def test_write_command_report_limits_summary_cards(tmp_path: Path) -> None:
     report = write_command_report(
-        "encode",
-        summary_cards=[{"label": f"card-{i}", "value": i} for i in range(9)],
+        CommandRun(
+            command="encode",
+            summary=[{"label": f"card-{i}", "value": i} for i in range(9)],
+            timestamp="fixed",
+        ),
         report_dir=tmp_path,
-        timestamp="fixed",
     )
 
     html = report.read_text(encoding="utf-8")
@@ -59,8 +74,8 @@ def test_write_command_report_limits_summary_cards(tmp_path: Path) -> None:
 
 
 def test_write_command_report_preserves_same_timestamp_runs(tmp_path: Path) -> None:
-    first = write_command_report("update_rpg", report_dir=tmp_path, timestamp="fixed")
-    second = write_command_report("update_rpg", report_dir=tmp_path, timestamp="fixed")
+    first = write_command_report(CommandRun("update_rpg", timestamp="fixed"), report_dir=tmp_path)
+    second = write_command_report(CommandRun("update_rpg", timestamp="fixed"), report_dir=tmp_path)
 
     assert first != second
     assert first.name == "cmind_run_update_rpg_fixed.html"
@@ -71,10 +86,12 @@ def test_write_command_report_preserves_same_timestamp_runs(tmp_path: Path) -> N
 
 def test_write_command_report_does_not_invent_node_rows_from_counts(tmp_path: Path) -> None:
     report = write_command_report(
-        "encode",
-        evidence={"dep_nodes": 4, "rpg_nodes": 6},
+        CommandRun(
+            command="encode",
+            evidence={"dep_nodes": 4, "rpg_nodes": 6},
+            timestamp="fixed",
+        ),
         report_dir=tmp_path,
-        timestamp="fixed",
     )
 
     html = report.read_text(encoding="utf-8")
@@ -89,14 +106,19 @@ def test_write_command_report_infers_artifact_status_and_preserves_verification_
     missing = tmp_path / "missing.json"
 
     report = write_command_report(
-        "encode",
-        artifacts=[("rpg_json", available), {"missing_json": missing}],
-        verification=[
-            {"name": "message", "status": "ok", "message": "from message"},
-            {"name": "reason", "status": "warn", "reason": "from reason"},
-        ],
+        CommandRun(
+            command="encode",
+            artifacts=[
+                ArtifactEvent(label="rpg_json", path=available),
+                ArtifactEvent(label="missing_json", path=missing),
+            ],
+            verification=[
+                VerificationEvent(name="message", status="ok", detail="from message"),
+                VerificationEvent(name="reason", status="warn", detail="from reason"),
+            ],
+            timestamp="fixed",
+        ),
         report_dir=tmp_path,
-        timestamp="fixed",
     )
 
     html = report.read_text(encoding="utf-8")
@@ -106,3 +128,50 @@ def test_write_command_report_infers_artifact_status_and_preserves_verification_
     assert html.count("<td>missing</td>") == 1
     assert "<td>from message</td>" in html
     assert "<td>from reason</td>" in html
+
+
+def test_all_event_types_serialize_with_optional_fields(tmp_path: Path) -> None:
+    available = tmp_path / "artifact.txt"
+    available.write_text("ok", encoding="utf-8")
+
+    events = [
+        StepEvent(),
+        RetrievalEvent(query="grep", tool="grep", hits=[{"path": "a.py"}], reason="matched"),
+        RPGDeltaEvent(node_id="feature", name="Feature", type="function", path="a.py", change="modified", score=1.0),
+        DepGraphDeltaEvent(dep_node_id="a.py:f", path="a.py", source_feature="feature", change="modified"),
+        CodeDeltaEvent(file="a.py", change_type="modify", before="old", after="new", diff="@@"),
+        VerificationEvent(),
+        UserDecisionEvent(decision="apply", branch="rpg-edit/x", before_state={"clean": True}, rollback_path="backup", confirmed=True),
+        ArtifactEvent(label="artifact", path=available),
+    ]
+
+    for event in events:
+        assert isinstance(event.to_dict(), dict)
+
+    run = CommandRun(
+        command="events",
+        retrievals=[events[1]],
+        rpg_deltas=[events[2]],
+        dep_graph_deltas=[events[3]],
+        code_deltas=[events[4]],
+        user_decisions=[events[6]],
+        artifacts=[events[7]],
+    ).to_dict()
+
+    assert run["retrievals"][0]["tool"] == "grep"
+    assert run["code_deltas"][0]["file"] == "a.py"
+    assert run["user_decisions"][0]["confirmed"] is True
+    assert run["artifacts"][0]["status"] == "available"
+
+
+def test_write_command_report_accepts_command_run_mapping(tmp_path: Path) -> None:
+    run = CommandRun(
+        command="mapping",
+        summary=[{"label": "safe", "value": "<ok>"}],
+        timestamp="fixed",
+    ).to_dict()
+
+    report = write_command_report(run, report_dir=tmp_path)
+
+    html = report.read_text(encoding="utf-8")
+    assert "&lt;ok&gt;" in html
