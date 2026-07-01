@@ -533,7 +533,10 @@ def _make_rpg_with_dep_graph(tmp_path):
                     "name": "Core Logic",
                     "node_type": "functional_area",
                     "level": 1,
-                    "meta": {"type_name": "directory", "path": "."},
+                    "meta": {
+                        "type_name": "directory",
+                        "path": ["src/core.py", "src/extra.py"],
+                    },
                     "children": [
                         {
                             "id": "feat_1",
@@ -604,6 +607,17 @@ class TestMCPServer:
         results = engine.search("Core Logic", scope="feature")
         assert len(results) >= 1
         assert any(r["id"] == "area_1" for r in results)
+
+    def test_graph_query_engine_search_list_path(self, tmp_rpg_with_dep_graph):
+        from rpg.graph_query import GraphQueryEngine
+        engine = GraphQueryEngine.from_rpg_file(tmp_rpg_with_dep_graph)
+        feature_results = engine.search("src/core.py", scope="feature")
+        all_results = engine.search("src/extra.py", scope="all")
+        assert any(
+            r["id"] == "area_1" and r["path"] == ["src/core.py", "src/extra.py"]
+            for r in feature_results
+        )
+        assert any(r["id"] == "area_1" for r in all_results)
 
     def test_graph_query_engine_explore(self, tmp_rpg_with_dep_graph):
         """explore() should traverse edges from a node."""
