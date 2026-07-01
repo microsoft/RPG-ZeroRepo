@@ -230,14 +230,34 @@ def _normalize_artifacts(value: Any) -> list[dict[str, Any]]:
     for item in iterable:
         if isinstance(item, tuple) and len(item) == 2:
             label, path = item
-            artifacts.append({"label": label, "path": path})
+            artifacts.append({"label": label, "path": path, "status": _artifact_status(path)})
         elif isinstance(item, Mapping):
             path = item.get("path") or item.get("href") or item.get("url") or item.get("file")
-            label = item.get("label") or item.get("name") or item.get("title") or path or "artifact"
-            artifacts.append({"label": label, "path": path, "status": item.get("status")})
+            label = item.get("label") or item.get("name") or item.get("title")
+            if path is None:
+                path_items = [
+                    (key, item_value)
+                    for key, item_value in item.items()
+                    if key not in {"label", "name", "title", "status"}
+                ]
+                if len(path_items) == 1:
+                    label, path = path_items[0]
+            label = label or path or "artifact"
+            artifacts.append({"label": label, "path": path, "status": _artifact_status(path, item.get("status"))})
         else:
-            artifacts.append({"label": Path(str(item)).name or "artifact", "path": item})
+            artifacts.append({"label": Path(str(item)).name or "artifact", "path": item, "status": _artifact_status(item)})
     return artifacts
+
+
+def _artifact_status(path: Any, status: Any = None) -> Any:
+    if status not in (None, ""):
+        return status
+    if path in (None, ""):
+        return "missing"
+    try:
+        return "available" if Path(str(path)).expanduser().exists() else "missing"
+    except (OSError, ValueError):
+        return "missing"
 
 
 def _normalize_verification(value: Any) -> list[dict[str, Any]]:
@@ -433,7 +453,7 @@ def _render_artifacts(artifacts: list[dict[str, Any]]) -> str:
                 "<tr>"
                 f"<td>{_h(artifact.get('label', 'artifact'))}</td>"
                 f"<td><a href=\"{_h_attr(href)}\">{_h(path or '')}</a></td>"
-                f"<td>{_h(artifact.get('status', ''))}</td>"
+                f"<td>{_h(_artifact_status(path, artifact.get('status')))}</td>"
                 "</tr>"
             )
         body = "<table><thead><tr><th>Artifact</th><th>Path</th><th>Status</th></tr></thead><tbody>" + "".join(rows) + "</tbody></table>"

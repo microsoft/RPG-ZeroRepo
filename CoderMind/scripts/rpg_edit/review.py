@@ -94,14 +94,41 @@ def _artifact_links(plan_path: Path, impact_path: Optional[Path]) -> List[Dict[s
     return links
 
 
+def _impact_results(artifacts: Dict[str, Any]) -> Dict[str, Any]:
+    impact = artifacts.get("impact") if isinstance(artifacts.get("impact"), dict) else {}
+    results = impact.get("results") if isinstance(impact.get("results"), dict) else {}
+    return results
+
+
 def _selected_candidate_rows(artifacts: Dict[str, Any]) -> List[Dict[str, Any]]:
     locate = artifacts.get("locate") if isinstance(artifacts.get("locate"), dict) else {}
     plan = artifacts.get("plan") if isinstance(artifacts.get("plan"), dict) else {}
-    affected = set(plan.get("affected_nodes") or [])
-    candidates = locate.get("results") or []
-    if affected:
-        candidates = [c for c in candidates if c.get("node_id") in affected]
-    return [c for c in candidates if isinstance(c, dict)]
+    affected = [node_id for node_id in plan.get("affected_nodes") or [] if node_id]
+    candidates = [c for c in locate.get("results") or [] if isinstance(c, dict)]
+    if not affected:
+        return candidates
+
+    impact_results = _impact_results(artifacts)
+    candidates_by_id = {c.get("node_id"): c for c in candidates if c.get("node_id") in affected}
+    rows: List[Dict[str, Any]] = []
+    for node_id in affected:
+        impact = impact_results.get(node_id) if isinstance(impact_results.get(node_id), dict) else {}
+        candidate = dict(candidates_by_id.get(node_id) or {"node_id": node_id})
+        if impact:
+            candidate.setdefault("name", impact.get("name", ""))
+            if not candidate.get("dep_nodes"):
+                candidate["dep_nodes"] = impact.get("dep_nodes") or []
+            if not candidate.get("status") and (impact.get("error") or impact.get("message")):
+                candidate["status"] = impact.get("error") or impact.get("message")
+        rows.append(candidate)
+    return rows
+
+
+def _dep_node_path(dep_id: Any) -> str:
+    if dep_id in (None, ""):
+        return ""
+    dep_id_text = str(dep_id)
+    return dep_id_text.split(":", 1)[0] if ":" in dep_id_text else dep_id_text
 
 
 def _dep_node_rows(candidates: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
@@ -111,7 +138,7 @@ def _dep_node_rows(candidates: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
             rows.append({
                 "node_id": dep_id,
                 "source_feature": candidate.get("node_id"),
-                "path": candidate.get("meta_path"),
+                "path": _dep_node_path(dep_id) or candidate.get("meta_path"),
             })
     return rows
 

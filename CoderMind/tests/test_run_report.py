@@ -81,3 +81,28 @@ def test_write_command_report_does_not_invent_node_rows_from_counts(tmp_path: Pa
     assert html.count("No node evidence recorded.") == 2
     assert '"dep_nodes": 4' in html
     assert '<td><code>4</code></td>' not in html
+
+
+def test_write_command_report_infers_artifact_status_and_preserves_verification_detail(tmp_path: Path) -> None:
+    available = tmp_path / "available.json"
+    available.write_text("{}", encoding="utf-8")
+    missing = tmp_path / "missing.json"
+
+    report = write_command_report(
+        "encode",
+        artifacts=[("rpg_json", available), {"missing_json": missing}],
+        verification=[
+            {"name": "message", "status": "ok", "message": "from message"},
+            {"name": "reason", "status": "warn", "reason": "from reason"},
+        ],
+        report_dir=tmp_path,
+        timestamp="fixed",
+    )
+
+    html = report.read_text(encoding="utf-8")
+    assert "<td>rpg_json</td>" in html
+    assert "<td>missing_json</td>" in html
+    assert html.count("<td>available</td>") == 1
+    assert html.count("<td>missing</td>") == 1
+    assert "<td>from message</td>" in html
+    assert "<td>from reason</td>" in html

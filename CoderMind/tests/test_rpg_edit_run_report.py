@@ -84,3 +84,43 @@ def test_review_publish_report_returns_report_path(tmp_path: Path, monkeypatch) 
     assert result["report_path"] == str(report_path)
     persisted = json.loads(review_path.read_text(encoding="utf-8"))
     assert persisted["report_path"] == str(report_path)
+
+
+def test_review_report_reconstructs_affected_node_evidence_from_impact(tmp_path: Path, monkeypatch) -> None:
+    review = _load_script("rpg_edit_review_impact_test", _SCRIPTS / "rpg_edit" / "review.py")
+
+    validate_path = tmp_path / "validate.json"
+    locate_path = tmp_path / "locate.json"
+    plan_path = tmp_path / "plan.json"
+    impact_path = tmp_path / "impact.json"
+    code_path = tmp_path / "code.json"
+    review_path = tmp_path / "review.json"
+    report_path = tmp_path / "report.html"
+    dep_id = "scripts/common/run_report.py:_render_artifacts"
+
+    validate_path.write_text(json.dumps({"type": "ready"}), encoding="utf-8")
+    locate_path.write_text(json.dumps({"type": "candidates", "results": [{"node_id": "other", "name": "Other"}]}), encoding="utf-8")
+    plan_path.write_text(json.dumps({"affected_nodes": ["planned"], "code_changes": [{"file_path": "scripts/common/run_report.py"}]}), encoding="utf-8")
+    impact_path.write_text(
+        json.dumps({"type": "impact", "results": {"planned": {"name": "Planned Node", "dep_nodes": [dep_id], "affected_files": ["scripts/common/run_report.py"]}}}),
+        encoding="utf-8",
+    )
+    code_path.write_text(json.dumps({"success": True, "files_modified": ["scripts/common/run_report.py"], "last_status": "complete"}), encoding="utf-8")
+
+    monkeypatch.setattr(review, "RPG_EDIT_VALIDATE_FILE", validate_path)
+    monkeypatch.setattr(review, "RPG_EDIT_LOCATE_FILE", locate_path)
+    monkeypatch.setattr(review, "RPG_EDIT_CODE_RESULT_FILE", code_path)
+    monkeypatch.setattr(review, "RPG_EDIT_REVIEW_RESULT_FILE", review_path)
+
+    def fake_write_command_report(*args, **kwargs):
+        assert kwargs["rpg_nodes"] == [{"node_id": "planned", "name": "Planned Node", "dep_nodes": [dep_id]}]
+        assert kwargs["dep_nodes"] == [
+            {"node_id": dep_id, "source_feature": "planned", "path": "scripts/common/run_report.py"}
+        ]
+        return report_path
+
+    monkeypatch.setattr(review, "write_command_report", fake_write_command_report)
+
+    result = review._publish_review_report({"type": "skipped", "success": True}, plan_path, impact_path)
+
+    assert result["report_path"] == str(report_path)
