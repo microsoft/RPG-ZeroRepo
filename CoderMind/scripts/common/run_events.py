@@ -155,6 +155,8 @@ class UserDecisionEvent:
     before_state: Any = None
     rollback_path: Any = None
     confirmed: Any = None
+    apply_status: Any = None
+    test_status: Any = None
 
     def to_dict(self) -> dict[str, Any]:
         return _compact({
@@ -163,6 +165,8 @@ class UserDecisionEvent:
             "before_state": self.before_state,
             "rollback_path": self.rollback_path,
             "confirmed": self.confirmed,
+            "apply_status": self.apply_status,
+            "test_status": self.test_status,
         })
 
 

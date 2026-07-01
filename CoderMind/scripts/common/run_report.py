@@ -52,6 +52,7 @@ def write_command_report(
     retrievals = data.get("retrievals") or evidence_data.get("retrievals")
     code_deltas = data.get("code_deltas") or evidence_data.get("code_deltas")
     focused_graph = data.get("focused_graph") or evidence_data.get("focused_graph")
+    user_decisions = data.get("user_decisions") or evidence_data.get("user_decisions")
 
     page_title = title or f"CoderMind {command} Explain View"
     html = _render_page(
@@ -68,6 +69,7 @@ def write_command_report(
         focused_graph=_normalize_focused_graph(focused_graph),
         artifacts=_normalize_artifacts(data.get("artifacts")),
         verification=_normalize_verification(data.get("verification")),
+        user_decisions=_normalize_user_decisions(user_decisions),
         evidence=evidence,
     )
     report_path.write_text(html, encoding="utf-8")
@@ -243,6 +245,25 @@ def _normalize_verification(value: Any) -> list[dict[str, Any]]:
     return checks
 
 
+def _normalize_user_decisions(value: Any) -> list[dict[str, Any]]:
+    decisions: list[dict[str, Any]] = []
+    for item in _as_sequence(value):
+        if isinstance(item, Mapping):
+            entry = dict(item)
+        else:
+            entry = {"decision": item}
+        decisions.append({
+            "decision": entry.get("decision", ""),
+            "before_state": entry.get("before_state"),
+            "confirmed": entry.get("confirmed"),
+            "branch": entry.get("branch", ""),
+            "apply_status": entry.get("apply_status", ""),
+            "test_status": entry.get("test_status", ""),
+            "rollback_path": entry.get("rollback_path", ""),
+        })
+    return decisions
+
+
 def _render_page(
     *,
     title: str,
@@ -258,6 +279,7 @@ def _render_page(
     focused_graph: dict[str, Any],
     artifacts: list[dict[str, Any]],
     verification: list[dict[str, Any]],
+    user_decisions: list[dict[str, Any]],
     evidence: Mapping[str, Any],
 ) -> str:
     status_html = f"<span class=\"status\">{_h(status)}</span>" if status else ""
@@ -312,6 +334,7 @@ details summary {{ cursor:pointer; color:var(--accent); font-weight:600; }}
 </header>
 {_render_summary_cards(summary_cards)}
 {_render_timeline(stages)}
+{_render_safety_boundary(user_decisions)}
 {_render_verification(verification)}
 {_render_retrievals(retrievals)}
 {_render_node_table("Focused RPG node evidence", rpg_nodes)}
@@ -383,6 +406,39 @@ def _render_verification(checks: list[dict[str, Any]]) -> str:
             )
         body = "<table><thead><tr><th>Check</th><th>Status</th><th>Detail</th></tr></thead><tbody>" + "".join(rows) + "</tbody></table>"
     return f"<section><h2>Verification status</h2>{body}</section>"
+
+
+def _render_safety_boundary(decisions: list[dict[str, Any]]) -> str:
+    if not decisions:
+        return ""
+    rows = []
+    for decision in decisions:
+        confirmed = decision.get("confirmed")
+        if confirmed is True:
+            confirmation = "confirmed"
+        elif confirmed is False:
+            confirmation = "not confirmed"
+        else:
+            confirmation = ""
+        rows.append(
+            "<tr>"
+            f"<td>{_h(decision.get('decision', ''))}</td>"
+            f"<td>{_h(decision.get('before_state'))}</td>"
+            f"<td>{_h(confirmation)}</td>"
+            f"<td>{_h(decision.get('branch', ''))}</td>"
+            f"<td>{_h(decision.get('apply_status', ''))}</td>"
+            f"<td>{_h(decision.get('test_status', ''))}</td>"
+            f"<td>{_h(decision.get('rollback_path', ''))}</td>"
+            "</tr>"
+        )
+    body = (
+        "<table><thead><tr><th>Decision</th><th>Before state</th>"
+        "<th>Confirmation</th><th>Branch</th><th>Apply status</th>"
+        "<th>Test status</th><th>Rollback path</th></tr></thead><tbody>"
+        + "".join(rows)
+        + "</tbody></table>"
+    )
+    return f"<section><h2>Safety boundary</h2>{body}</section>"
 
 
 def _render_retrievals(retrievals: list[dict[str, Any]]) -> str:
