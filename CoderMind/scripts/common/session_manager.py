@@ -225,7 +225,7 @@ class NullSessionManager(SessionManager):
     """
 
     def before(self, ctx: TraceContext, prompt: str) -> None:
-        pass
+        return None
 
     def after(self, purpose: str) -> Optional[Path]:
         return None
