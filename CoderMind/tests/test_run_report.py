@@ -57,12 +57,28 @@ def test_write_command_report_escapes_content_and_writes_sections(tmp_path: Path
     assert report.parent == tmp_path
     assert report.name.startswith("cmind_run_rpg_edit_script_alert_1_script_")
     html = report.read_text(encoding="utf-8")
+    section_order = [
+        "Summary",
+        "Stage timeline",
+        "Safety boundary",
+        "Why these nodes?",
+        "Focused impact summary",
+        "What changed?",
+        "Verification status",
+        "Artifact links",
+        "Evidence JSON",
+    ]
+    positions = [html.index(title) for title in section_order if title in html]
+    assert positions == sorted(positions)
     assert "Summary" in html
     assert "Stage timeline" in html
     assert "Safety boundary" in html
+    assert "Verification status" in html
     assert "Artifact links" in html
     assert "Evidence JSON" in html
     assert "Before state" in html
+    assert "overflow-x:auto" in html
+    assert "min-width:680px" in html
     assert "Confirmation" in html
     assert "Branch" in html
     assert "Apply status" in html
@@ -108,22 +124,59 @@ def test_write_command_report_renders_retrievals_code_deltas_and_focused_graph(t
                 "rpg_node_count": 2,
                 "dep_node_count": 1,
             },
+            "focused_impact": {
+                "summary": {
+                    "selected_feature_groups": 2,
+                    "mapped_code_relations": 1,
+                    "missing_mappings": 1,
+                },
+                "groups": [
+                    {
+                        "node_id": "n1<script>",
+                        "name": "Node <unsafe>",
+                        "status": "mapped",
+                        "reason": "locate score < 1",
+                        "code_relations": [
+                            {"dep_node_id": "a.py:f<script>", "path": "a.py", "relation": "feature_to_dep", "status": "mapped"}
+                        ],
+                        "affected_files": ["a.py"],
+                        "changed_files": ["a.py"],
+                        "hidden_counts": {"callers": 3, "code_relations": 1},
+                    },
+                    {
+                        "node_id": "n2",
+                        "name": "Missing mapping",
+                        "status": "missing_mapping",
+                        "reason": "missing dep_graph mapping",
+                        "code_relations": [],
+                        "missing_states": {"mapping": "missing_dep_graph_mapping"},
+                        "hidden_counts": {"code_relations": 0},
+                    },
+                ],
+            },
             "timestamp": "fixed",
         },
         report_dir=tmp_path,
     )
 
     html = report.read_text(encoding="utf-8")
+    assert "Why these nodes?" in html
     assert "Retrieval evidence" in html
-    assert "Code deltas" in html
-    assert "Focused graph evidence" in html
+    assert "What changed?" in html
+    assert "Focused impact summary" in html
     assert "RPG_EDIT_LOCATE_FILE" in html
     assert "n1&lt;script&gt;" in html
+    assert "Node &lt;unsafe&gt;" in html
+    assert "a.py:f&lt;script&gt;" in html
+    assert "missing_dep_graph_mapping" in html
+    assert "Hidden counts" in html
+    assert '"callers": 3' in html
     assert "+line 0 &lt;script&gt;alert(0)&lt;/script&gt;" in html
     assert "+line 0 <script>alert(0)</script>" not in html
     assert "<details><summary>View diff</summary>" in html
     assert "<details open" not in html
-    assert html.count("<h2>Focused graph evidence</h2>") == 1
+    assert html.count("<h2>Focused impact summary</h2>") == 1
+    assert "Focused graph evidence" in html
     assert "Graph artifact" in html
     assert "Inspector metadata" in html
 
@@ -169,7 +222,8 @@ def test_write_command_report_does_not_invent_node_rows_from_counts(tmp_path: Pa
     )
 
     html = report.read_text(encoding="utf-8")
-    assert html.count("No node evidence recorded.") == 2
+    assert "Why these nodes?" not in html
+    assert "Focused impact summary" not in html
     assert '"dep_nodes": 4' in html
     assert '<td><code>4</code></td>' not in html
 

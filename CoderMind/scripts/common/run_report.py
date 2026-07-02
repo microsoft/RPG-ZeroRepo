@@ -52,6 +52,7 @@ def write_command_report(
     retrievals = data.get("retrievals") or evidence_data.get("retrievals")
     code_deltas = data.get("code_deltas") or evidence_data.get("code_deltas")
     focused_graph = data.get("focused_graph") or evidence_data.get("focused_graph")
+    focused_impact = data.get("focused_impact") or evidence_data.get("focused_impact")
     user_decisions = data.get("user_decisions") or evidence_data.get("user_decisions")
 
     page_title = title or f"CoderMind {command} Explain View"
@@ -67,6 +68,7 @@ def write_command_report(
         dep_nodes=_normalize_nodes(data.get("dep_graph_deltas"), dep_graph=True),
         code_deltas=_normalize_code_deltas(code_deltas),
         focused_graph=_normalize_focused_graph(focused_graph),
+        focused_impact=_normalize_focused_impact(focused_impact),
         artifacts=_normalize_artifacts(data.get("artifacts")),
         verification=_normalize_verification(data.get("verification")),
         user_decisions=_normalize_user_decisions(user_decisions),
@@ -204,6 +206,21 @@ def _normalize_focused_graph(value: Any) -> dict[str, Any]:
     return {"detail": value}
 
 
+def _normalize_focused_impact(value: Any) -> dict[str, Any]:
+    if value in (None, "", [], {}):
+        return {}
+    if not isinstance(value, Mapping):
+        return {"detail": value, "groups": []}
+    normalized = dict(value)
+    normalized["summary"] = dict(value.get("summary") or {}) if isinstance(value.get("summary"), Mapping) else {}
+    normalized["groups"] = [dict(group) if isinstance(group, Mapping) else {"detail": group} for group in _as_sequence(value.get("groups"))]
+    normalized["unmatched_code_deltas"] = [
+        dict(delta) if isinstance(delta, Mapping) else {"file": delta}
+        for delta in _as_sequence(value.get("unmatched_code_deltas"))
+    ]
+    return normalized
+
+
 def _normalize_artifacts(value: Any) -> list[dict[str, Any]]:
     artifacts: list[dict[str, Any]] = []
     for item in _as_sequence(value):
@@ -277,6 +294,7 @@ def _render_page(
     dep_nodes: list[dict[str, Any]],
     code_deltas: list[dict[str, Any]],
     focused_graph: dict[str, Any],
+    focused_impact: dict[str, Any],
     artifacts: list[dict[str, Any]],
     verification: list[dict[str, Any]],
     user_decisions: list[dict[str, Any]],
@@ -297,7 +315,7 @@ header {{ margin-bottom:24px; }}
 h1 {{ margin:0 0 8px; font-size:30px; }}
 .meta {{ color:var(--muted); font-size:14px; display:flex; flex-wrap:wrap; gap:12px; }}
 .status {{ border:1px solid var(--line); border-radius:999px; padding:2px 10px; background:#eef4ff; color:#174ea6; }}
-section {{ background:var(--card); border:1px solid var(--line); border-radius:14px; margin:16px 0; padding:18px; box-shadow:0 1px 2px rgba(15,23,42,.04); }}
+section {{ background:var(--card); border:1px solid var(--line); border-radius:14px; margin:16px 0; padding:18px; box-shadow:0 1px 2px rgba(15,23,42,.04); overflow-x:auto; }}
 h2 {{ margin:0 0 14px; font-size:18px; }}
 .cards {{ display:grid; grid-template-columns:repeat(auto-fit,minmax(150px,1fr)); gap:12px; }}
 .card {{ border:1px solid var(--line); border-radius:12px; padding:14px; background:#fbfdff; }}
@@ -315,7 +333,7 @@ h2 {{ margin:0 0 14px; font-size:18px; }}
 .delta {{ border:1px solid var(--line); border-radius:12px; padding:12px; margin:10px 0; background:#fbfdff; }}
 .delta-head {{ display:flex; flex-wrap:wrap; gap:8px; align-items:center; margin-bottom:8px; }}
 .hit-list {{ margin:0; padding-left:18px; }}
-table {{ width:100%; border-collapse:collapse; font-size:14px; table-layout:fixed; }}
+table {{ width:100%; min-width:680px; border-collapse:collapse; font-size:14px; table-layout:auto; }}
 th, td {{ border-top:1px solid var(--line); padding:8px 10px; text-align:left; vertical-align:top; overflow-wrap:anywhere; word-break:break-word; }}
 th {{ color:var(--muted); font-weight:600; background:#fbfdff; }}
 code {{ white-space:normal; overflow-wrap:anywhere; word-break:break-word; }}
@@ -335,12 +353,10 @@ details summary {{ cursor:pointer; color:var(--accent); font-weight:600; }}
 {_render_summary_cards(summary_cards)}
 {_render_timeline(stages)}
 {_render_safety_boundary(user_decisions)}
-{_render_verification(verification)}
-{_render_retrievals(retrievals)}
-{_render_node_table("Focused RPG node evidence", rpg_nodes)}
-{_render_node_table("Focused dependency node evidence", dep_nodes)}
+{_render_why_these_nodes(retrievals, rpg_nodes, dep_nodes)}
+{_render_focused_impact(focused_impact, focused_graph)}
 {_render_code_deltas(code_deltas)}
-{_render_focused_graph(focused_graph)}
+{_render_verification(verification)}
 {_render_artifacts(artifacts)}
 {_render_evidence(evidence)}
 </main>
@@ -441,9 +457,9 @@ def _render_safety_boundary(decisions: list[dict[str, Any]]) -> str:
     return f"<section><h2>Safety boundary</h2>{body}</section>"
 
 
-def _render_retrievals(retrievals: list[dict[str, Any]]) -> str:
+def _render_retrievals(retrievals: list[dict[str, Any]], *, title: str = "Retrieval evidence", as_section: bool = True) -> str:
     if not retrievals:
-        return ""
+        return "" if as_section else f"<h3>{_h(title)}</h3><p class=\"empty\">No retrieval evidence recorded.</p>"
     rows = []
     for retrieval in retrievals:
         hits = retrieval.get("hits") or []
@@ -467,7 +483,9 @@ def _render_retrievals(retrievals: list[dict[str, Any]]) -> str:
             "</tr>"
         )
     body = "<table><thead><tr><th>Tool</th><th>Query</th><th>Reason</th><th>Hits</th></tr></thead><tbody>" + "".join(rows) + "</tbody></table>"
-    return f"<section><h2>Retrieval evidence</h2>{body}</section>"
+    if not as_section:
+        return f"<h3>{_h(title)}</h3>{body}"
+    return f"<section><h2>{_h(title)}</h2>{body}</section>"
 
 
 def _render_code_deltas(deltas: list[dict[str, Any]]) -> str:
@@ -495,10 +513,58 @@ def _render_code_deltas(deltas: list[dict[str, Any]]) -> str:
             f"{diff_html}{before_after}"
             "</div>"
         )
-    return f"<section><h2>Code deltas</h2>{''.join(blocks)}</section>"
+    return f"<section><h2>What changed?</h2>{''.join(blocks)}</section>"
 
 
-def _render_focused_graph(focused_graph: dict[str, Any]) -> str:
+def _render_why_these_nodes(
+    retrievals: list[dict[str, Any]],
+    rpg_nodes: list[dict[str, Any]],
+    dep_nodes: list[dict[str, Any]],
+) -> str:
+    if not retrievals and not rpg_nodes and not dep_nodes:
+        return ""
+    blocks = []
+    if retrievals:
+        blocks.append(_render_retrievals(retrievals, title="Retrieval evidence", as_section=False))
+    if rpg_nodes:
+        blocks.append(_render_node_rows("Selected feature groups", rpg_nodes, dep_graph=False))
+    if dep_nodes:
+        blocks.append(_render_node_rows("Mapped code relations", dep_nodes, dep_graph=True))
+    return f"<section><h2>Why these nodes?</h2>{''.join(blocks)}</section>"
+
+
+def _render_node_rows(title: str, nodes: list[dict[str, Any]], *, dep_graph: bool) -> str:
+    if not nodes:
+        return f"<h3>{_h(title)}</h3><p class=\"empty\">No node evidence recorded.</p>"
+    rows = []
+    if dep_graph:
+        for node in nodes:
+            dep_id = node.get("dep_node_id") or node.get("node_id")
+            rows.append(
+                "<tr>"
+                f"<td><code>{_h(dep_id)}</code></td>"
+                f"<td>{_h(node.get('path', ''))}</td>"
+                f"<td><code>{_h(node.get('source_feature', ''))}</code></td>"
+                f"<td>{_h(node.get('relation') or node.get('change') or node.get('status', ''))}</td>"
+                "</tr>"
+            )
+        body = "<table><thead><tr><th>Code node</th><th>Path</th><th>Feature</th><th>Relation/state</th></tr></thead><tbody>" + "".join(rows) + "</tbody></table>"
+    else:
+        for node in nodes:
+            rows.append(
+                "<tr>"
+                f"<td><code>{_h(node.get('node_id', ''))}</code></td>"
+                f"<td>{_h(node.get('name', ''))}</td>"
+                f"<td>{_h(node.get('type') or node.get('node_type') or '')}</td>"
+                f"<td>{_h(node.get('path', ''))}</td>"
+                f"<td>{_h(node.get('score') or node.get('status') or '')}</td>"
+                "</tr>"
+            )
+        body = "<table><thead><tr><th>Feature</th><th>Name</th><th>Type</th><th>Path</th><th>Score/state</th></tr></thead><tbody>" + "".join(rows) + "</tbody></table>"
+    return f"<h3>{_h(title)}</h3>{body}"
+
+
+def _focused_graph_metadata(focused_graph: dict[str, Any]) -> str:
     if not focused_graph:
         return ""
     path = focused_graph.get("path") or focused_graph.get("artifact_path") or focused_graph.get("html_path")
@@ -520,38 +586,70 @@ def _render_focused_graph(focused_graph: dict[str, Any]) -> str:
     table = "<table><tbody>" + "".join(table_rows) + "</tbody></table>" if table_rows else "<p class=\"empty\">No focused graph metadata recorded.</p>"
     metadata = json.dumps(focused_graph, indent=2, ensure_ascii=False, default=_json_default)
     inspector = f"<details><summary>Inspector metadata</summary><pre>{_h(metadata)}</pre></details>"
-    return f"<section><h2>Focused graph evidence</h2>{table}{inspector}</section>"
+    return f"<h3>Focused graph evidence</h3>{table}{inspector}"
 
 
-def _render_node_table(title: str, nodes: list[dict[str, Any]]) -> str:
-    if not nodes:
-        body = "<p class=\"empty\">No node evidence recorded.</p>"
-    elif any("dep_node_id" in node for node in nodes):
-        rows = []
-        for node in nodes:
-            rows.append(
-                "<tr>"
-                f"<td><code>{_h(node.get('dep_node_id', ''))}</code></td>"
-                f"<td>{_h(node.get('path', ''))}</td>"
-                f"<td>{_h(node.get('source_feature', ''))}</td>"
-                f"<td>{_h(node.get('change', ''))}</td>"
-                "</tr>"
-            )
-        body = "<table><thead><tr><th>ID</th><th>Path</th><th>Source feature</th><th>Change</th></tr></thead><tbody>" + "".join(rows) + "</tbody></table>"
-    else:
-        rows = []
-        for node in nodes:
-            rows.append(
-                "<tr>"
-                f"<td><code>{_h(node.get('node_id', ''))}</code></td>"
-                f"<td>{_h(node.get('name', ''))}</td>"
-                f"<td>{_h(node.get('type', ''))}</td>"
-                f"<td>{_h(node.get('path', ''))}</td>"
-                f"<td>{_h(node.get('score', ''))}</td>"
-                "</tr>"
-            )
-        body = "<table><thead><tr><th>ID</th><th>Name</th><th>Type</th><th>Path</th><th>Score/status</th></tr></thead><tbody>" + "".join(rows) + "</tbody></table>"
-    return f"<section><h2>{_h(title)}</h2>{body}</section>"
+def _render_focused_impact(focused_impact: dict[str, Any], focused_graph: dict[str, Any]) -> str:
+    if not focused_impact and not focused_graph:
+        return ""
+    summary = focused_impact.get("summary") if isinstance(focused_impact.get("summary"), Mapping) else {}
+    groups = focused_impact.get("groups") or []
+    blocks = []
+    if summary:
+        rows = "".join(f"<tr><th>{_h(key)}</th><td>{_h(value)}</td></tr>" for key, value in summary.items())
+        blocks.append("<table><tbody>" + rows + "</tbody></table>")
+    if groups:
+        for group in groups:
+            blocks.append(_render_focused_impact_group(group))
+    elif focused_impact:
+        blocks.append("<p class=\"empty\">No focused impact groups recorded.</p>")
+    blocks.append(_focused_graph_metadata(focused_graph))
+    return f"<section><h2>Focused impact summary</h2>{''.join(blocks)}</section>"
+
+
+def _render_focused_impact_group(group: Mapping[str, Any]) -> str:
+    title = group.get("name") or group.get("node_id") or "feature"
+    node_id = group.get("node_id", "")
+    missing_states = group.get("missing_states") if isinstance(group.get("missing_states"), Mapping) else {}
+    hidden_counts = group.get("hidden_counts") if isinstance(group.get("hidden_counts"), Mapping) else {}
+    relations = [item for item in _as_sequence(group.get("code_relations")) if isinstance(item, Mapping)]
+    affected_files = _as_sequence(group.get("affected_files"))
+    changed_files = _as_sequence(group.get("changed_files"))
+    state_rows = [
+        ("Feature", f"<code>{_h(node_id)}</code>", True),
+        ("Reason", _h(group.get("reason", "")), True),
+        ("Status", _h(group.get("status", "")), True),
+        ("Missing states", _h(missing_states or "none"), True),
+        ("Hidden counts", _h(hidden_counts or "none"), True),
+        ("Affected files", _h(", ".join(str(item) for item in affected_files)), True),
+        ("Changed files", _h(", ".join(str(item) for item in changed_files)), True),
+    ]
+    rows = []
+    for label, value, is_html in state_rows:
+        if value in (None, ""):
+            continue
+        rows.append(f"<tr><th>{_h(label)}</th><td>{value if is_html else _h(value)}</td></tr>")
+    relation_rows = []
+    for relation in relations:
+        dep_id = relation.get("dep_node_id") or relation.get("node_id")
+        relation_rows.append(
+            "<tr>"
+            f"<td><code>{_h(dep_id)}</code></td>"
+            f"<td>{_h(relation.get('path', ''))}</td>"
+            f"<td>{_h(relation.get('relation') or relation.get('source') or '')}</td>"
+            f"<td>{_h(relation.get('status', ''))}</td>"
+            "</tr>"
+        )
+    relations_html = "<p class=\"empty\">No mapped code relations recorded.</p>"
+    if relation_rows:
+        relations_html = "<table><thead><tr><th>Code node</th><th>Path</th><th>Relation</th><th>Status</th></tr></thead><tbody>" + "".join(relation_rows) + "</tbody></table>"
+    return (
+        "<div class=\"delta\">"
+        f"<div class=\"delta-head\"><strong>{_h(title)}</strong><code>{_h(node_id)}</code></div>"
+        "<table><tbody>" + "".join(rows) + "</tbody></table>"
+        f"<details><summary>Mapped code relations</summary>{relations_html}</details>"
+        "</div>"
+    )
 
 
 def _render_artifacts(artifacts: list[dict[str, Any]]) -> str:
