@@ -130,11 +130,18 @@ def _selected_candidate_rows(artifacts: Dict[str, Any]) -> List[Dict[str, Any]]:
     rows: List[Dict[str, Any]] = []
     for node_id in affected:
         impact = impact_results.get(node_id) if isinstance(impact_results.get(node_id), dict) else {}
-        candidate = dict(candidates_by_id.get(node_id) or {"node_id": node_id})
+        located = candidates_by_id.get(node_id)
+        candidate = dict(located or {"node_id": node_id})
+        if located:
+            candidate.setdefault("locate_state", "selected")
+        else:
+            candidate["locate_state"] = "missing"
+            candidate["reason_state"] = "reconstructed_from_plan_impact"
         if impact:
             candidate.setdefault("name", impact.get("name", ""))
             if not candidate.get("dep_nodes"):
                 candidate["dep_nodes"] = impact.get("dep_nodes") or []
+                candidate["dep_nodes_source"] = "impact"
             if not candidate.get("status") and (impact.get("error") or impact.get("message")):
                 candidate["status"] = impact.get("error") or impact.get("message")
         rows.append(candidate)
@@ -149,24 +156,54 @@ def _listify(value: Any) -> List[Any]:
     return [value]
 
 
+def _ordered_unique(values: List[Any]) -> List[str]:
+    seen: set[str] = set()
+    ordered: List[str] = []
+    for value in values:
+        if value in (None, ""):
+            continue
+        text = str(value)
+        if text in seen:
+            continue
+        seen.add(text)
+        ordered.append(text)
+    return ordered
+
+
+def _candidate_dep_nodes(candidate: Dict[str, Any], impact: Dict[str, Any]) -> List[str]:
+    return _ordered_unique(_listify(candidate.get("dep_nodes")) + _listify(impact.get("dep_nodes")))
+
+
 def _retrieval_hit_reason(candidate: Dict[str, Any], impact: Dict[str, Any]) -> str:
     parts: List[str] = []
-    if candidate.get("score") not in (None, ""):
+    if candidate.get("locate_state") == "missing":
+        parts.append("locate missing; reconstructed from plan/impact")
+    elif candidate.get("score") not in (None, ""):
         parts.append(f"locate score={candidate.get('score')}")
+    elif candidate.get("node_id"):
+        parts.append("selected feature")
     if candidate.get("feature_path"):
         parts.append(f"feature path={candidate.get('feature_path')}")
-    dep_count = len(_listify(candidate.get("dep_nodes")))
+    dep_count = len(_candidate_dep_nodes(candidate, impact))
     if dep_count:
-        parts.append(f"{dep_count} dep nodes")
-    if impact.get("error"):
+        parts.append(f"{dep_count} mapped code relations ({dep_count} dep nodes)")
+    else:
+        parts.append("missing dep_graph mapping")
+    if not impact:
+        parts.append("missing impact result")
+    elif impact.get("error"):
         parts.append(f"impact error={impact.get('error')}")
-    if impact.get("message"):
-        parts.append(str(impact.get("message")))
+    elif impact.get("message"):
+        parts.append(f"impact state={impact.get('message')}")
     summary = impact.get("impact_summary") if isinstance(impact.get("impact_summary"), dict) else {}
     callers = summary.get("total_callers", len(impact.get("callers") or []))
+    callees = summary.get("total_callees", len(impact.get("callees") or []))
+    inheritance = summary.get("total_inheritance", len(impact.get("inheritance") or []))
     files = summary.get("affected_file_count", len(impact.get("affected_files") or []))
-    if callers or files:
+    if callers or callees or inheritance or files:
         parts.append(f"impact callers={callers}, affected_files={files}")
+        if callees or inheritance:
+            parts.append(f"impact callees={callees}, inheritance={inheritance}")
     return "; ".join(parts) or "selected by review plan"
 
 
@@ -179,32 +216,46 @@ def _retrieval_rows(artifacts: Dict[str, Any], candidates: List[Dict[str, Any]])
         for candidate in candidates:
             node_id = candidate.get("node_id")
             impact = impact_results.get(node_id) if isinstance(impact_results.get(node_id), dict) else {}
+            dep_nodes = _candidate_dep_nodes(candidate, impact)
+            locate_state = candidate.get("locate_state") or ("selected" if node_id else "missing")
+            impact_state = "available" if impact else "missing"
+            if impact.get("error"):
+                impact_state = "error"
+            elif impact and not dep_nodes:
+                impact_state = "missing_mapping"
             hits.append({
                 "node_id": node_id,
                 "name": candidate.get("name"),
                 "path": candidate.get("path") or candidate.get("meta_path"),
                 "score": candidate.get("score"),
+                "locate_state": locate_state,
+                "impact_state": impact_state,
+                "mapping_state": "mapped" if dep_nodes else "missing_mapping",
+                "mapped_code_relations": len(dep_nodes),
                 "reason": _retrieval_hit_reason(candidate, impact),
             })
         rows.append({
             "query": locate.get("query", ""),
             "tool": str(RPG_EDIT_LOCATE_FILE),
-            "reason": f"{len(hits)} selected from {len(locate.get('results') or [])} locate candidates",
+            "reason": f"{len(hits)} selected feature groups from {len(locate.get('results') or [])} locate candidates",
             "hits": hits,
         })
     if impact_results:
         hits = []
         for node_id, impact in impact_results.items():
             impact = impact if isinstance(impact, dict) else {}
+            dep_nodes = _candidate_dep_nodes({"node_id": node_id}, impact)
             hits.append({
                 "node_id": node_id,
                 "name": impact.get("name"),
+                "impact_state": "available" if dep_nodes else "missing_mapping",
+                "mapped_code_relations": len(dep_nodes),
                 "reason": _retrieval_hit_reason({"node_id": node_id}, impact),
             })
         rows.append({
             "query": ", ".join(str(node_id) for node_id in impact_results),
             "tool": str(RPG_EDIT_IMPACT_FILE),
-            "reason": f"{len(impact_results)} impact result sets",
+            "reason": f"{len(impact_results)} impact result sets with mapped code relations",
             "hits": hits,
         })
     return rows
@@ -282,30 +333,171 @@ def _dep_node_path(dep_id: Any) -> str:
     return dep_id_text.split(":", 1)[0] if ":" in dep_id_text else dep_id_text
 
 
-def _dep_node_rows(candidates: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+def _mapped_code_relations(candidate: Dict[str, Any], impact: Dict[str, Any]) -> List[Dict[str, Any]]:
+    candidate_dep = {str(dep_id) for dep_id in _listify(candidate.get("dep_nodes"))}
+    impact_dep = {str(dep_id) for dep_id in _listify(impact.get("dep_nodes"))}
+    candidate_dep_source = candidate.get("dep_nodes_source")
     rows: List[Dict[str, Any]] = []
-    for candidate in candidates:
-        for dep_id in candidate.get("dep_nodes") or []:
-            rows.append({
-                "node_id": dep_id,
-                "source_feature": candidate.get("node_id"),
-                "path": _dep_node_path(dep_id) or candidate.get("meta_path"),
-            })
+    for dep_id in _candidate_dep_nodes(candidate, impact):
+        sources: List[str] = []
+        if dep_id in candidate_dep and candidate_dep_source != "impact":
+            sources.append("locate")
+        if dep_id in impact_dep or (dep_id in candidate_dep and candidate_dep_source == "impact"):
+            sources.append("impact")
+        rows.append({
+            "node_id": dep_id,
+            "dep_node_id": dep_id,
+            "source_feature": candidate.get("node_id"),
+            "path": _dep_node_path(dep_id) or candidate.get("meta_path") or candidate.get("path"),
+            "relation": "feature_to_dep",
+            "source": "+".join(sources) or "selected_feature",
+            "status": "mapped",
+        })
     return rows
 
 
-def _review_summary_cards(result: Dict[str, Any], artifacts: Dict[str, Any]) -> List[Dict[str, Any]]:
-    plan = artifacts.get("plan") if isinstance(artifacts.get("plan"), dict) else {}
+def _dep_node_rows(candidates: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    rows: List[Dict[str, Any]] = []
+    for candidate in candidates:
+        rows.extend(_mapped_code_relations(candidate, {}))
+    return rows
+
+
+def _code_delta_file(delta: Dict[str, Any]) -> str:
+    return str(delta.get("file") or delta.get("path") or "")
+
+
+def _feature_evidence_groups(
+    artifacts: Dict[str, Any],
+    candidates: List[Dict[str, Any]],
+    code_deltas: List[Dict[str, Any]],
+    result: Dict[str, Any],
+    focused_graph: Optional[Dict[str, Any]] = None,
+) -> Dict[str, Any]:
     locate = artifacts.get("locate") if isinstance(artifacts.get("locate"), dict) else {}
+    plan = artifacts.get("plan") if isinstance(artifacts.get("plan"), dict) else {}
     code_result = artifacts.get("code_result") if isinstance(artifacts.get("code_result"), dict) else {}
+    apply_result = artifacts.get("apply_result") if isinstance(artifacts.get("apply_result"), dict) else {}
+    impact_results = _impact_results(artifacts)
+    locate_ids = {row.get("node_id") for row in locate.get("results") or [] if isinstance(row, dict)}
+    applied_by_id = {
+        row.get("node_id"): row
+        for row in apply_result.get("applied_features") or []
+        if isinstance(row, dict) and row.get("node_id")
+    }
+    changed_files = _ordered_unique(
+        [_code_delta_file(delta) for delta in code_deltas]
+        + [str(path) for path in _listify(code_result.get("files_modified"))]
+        + [str(change.get("file_path")) for change in plan.get("code_changes") or [] if isinstance(change, dict) and change.get("file_path")]
+    )
+    groups: List[Dict[str, Any]] = []
+    for candidate in candidates:
+        node_id = candidate.get("node_id")
+        impact = impact_results.get(node_id) if isinstance(impact_results.get(node_id), dict) else {}
+        relations = _mapped_code_relations(candidate, impact)
+        relation_paths = _ordered_unique([row.get("path") for row in relations])
+        affected_files = _ordered_unique(_listify(impact.get("affected_files")) + relation_paths)
+        relevant_files = set(affected_files or relation_paths or changed_files)
+        relevant_deltas = [delta for delta in code_deltas if _code_delta_file(delta) in relevant_files]
+        locate_state = candidate.get("locate_state") or ("selected" if node_id in locate_ids or not locate else "missing")
+        if not impact:
+            impact_state = "missing"
+        elif impact.get("error"):
+            impact_state = "error"
+        elif relations:
+            impact_state = "mapped"
+        else:
+            impact_state = "missing_mapping"
+        missing_states: Dict[str, str] = {}
+        if locate_state != "selected":
+            missing_states["locate"] = str(locate_state)
+        if impact_state != "mapped":
+            missing_states["impact"] = impact_state
+        if not relations:
+            missing_states["mapping"] = "missing_dep_graph_mapping"
+        impact_summary = impact.get("impact_summary") if isinstance(impact.get("impact_summary"), dict) else {}
+        caller_count = impact_summary.get("total_callers", len(impact.get("callers") or []))
+        callee_count = impact_summary.get("total_callees", len(impact.get("callees") or []))
+        inheritance_count = impact_summary.get("total_inheritance", len(impact.get("inheritance") or []))
+        affected_file_count = impact_summary.get("affected_file_count", len(affected_files))
+        apply_row = applied_by_id.get(node_id, {})
+        groups.append({
+            "node_id": node_id,
+            "name": candidate.get("name") or impact.get("name") or node_id,
+            "node_type": candidate.get("node_type") or candidate.get("type_name") or candidate.get("type"),
+            "path": candidate.get("path") or candidate.get("meta_path"),
+            "feature_path": candidate.get("feature_path"),
+            "score": candidate.get("score"),
+            "status": "mapped" if relations else "missing_mapping",
+            "reason": _retrieval_hit_reason(candidate, impact),
+            "missing_states": missing_states,
+            "code_relations": relations,
+            "affected_files": affected_files,
+            "changed_files": [_code_delta_file(delta) for delta in relevant_deltas],
+            "callers": impact.get("callers") or [],
+            "callees": impact.get("callees") or [],
+            "imports": impact.get("imports") or [],
+            "inheritance": impact.get("inheritance") or [],
+            "hidden_counts": {
+                "code_relations": len(relations),
+                "affected_files": affected_file_count,
+                "callers": caller_count,
+                "callees": callee_count,
+                "imports": len(impact.get("imports") or []),
+                "inheritance": inheritance_count,
+            },
+            "apply": {
+                "status": _apply_status(apply_result),
+                "action": apply_row.get("action") or apply_row.get("change"),
+                "dep_graph_refreshed": apply_result.get("dep_graph_refreshed"),
+            },
+            "review": {
+                "status": result.get("type", "review"),
+                "success": result.get("success", result.get("type") == "skipped"),
+                "iterations": len(result.get("iterations") or []),
+                "suggestions": len(result.get("suggestions") or []),
+            },
+        })
+    matched_files = {file_path for group in groups for file_path in group.get("changed_files") or []}
+    unmatched_code_deltas = [delta for delta in code_deltas if _code_delta_file(delta) not in matched_files]
+    summary = {
+        "selected_feature_groups": len(groups),
+        "mapped_code_relations": sum(len(group.get("code_relations") or []) for group in groups),
+        "missing_mappings": sum(1 for group in groups if not group.get("code_relations")),
+        "changed_files": len(changed_files),
+        "review_status": result.get("type", "review"),
+        "apply_status": _apply_status(apply_result),
+        "verification_status": _test_status(result, code_result, apply_result),
+    }
+    payload: Dict[str, Any] = {
+        "summary": summary,
+        "groups": groups,
+        "unmatched_code_deltas": unmatched_code_deltas,
+    }
+    if focused_graph:
+        payload["graph"] = focused_graph
+    return payload
+
+
+def _review_summary_cards(
+    result: Dict[str, Any],
+    artifacts: Dict[str, Any],
+    focused_impact: Optional[Dict[str, Any]] = None,
+) -> List[Dict[str, Any]]:
+    plan = artifacts.get("plan") if isinstance(artifacts.get("plan"), dict) else {}
+    code_result = artifacts.get("code_result") if isinstance(artifacts.get("code_result"), dict) else {}
+    apply_result = artifacts.get("apply_result") if isinstance(artifacts.get("apply_result"), dict) else {}
+    summary = focused_impact.get("summary") if isinstance(focused_impact, dict) else {}
+    result_value = "passed" if result.get("success", result.get("type") == "skipped") else "failed"
+    changed_files = summary.get("changed_files", len(code_result.get("files_modified") or []))
     return [
-        {"label": "review", "value": result.get("type", "review")},
-        {"label": "success", "value": result.get("success", result.get("type") == "skipped")},
-        {"label": "iterations", "value": len(result.get("iterations") or [])},
-        {"label": "files", "value": len(code_result.get("files_modified") or [])},
-        {"label": "candidates", "value": len(locate.get("results") or [])},
-        {"label": "affected nodes", "value": len(plan.get("affected_nodes") or [])},
-        {"label": "suggestions", "value": len(result.get("suggestions") or [])},
+        {"label": "Review status", "value": result.get("type", "review")},
+        {"label": "Review result", "value": result_value},
+        {"label": "Selected features", "value": summary.get("selected_feature_groups", len(plan.get("affected_nodes") or []))},
+        {"label": "Mapped code relations", "value": summary.get("mapped_code_relations", 0)},
+        {"label": "Missing mappings", "value": summary.get("missing_mappings", 0)},
+        {"label": "Changed files", "value": changed_files},
+        {"label": "Verification", "value": summary.get("verification_status") or _test_status(result, code_result, apply_result)},
     ]
 
 
@@ -398,14 +590,17 @@ def _user_decision(result: Dict[str, Any], artifacts: Dict[str, Any]) -> UserDec
 
 
 class _ReportPayload:
-    def __init__(self, run: CommandRun, focused_graph: Dict[str, Any]):
+    def __init__(self, run: CommandRun, focused_graph: Dict[str, Any], focused_impact: Dict[str, Any]):
         self.run = run
         self.focused_graph = focused_graph
+        self.focused_impact = focused_impact
 
     def to_dict(self) -> Dict[str, Any]:
         data = self.run.to_dict()
         if self.focused_graph:
             data["focused_graph"] = self.focused_graph
+        if self.focused_impact:
+            data["focused_impact"] = self.focused_impact
         return data
 
 
@@ -415,10 +610,11 @@ def _publish_review_report(result: Dict[str, Any], plan_path: Path, impact_path:
     candidates = _selected_candidate_rows(artifacts)
     code_deltas = _code_delta_rows(artifacts)
     focused_graph = _focused_graph_artifact(candidates, artifacts)
+    focused_impact = _feature_evidence_groups(artifacts, candidates, code_deltas, result, focused_graph)
     artifact_rows = _artifact_links(plan_path, impact_path)
     if focused_graph.get("path"):
         artifact_rows.append({"label": "focused_graph", "path": focused_graph["path"], "status": focused_graph.get("status")})
-    evidence = {"artifacts": artifacts, "review_result": result}
+    evidence = {"artifacts": artifacts, "review_result": result, "focused_impact": focused_impact}
     if focused_graph:
         evidence["focused_graph"] = focused_graph
     try:
@@ -426,7 +622,7 @@ def _publish_review_report(result: Dict[str, Any], plan_path: Path, impact_path:
             command="rpg_edit",
             title="CoderMind rpg_edit Explain View",
             status=str(result.get("type", "review")),
-            summary=_review_summary_cards(result, artifacts),
+            summary=_review_summary_cards(result, artifacts, focused_impact),
             steps=[
                 StepEvent(name=row.get("name", "stage"), status=row.get("status"), reason=row.get("reason", ""))
                 for row in _review_timeline(result, artifacts)
@@ -475,7 +671,7 @@ def _publish_review_report(result: Dict[str, Any], plan_path: Path, impact_path:
             user_decisions=[_user_decision(result, artifacts)],
             evidence=evidence,
         )
-        report_path = write_command_report(_ReportPayload(report_run, focused_graph))
+        report_path = write_command_report(_ReportPayload(report_run, focused_graph, focused_impact))
         result["report_path"] = str(report_path)
     except Exception as exc:
         result["report_error"] = str(exc)

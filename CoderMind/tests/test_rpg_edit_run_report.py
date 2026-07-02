@@ -202,6 +202,26 @@ def test_review_publish_report_returns_report_path(tmp_path: Path, monkeypatch) 
         assert data["focused_graph"]["selected_rpg_nodes"] == ["n1"]
         assert data["focused_graph"]["selected_dep_nodes"] == ["a.py:f"]
         assert Path(data["focused_graph"]["path"]).exists()
+        assert data["focused_impact"]["summary"]["selected_feature_groups"] == 1
+        assert data["focused_impact"]["summary"]["mapped_code_relations"] == 1
+        assert data["focused_impact"]["summary"]["missing_mappings"] == 0
+        focused_group = data["focused_impact"]["groups"][0]
+        assert focused_group["node_id"] == "n1"
+        assert focused_group["status"] == "mapped"
+        assert focused_group["code_relations"] == [
+            {
+                "node_id": "a.py:f",
+                "dep_node_id": "a.py:f",
+                "source_feature": "n1",
+                "path": "a.py",
+                "relation": "feature_to_dep",
+                "source": "locate+impact",
+                "status": "mapped",
+            }
+        ]
+        assert focused_group["affected_files"] == ["a.py"]
+        assert focused_group["changed_files"] == ["a.py"]
+        assert focused_group["hidden_counts"]["callers"] == 1
         assert any(item["label"] == "focused_graph" for item in data["artifacts"])
         return report_path
 
@@ -282,9 +302,22 @@ def test_review_report_reconstructs_affected_node_evidence_from_impact(tmp_path:
             {"dep_node_id": dep_id, "path": "scripts/common/run_report.py", "source_feature": "planned"}
         ]
         assert data["retrievals"][0]["hits"][0]["node_id"] == "planned"
-        assert "1 dep nodes" in data["retrievals"][0]["hits"][0]["reason"]
+        assert data["retrievals"][0]["hits"][0]["locate_state"] == "missing"
+        assert data["retrievals"][0]["hits"][0]["mapping_state"] == "mapped"
+        assert "1 mapped code relations" in data["retrievals"][0]["hits"][0]["reason"]
         assert "impact callers=0, affected_files=1" in data["retrievals"][0]["hits"][0]["reason"]
         assert data["retrievals"][1]["tool"] == str(impact_path)
+        focused = data["focused_impact"]
+        assert focused["summary"]["selected_feature_groups"] == 1
+        assert focused["summary"]["mapped_code_relations"] == 1
+        assert focused["summary"]["missing_mappings"] == 0
+        group = focused["groups"][0]
+        assert group["node_id"] == "planned"
+        assert group["missing_states"] == {"locate": "missing"}
+        assert group["code_relations"][0]["dep_node_id"] == dep_id
+        assert group["code_relations"][0]["source"] == "impact"
+        assert group["changed_files"] == ["scripts/common/run_report.py"]
+        assert group["apply"]["status"] == "dep_refreshed"
         return report_path
 
     monkeypatch.setattr(review, "write_command_report", fake_write_command_report)
