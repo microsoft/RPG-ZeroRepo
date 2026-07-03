@@ -62,7 +62,7 @@ def test_write_command_report_escapes_content_and_writes_sections(tmp_path: Path
         "Stage timeline",
         "Safety boundary",
         "Why these nodes?",
-        "Focused impact summary",
+        "Focused impact view",
         "What changed?",
         "Verification status",
         "Artifact links",
@@ -95,9 +95,7 @@ def test_write_command_report_escapes_content_and_writes_sections(tmp_path: Path
     assert "backup/<script>" not in html
 
 
-def test_write_command_report_renders_retrievals_code_deltas_and_focused_graph(tmp_path: Path) -> None:
-    graph = tmp_path / "focused.html"
-    graph.write_text("graph", encoding="utf-8")
+def test_write_command_report_renders_retrievals_code_deltas_and_focused_view(tmp_path: Path) -> None:
     long_diff = "diff --git a/a.py b/a.py\n" + "\n".join(
         f"+line {i} <script>alert({i})</script>" for i in range(40)
     )
@@ -116,42 +114,75 @@ def test_write_command_report_renders_retrievals_code_deltas_and_focused_graph(t
             "code_deltas": [
                 CodeDeltaEvent(file="a.py", change_type="modify", diff=long_diff).to_dict()
             ],
-            "focused_graph": {
-                "path": graph,
-                "status": "available",
-                "selected_rpg_nodes": ["n1"],
-                "selected_dep_nodes": ["a.py:f"],
-                "rpg_node_count": 2,
-                "dep_node_count": 1,
-            },
-            "focused_impact": {
+            "focused_view": {
                 "summary": {
-                    "selected_feature_groups": 2,
+                    "primary_rpg_nodes": 2,
+                    "primary_code_nodes": 1,
                     "mapped_code_relations": 1,
                     "missing_mappings": 1,
+                    "edges": 2,
+                    "warnings": 4,
                 },
-                "groups": [
+                "primary_rpg_nodes": [
                     {
                         "node_id": "n1<script>",
                         "name": "Node <unsafe>",
+                        "path": "feature/<unsafe>",
                         "status": "mapped",
-                        "reason": "locate score < 1",
-                        "code_relations": [
-                            {"dep_node_id": "a.py:f<script>", "path": "a.py", "relation": "feature_to_dep", "status": "mapped"}
-                        ],
-                        "affected_files": ["a.py"],
+                        "reason": "selected <reason>",
+                        "hidden_counts": {"callers": 3},
+                    },
+                    {"node_id": "n2", "name": "Missing <mapping>", "status": "missing", "path": "missing/<path>"},
+                ],
+                "primary_code_nodes": [
+                    {
+                        "node_id": "a.py:f<script>",
+                        "dep_node_id": "a.py:f<script>",
+                        "name": "func <unsafe>",
+                        "path": "a.py<script>",
+                        "type": "function",
+                        "status": "mapped",
+                        "source": "locate<unsafe>",
+                    }
+                ],
+                "mappings": [
+                    {
+                        "rpg_node_id": "n1<script>",
+                        "code_node_id": "a.py:f<script>",
+                        "status": "mapped",
+                        "path": "a.py<script>",
+                        "source": "locate+impact",
+                        "reason": "maps because <reason>",
                         "changed_files": ["a.py"],
-                        "hidden_counts": {"callers": 3, "code_relations": 1},
+                    },
+                    {"rpg_node_id": "n2", "status": "missing", "reason": "no dep <reason>"},
+                ],
+                "edges": [
+                    {
+                        "source_node_id": "caller<script>",
+                        "target_node_id": "n1<script>",
+                        "relation": "caller",
+                        "direction": "upstream",
+                        "path": "caller.py<script>",
+                        "source": "impact",
+                        "reason": "calls <reason>",
                     },
                     {
-                        "node_id": "n2",
-                        "name": "Missing mapping",
-                        "status": "missing_mapping",
-                        "reason": "missing dep_graph mapping",
-                        "code_relations": [],
-                        "missing_states": {"mapping": "missing_dep_graph_mapping"},
-                        "hidden_counts": {"code_relations": 0},
+                        "source_node_id": "n1<script>",
+                        "target_node_id": "callee<script>",
+                        "relation": "callee",
+                        "direction": "downstream",
+                        "path": "callee.py<script>",
+                        "source": "impact",
+                        "reason": "reaches <reason>",
                     },
+                ],
+                "hidden_counts": {"callers": 3, "edges": 1, "relations": {"caller": 1}},
+                "warnings": [
+                    {"type": "missing_mapping", "message": "Missing <mapping>", "node_id": "n2"},
+                    {"type": "missing_reason", "message": "Missing <reason>", "node_id": "n3"},
+                    {"type": "too_many_neighbors", "message": "Too many <neighbors>", "hidden_counts": {"edges": 1}},
+                    {"type": "stale_graph", "message": "Stale <graph>", "dep_node_id": "old.py:f"},
                 ],
             },
             "timestamp": "fixed",
@@ -163,22 +194,43 @@ def test_write_command_report_renders_retrievals_code_deltas_and_focused_graph(t
     assert "Why these nodes?" in html
     assert "Retrieval evidence" in html
     assert "What changed?" in html
-    assert "Focused impact summary" in html
+    assert "Focused impact view" in html
+    assert html.count("<h2>Focused impact view</h2>") == 1
     assert "RPG_EDIT_LOCATE_FILE" in html
+    assert "Primary RPG nodes" in html
+    assert "Primary code nodes" in html
+    assert "Semantic-code mappings" in html
+    assert "Capped neighborhood" in html
+    assert "Hidden context" in html
+    assert "Inspector JSON" in html
+    assert "mapped" in html
+    assert "missing" in html
     assert "n1&lt;script&gt;" in html
     assert "Node &lt;unsafe&gt;" in html
+    assert "feature/&lt;unsafe&gt;" in html
     assert "a.py:f&lt;script&gt;" in html
-    assert "missing_dep_graph_mapping" in html
-    assert "Hidden counts" in html
-    assert '"callers": 3' in html
+    assert "a.py&lt;script&gt;" in html
+    assert "maps because &lt;reason&gt;" in html
+    assert "Missing &lt;mapping&gt;" in html
+    assert "missing_mapping" in html
+    assert "missing_reason" in html
+    assert "too_many_neighbors" in html
+    assert "stale_graph" in html
+    assert "Hidden 4 additional caller neighbors." in html
+    assert '"caller": 1' in html
+    assert '"focused_view"' in html
     assert "+line 0 &lt;script&gt;alert(0)&lt;/script&gt;" in html
     assert "+line 0 <script>alert(0)</script>" not in html
+    assert "Node <unsafe>" not in html
+    assert "a.py<script>" not in html
+    assert "maps because <reason>" not in html
     assert "<details><summary>View diff</summary>" in html
     assert "<details open" not in html
-    assert html.count("<h2>Focused impact summary</h2>") == 1
-    assert "Focused graph evidence" in html
-    assert "Graph artifact" in html
-    assert "Inspector metadata" in html
+    assert "Focused impact summary" not in html
+    assert "Focused graph evidence" not in html
+    assert "Graph artifact" not in html
+    assert "Inspector metadata" not in html
+    assert "focused_graph" not in html
 
 
 def test_write_command_report_limits_summary_cards(tmp_path: Path) -> None:
@@ -223,7 +275,7 @@ def test_write_command_report_does_not_invent_node_rows_from_counts(tmp_path: Pa
 
     html = report.read_text(encoding="utf-8")
     assert "Why these nodes?" not in html
-    assert "Focused impact summary" not in html
+    assert "Focused impact view" not in html
     assert '"dep_nodes": 4' in html
     assert '<td><code>4</code></td>' not in html
 
