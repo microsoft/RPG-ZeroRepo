@@ -51,8 +51,9 @@ def write_command_report(
     evidence_data = evidence.get("evidence") if isinstance(evidence.get("evidence"), Mapping) else {}
     retrievals = data.get("retrievals") or evidence_data.get("retrievals")
     code_deltas = data.get("code_deltas") or evidence_data.get("code_deltas")
-    focused_graph = data.get("focused_graph") or evidence_data.get("focused_graph")
-    focused_impact = data.get("focused_impact") or evidence_data.get("focused_impact")
+    focused_view = data.get("focused_view") or evidence_data.get("focused_view")
+    if not focused_view:
+        focused_view = data.get("focused_impact") or evidence_data.get("focused_impact")
     user_decisions = data.get("user_decisions") or evidence_data.get("user_decisions")
 
     page_title = title or f"CoderMind {command} Explain View"
@@ -67,8 +68,7 @@ def write_command_report(
         rpg_nodes=_normalize_nodes(data.get("rpg_deltas"), dep_graph=False),
         dep_nodes=_normalize_nodes(data.get("dep_graph_deltas"), dep_graph=True),
         code_deltas=_normalize_code_deltas(code_deltas),
-        focused_graph=_normalize_focused_graph(focused_graph),
-        focused_impact=_normalize_focused_impact(focused_impact),
+        focused_view=_normalize_focused_view(focused_view),
         artifacts=_normalize_artifacts(data.get("artifacts")),
         verification=_normalize_verification(data.get("verification")),
         user_decisions=_normalize_user_decisions(user_decisions),
@@ -198,22 +198,34 @@ def _normalize_code_deltas(value: Any) -> list[dict[str, Any]]:
     return deltas
 
 
-def _normalize_focused_graph(value: Any) -> dict[str, Any]:
-    if value in (None, "", [], {}):
-        return {}
-    if isinstance(value, Mapping):
-        return dict(value)
-    return {"detail": value}
-
-
-def _normalize_focused_impact(value: Any) -> dict[str, Any]:
+def _normalize_focused_view(value: Any) -> dict[str, Any]:
     if value in (None, "", [], {}):
         return {}
     if not isinstance(value, Mapping):
-        return {"detail": value, "groups": []}
+        return {"detail": value}
     normalized = dict(value)
     normalized["summary"] = dict(value.get("summary") or {}) if isinstance(value.get("summary"), Mapping) else {}
-    normalized["groups"] = [dict(group) if isinstance(group, Mapping) else {"detail": group} for group in _as_sequence(value.get("groups"))]
+    normalized["primary_rpg_nodes"] = [
+        dict(node) if isinstance(node, Mapping) else {"node_id": node}
+        for node in _as_sequence(value.get("primary_rpg_nodes"))
+    ]
+    normalized["primary_code_nodes"] = [
+        dict(node) if isinstance(node, Mapping) else {"node_id": node}
+        for node in _as_sequence(value.get("primary_code_nodes"))
+    ]
+    normalized["mappings"] = [
+        dict(mapping) if isinstance(mapping, Mapping) else {"detail": mapping}
+        for mapping in _as_sequence(value.get("mappings"))
+    ]
+    normalized["edges"] = [
+        dict(edge) if isinstance(edge, Mapping) else {"detail": edge}
+        for edge in _as_sequence(value.get("edges"))
+    ]
+    normalized["hidden_counts"] = dict(value.get("hidden_counts") or {}) if isinstance(value.get("hidden_counts"), Mapping) else {}
+    normalized["warnings"] = [
+        dict(warning) if isinstance(warning, Mapping) else {"message": warning}
+        for warning in _as_sequence(value.get("warnings"))
+    ]
     normalized["unmatched_code_deltas"] = [
         dict(delta) if isinstance(delta, Mapping) else {"file": delta}
         for delta in _as_sequence(value.get("unmatched_code_deltas"))
@@ -293,8 +305,7 @@ def _render_page(
     rpg_nodes: list[dict[str, Any]],
     dep_nodes: list[dict[str, Any]],
     code_deltas: list[dict[str, Any]],
-    focused_graph: dict[str, Any],
-    focused_impact: dict[str, Any],
+    focused_view: dict[str, Any],
     artifacts: list[dict[str, Any]],
     verification: list[dict[str, Any]],
     user_decisions: list[dict[str, Any]],
@@ -342,6 +353,9 @@ a:hover {{ text-decoration:underline; }}
 .empty {{ color:var(--muted); font-style:italic; }}
 pre {{ white-space:pre-wrap; overflow:auto; background:#0f172a; color:#e5e7eb; border-radius:10px; padding:14px; }}
 details summary {{ cursor:pointer; color:var(--accent); font-weight:600; }}
+.focus-summary {{ display:flex; flex-wrap:wrap; gap:8px; margin-bottom:12px; }}
+.focus-summary .badge {{ background:#eef4ff; color:#174ea6; }}
+.warning-list {{ margin:0 0 12px; padding-left:18px; }}
 </style>
 </head>
 <body>
@@ -354,7 +368,7 @@ details summary {{ cursor:pointer; color:var(--accent); font-weight:600; }}
 {_render_timeline(stages)}
 {_render_safety_boundary(user_decisions)}
 {_render_why_these_nodes(retrievals, rpg_nodes, dep_nodes)}
-{_render_focused_impact(focused_impact, focused_graph)}
+{_render_focused_impact(focused_view)}
 {_render_code_deltas(code_deltas)}
 {_render_verification(verification)}
 {_render_artifacts(artifacts)}
@@ -564,92 +578,162 @@ def _render_node_rows(title: str, nodes: list[dict[str, Any]], *, dep_graph: boo
     return f"<h3>{_h(title)}</h3>{body}"
 
 
-def _focused_graph_metadata(focused_graph: dict[str, Any]) -> str:
-    if not focused_graph:
+def _focused_graph_metadata(focused_view: dict[str, Any]) -> str:
+    data = json.dumps(focused_view, indent=2, ensure_ascii=False, default=_json_default)
+    return f"<details><summary>Inspector JSON</summary><pre>{_h(data)}</pre></details>"
+
+
+def _focused_node_cell(node_id: Any, node: Mapping[str, Any] | None) -> str:
+    if node_id in (None, "") and not node:
+        return "<span class=\"empty\">missing</span>"
+    node = node or {}
+    parts = []
+    if node_id not in (None, ""):
+        parts.append(f"<code>{_h(node_id)}</code>")
+    if node.get("name"):
+        parts.append(f"<div>{_h(node.get('name'))}</div>")
+    if node.get("path"):
+        parts.append(f"<div class=\"reason\">{_h(node.get('path'))}</div>")
+    return "".join(parts) or "<span class=\"empty\">missing</span>"
+
+
+def _render_focused_impact(focused_view: dict[str, Any]) -> str:
+    if not focused_view:
         return ""
-    path = focused_graph.get("path") or focused_graph.get("artifact_path") or focused_graph.get("html_path")
-    href = _artifact_href(path) if path else "#"
-    rows = [
-        ("Status", focused_graph.get("status", "recorded"), False),
-        ("Graph artifact", f"<a href=\"{_h_attr(href)}\">{_h(path or '')}</a>" if path else "", True),
-        ("Selected RPG nodes", ", ".join(str(v) for v in focused_graph.get("selected_rpg_nodes") or focused_graph.get("rpg_node_ids") or []), False),
-        ("Selected dependency nodes", ", ".join(str(v) for v in focused_graph.get("selected_dep_nodes") or focused_graph.get("dep_node_ids") or []), False),
-        ("Included RPG nodes", focused_graph.get("rpg_node_count") or focused_graph.get("rpg_nodes") or "", False),
-        ("Included dependency nodes", focused_graph.get("dep_node_count") or focused_graph.get("dep_nodes") or "", False),
+    summary = focused_view.get("summary") if isinstance(focused_view.get("summary"), Mapping) else {}
+    rpg_nodes = [node for node in _as_sequence(focused_view.get("primary_rpg_nodes")) if isinstance(node, Mapping)]
+    code_nodes = [node for node in _as_sequence(focused_view.get("primary_code_nodes")) if isinstance(node, Mapping)]
+    mappings = [mapping for mapping in _as_sequence(focused_view.get("mappings")) if isinstance(mapping, Mapping)]
+    edges = [edge for edge in _as_sequence(focused_view.get("edges")) if isinstance(edge, Mapping)]
+    hidden_counts = focused_view.get("hidden_counts") if isinstance(focused_view.get("hidden_counts"), Mapping) else {}
+    warnings = [warning for warning in _as_sequence(focused_view.get("warnings")) if isinstance(warning, Mapping)]
+    rpg_by_id = {str(node.get("node_id")): node for node in rpg_nodes if node.get("node_id") not in (None, "")}
+    code_by_id = {
+        str(node.get("node_id") or node.get("dep_node_id")): node
+        for node in code_nodes
+        if (node.get("node_id") or node.get("dep_node_id")) not in (None, "")
+    }
+    summary_items = [
+        ("Primary RPG nodes", summary.get("primary_rpg_nodes", len(rpg_nodes))),
+        ("Primary code nodes", summary.get("primary_code_nodes", len(code_nodes))),
+        ("Mapped relations", summary.get("mapped_code_relations", len([row for row in mappings if row.get("code_node_id")]))),
+        ("Missing mappings", summary.get("missing_mappings", len([row for row in mappings if row.get("status") == "missing"]))),
+        ("Edges shown", summary.get("edges", len(edges))),
+        ("Warnings", summary.get("warnings", len(warnings))),
     ]
-    table_rows = []
-    for label, value, is_html in rows:
-        if value in (None, ""):
-            continue
-        rendered = str(value) if is_html else _h(value)
-        table_rows.append(f"<tr><th>{_h(label)}</th><td>{rendered}</td></tr>")
-    table = "<table><tbody>" + "".join(table_rows) + "</tbody></table>" if table_rows else "<p class=\"empty\">No focused graph metadata recorded.</p>"
-    metadata = json.dumps(focused_graph, indent=2, ensure_ascii=False, default=_json_default)
-    inspector = f"<details><summary>Inspector metadata</summary><pre>{_h(metadata)}</pre></details>"
-    return f"<h3>Focused graph evidence</h3>{table}{inspector}"
+    summary_html = "<div class=\"focus-summary\">" + "".join(
+        f"<span class=\"badge\">{_h(label)}: <strong>{_h(value)}</strong></span>"
+        for label, value in summary_items
+    ) + "</div>"
 
+    code_rows = []
+    for node in code_nodes:
+        node_id = node.get("node_id") or node.get("dep_node_id")
+        code_rows.append(
+            "<tr>"
+            f"<td>{_focused_node_cell(node_id, node)}</td>"
+            f"<td>{_h(node.get('type') or node.get('kind') or '')}</td>"
+            f"<td>{_h(node.get('status', ''))}</td>"
+            f"<td>{_h(node.get('source', ''))}</td>"
+            "</tr>"
+        )
+    code_html = "<p class=\"empty\">No primary code nodes recorded.</p>"
+    if code_rows:
+        code_html = "<table><thead><tr><th>Code node</th><th>Type</th><th>Status</th><th>Source</th></tr></thead><tbody>" + "".join(code_rows) + "</tbody></table>"
 
-def _render_focused_impact(focused_impact: dict[str, Any], focused_graph: dict[str, Any]) -> str:
-    if not focused_impact and not focused_graph:
-        return ""
-    summary = focused_impact.get("summary") if isinstance(focused_impact.get("summary"), Mapping) else {}
-    groups = focused_impact.get("groups") or []
-    blocks = []
-    if summary:
-        rows = "".join(f"<tr><th>{_h(key)}</th><td>{_h(value)}</td></tr>" for key, value in summary.items())
-        blocks.append("<table><tbody>" + rows + "</tbody></table>")
-    if groups:
-        for group in groups:
-            blocks.append(_render_focused_impact_group(group))
-    elif focused_impact:
-        blocks.append("<p class=\"empty\">No focused impact groups recorded.</p>")
-    blocks.append(_focused_graph_metadata(focused_graph))
-    return f"<section><h2>Focused impact summary</h2>{''.join(blocks)}</section>"
+    mapping_rows = []
+    for mapping in mappings:
+        rpg_id = mapping.get("rpg_node_id") or mapping.get("node_id")
+        code_id = mapping.get("code_node_id") or mapping.get("dep_node_id")
+        rpg_node = rpg_by_id.get(str(rpg_id)) if rpg_id not in (None, "") else None
+        code_node = code_by_id.get(str(code_id)) if code_id not in (None, "") else None
+        changed_files = ", ".join(str(item) for item in _as_sequence(mapping.get("changed_files")))
+        mapping_rows.append(
+            "<tr>"
+            f"<td>{_focused_node_cell(rpg_id, rpg_node)}</td>"
+            f"<td>{_focused_node_cell(code_id, code_node)}</td>"
+            f"<td>{_h(mapping.get('status', ''))}</td>"
+            f"<td>{_h(mapping.get('path') or (code_node or {}).get('path') or '')}</td>"
+            f"<td>{_h(mapping.get('source', ''))}</td>"
+            f"<td>{_h(mapping.get('reason', ''))}</td>"
+            f"<td>{_h(changed_files)}</td>"
+            "</tr>"
+        )
+    mappings_html = "<p class=\"empty\">No semantic-code mappings recorded.</p>"
+    if mapping_rows:
+        mappings_html = (
+            "<table><thead><tr><th>Semantic node</th><th>Code node</th><th>Status</th>"
+            "<th>Path</th><th>Source</th><th>Reason</th><th>Changed files</th></tr></thead><tbody>"
+            + "".join(mapping_rows)
+            + "</tbody></table>"
+        )
+
+    hidden_relations = hidden_counts.get("relations") if isinstance(hidden_counts.get("relations"), Mapping) else {}
+    relation_hidden_keys = {"caller": "callers", "callee": "callees", "import": "imports", "inheritance": "inheritance"}
+    edges_by_relation: dict[str, list[Mapping[str, Any]]] = {}
+    for edge in edges:
+        relation = str(edge.get("relation") or "dependency")
+        edges_by_relation.setdefault(relation, []).append(edge)
+    relation_names = set(edges_by_relation)
+    for relation, hidden_key in relation_hidden_keys.items():
+        if hidden_counts.get(hidden_key):
+            relation_names.add(relation)
+    relation_blocks = []
+    for relation in sorted(relation_names):
+        hidden = hidden_relations.get(relation, 0) if isinstance(hidden_relations, Mapping) else 0
+        hidden += hidden_counts.get(relation_hidden_keys.get(relation, ""), 0) or 0
+        relation_blocks.append(_render_focused_impact_group({"relation": relation, "edges": edges_by_relation.get(relation, []), "hidden": hidden}))
+    neighborhood_html = "".join(relation_blocks) or "<p class=\"empty\">No one-hop neighborhood edges recorded.</p>"
+
+    warning_html = "<p class=\"empty\">No focused warnings recorded.</p>"
+    if warnings:
+        warning_items = []
+        for warning in warnings:
+            warning_type = warning.get("type", "warning")
+            context = {key: value for key, value in warning.items() if key not in {"type", "message"}}
+            context_html = f" <code>{_h(context)}</code>" if context else ""
+            warning_items.append(f"<li><code>{_h(warning_type)}</code> {_h(warning.get('message', ''))}{context_html}</li>")
+        warning_html = '<ul class="warning-list">' + "".join(warning_items) + "</ul>"
+
+    hidden_html = "<p class=\"empty\">No hidden focused context recorded.</p>"
+    if hidden_counts:
+        hidden_rows = "".join(f"<tr><th>{_h(key)}</th><td>{_h(value)}</td></tr>" for key, value in hidden_counts.items())
+        hidden_html = "<table><tbody>" + hidden_rows + "</tbody></table>"
+
+    return (
+        "<section><h2>Focused impact view</h2>"
+        f"{summary_html}"
+        f"<h3>Primary code nodes</h3>{code_html}"
+        f"<h3>Semantic-code mappings</h3>{mappings_html}"
+        f"<h3>Capped neighborhood</h3>{neighborhood_html}"
+        f"<h3>Warnings</h3>{warning_html}"
+        f"<h3>Hidden context</h3>{hidden_html}"
+        f"{_focused_graph_metadata(focused_view)}"
+        "</section>"
+    )
 
 
 def _render_focused_impact_group(group: Mapping[str, Any]) -> str:
-    title = group.get("name") or group.get("node_id") or "feature"
-    node_id = group.get("node_id", "")
-    missing_states = group.get("missing_states") if isinstance(group.get("missing_states"), Mapping) else {}
-    hidden_counts = group.get("hidden_counts") if isinstance(group.get("hidden_counts"), Mapping) else {}
-    relations = [item for item in _as_sequence(group.get("code_relations")) if isinstance(item, Mapping)]
-    affected_files = _as_sequence(group.get("affected_files"))
-    changed_files = _as_sequence(group.get("changed_files"))
-    state_rows = [
-        ("Feature", f"<code>{_h(node_id)}</code>", True),
-        ("Reason", _h(group.get("reason", "")), True),
-        ("Status", _h(group.get("status", "")), True),
-        ("Missing states", _h(missing_states or "none"), True),
-        ("Hidden counts", _h(hidden_counts or "none"), True),
-        ("Affected files", _h(", ".join(str(item) for item in affected_files)), True),
-        ("Changed files", _h(", ".join(str(item) for item in changed_files)), True),
-    ]
-    rows = []
-    for label, value, is_html in state_rows:
-        if value in (None, ""):
-            continue
-        rows.append(f"<tr><th>{_h(label)}</th><td>{value if is_html else _h(value)}</td></tr>")
-    relation_rows = []
-    for relation in relations:
-        dep_id = relation.get("dep_node_id") or relation.get("node_id")
-        relation_rows.append(
+    relation = group.get("relation") or "dependency"
+    edges = [edge for edge in _as_sequence(group.get("edges")) if isinstance(edge, Mapping)]
+    hidden = group.get("hidden") or 0
+    edge_rows = []
+    for edge in edges:
+        edge_rows.append(
             "<tr>"
-            f"<td><code>{_h(dep_id)}</code></td>"
-            f"<td>{_h(relation.get('path', ''))}</td>"
-            f"<td>{_h(relation.get('relation') or relation.get('source') or '')}</td>"
-            f"<td>{_h(relation.get('status', ''))}</td>"
+            f"<td><code>{_h(edge.get('source_node_id', ''))}</code></td>"
+            f"<td><code>{_h(edge.get('target_node_id', ''))}</code></td>"
+            f"<td>{_h(edge.get('direction', ''))}</td>"
+            f"<td>{_h(edge.get('path', ''))}</td>"
+            f"<td>{_h(edge.get('source', ''))}</td>"
+            f"<td>{_h(edge.get('reason', ''))}</td>"
             "</tr>"
         )
-    relations_html = "<p class=\"empty\">No mapped code relations recorded.</p>"
-    if relation_rows:
-        relations_html = "<table><thead><tr><th>Code node</th><th>Path</th><th>Relation</th><th>Status</th></tr></thead><tbody>" + "".join(relation_rows) + "</tbody></table>"
-    return (
-        "<div class=\"delta\">"
-        f"<div class=\"delta-head\"><strong>{_h(title)}</strong><code>{_h(node_id)}</code></div>"
-        "<table><tbody>" + "".join(rows) + "</tbody></table>"
-        f"<details><summary>Mapped code relations</summary>{relations_html}</details>"
-        "</div>"
-    )
+    rows_html = "<p class=\"empty\">No visible rows for this relation.</p>"
+    if edge_rows:
+        rows_html = "<table><thead><tr><th>Source</th><th>Target</th><th>Direction</th><th>Path</th><th>Source</th><th>Reason</th></tr></thead><tbody>" + "".join(edge_rows) + "</tbody></table>"
+    hidden_html = f"<p class=\"reason\">Hidden { _h(hidden) } additional {_h(relation)} neighbors.</p>" if hidden else ""
+    return f"<details><summary>{_h(relation)} neighborhood ({_h(len(edges))} shown)</summary>{hidden_html}{rows_html}</details>"
 
 
 def _render_artifacts(artifacts: list[dict[str, Any]]) -> str:

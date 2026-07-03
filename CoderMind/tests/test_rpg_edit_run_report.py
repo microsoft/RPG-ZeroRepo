@@ -93,10 +93,17 @@ def test_review_publish_report_returns_report_path(tmp_path: Path, monkeypatch) 
 
     validate_path.write_text(json.dumps({"type": "ready"}), encoding="utf-8")
     locate_path.write_text(
-        json.dumps({"type": "candidates", "query": "a.py", "results": [{"node_id": "n1", "name": "Node", "score": 1.0, "dep_nodes": ["a.py:f"]}]}),
+        json.dumps({
+            "type": "candidates",
+            "query": "a.py",
+            "results": [
+                {"node_id": "n1", "name": "Node", "score": 1.0, "dep_nodes": ["a.py:f"]},
+                {"node_id": "n2", "name": "Missing Node", "score": 0.5},
+            ],
+        }),
         encoding="utf-8",
     )
-    plan_path.write_text(json.dumps({"affected_nodes": ["n1"], "code_changes": [{"file_path": "a.py"}]}), encoding="utf-8")
+    plan_path.write_text(json.dumps({"affected_nodes": ["n1", "n2"], "code_changes": [{"file_path": "a.py"}]}), encoding="utf-8")
     impact_path.write_text(
         json.dumps({
             "type": "impact",
@@ -106,6 +113,11 @@ def test_review_publish_report_returns_report_path(tmp_path: Path, monkeypatch) 
                     "dep_nodes": ["a.py:f"],
                     "affected_files": ["a.py"],
                     "impact_summary": {"total_callers": 1, "affected_file_count": 1},
+                },
+                "n2": {
+                    "name": "Missing Node",
+                    "affected_files": [],
+                    "impact_summary": {"total_callers": 0, "affected_file_count": 0},
                 }
             },
         }),
@@ -136,7 +148,15 @@ def test_review_publish_report_returns_report_path(tmp_path: Path, monkeypatch) 
     rpg_path.write_text(
         json.dumps({
             "repo_name": "test",
-            "root": {"id": "n1", "name": "Node", "node_type": "feature", "meta": {"path": "a.py"}, "children": []},
+            "root": {
+                "id": "n1",
+                "name": "Node",
+                "node_type": "feature",
+                "meta": {"path": "a.py"},
+                "children": [
+                    {"id": "n2", "name": "Missing Node", "node_type": "feature", "meta": {"path": "b.py"}, "children": []}
+                ],
+            },
             "edges": [],
             "dep_graph": {
                 "nodes": {"a.py:f": {"name": "f", "type": "function", "module": "a.py", "rpg_nodes": ["n1"]}},
@@ -198,31 +218,26 @@ def test_review_publish_report_returns_report_path(tmp_path: Path, monkeypatch) 
         assert "impact callers=1, affected_files=1" in data["retrievals"][0]["hits"][0]["reason"]
         assert data["retrievals"][1]["tool"] == str(impact_path)
         assert data["code_deltas"] == [{"file": "a.py", "change_type": "modify", "diff": "+new <unsafe>"}]
-        assert data["focused_graph"]["status"] == "available"
-        assert data["focused_graph"]["selected_rpg_nodes"] == ["n1"]
-        assert data["focused_graph"]["selected_dep_nodes"] == ["a.py:f"]
-        assert Path(data["focused_graph"]["path"]).exists()
-        assert data["focused_impact"]["summary"]["selected_feature_groups"] == 1
-        assert data["focused_impact"]["summary"]["mapped_code_relations"] == 1
-        assert data["focused_impact"]["summary"]["missing_mappings"] == 0
-        focused_group = data["focused_impact"]["groups"][0]
-        assert focused_group["node_id"] == "n1"
-        assert focused_group["status"] == "mapped"
-        assert focused_group["code_relations"] == [
-            {
-                "node_id": "a.py:f",
-                "dep_node_id": "a.py:f",
-                "source_feature": "n1",
-                "path": "a.py",
-                "relation": "feature_to_dep",
-                "source": "locate+impact",
-                "status": "mapped",
-            }
-        ]
-        assert focused_group["affected_files"] == ["a.py"]
-        assert focused_group["changed_files"] == ["a.py"]
-        assert focused_group["hidden_counts"]["callers"] == 1
-        assert any(item["label"] == "focused_graph" for item in data["artifacts"])
+        assert "focused_graph" not in data
+        assert "focused_impact" not in data
+        assert not any(item["label"] == "focused_graph" for item in data["artifacts"])
+        assert not list(tmp_path.glob("rpg_edit_focused_graph_*.html"))
+        focused = data["focused_view"]
+        assert focused["summary"]["selected_feature_groups"] == 2
+        assert focused["summary"]["mapped_code_relations"] == 1
+        assert focused["summary"]["missing_mappings"] == 1
+        assert focused["primary_rpg_nodes"][0]["node_id"] == "n1"
+        assert focused["primary_rpg_nodes"][0]["mapping_status"] == "mapped"
+        assert focused["primary_rpg_nodes"][0]["changed_files"] == ["a.py"]
+        assert focused["primary_rpg_nodes"][0]["hidden_counts"]["callers"] == 1
+        assert focused["primary_code_nodes"][0]["node_id"] == "a.py:f"
+        assert focused["primary_code_nodes"][0]["path"] == "a.py"
+        mapping_statuses = {row["status"] for row in focused["mappings"]}
+        assert {"mapped", "missing"}.issubset(mapping_statuses)
+        mapped = next(row for row in focused["mappings"] if row.get("code_node_id") == "a.py:f")
+        assert mapped["rpg_node_id"] == "n1"
+        assert mapped["changed_files"] == ["a.py"]
+        assert any(row["type"] == "missing_mapping" and row["node_id"] == "n2" for row in focused["warnings"])
         return report_path
 
     monkeypatch.setattr(review, "write_command_report", fake_write_command_report)
@@ -245,6 +260,7 @@ def test_review_report_reconstructs_affected_node_evidence_from_impact(tmp_path:
     apply_path = tmp_path / "apply.json"
     review_path = tmp_path / "review.json"
     report_path = tmp_path / "report.html"
+    rpg_path = tmp_path / "rpg.json"
     dep_id = "scripts/common/run_report.py:_render_artifacts"
 
     validate_path.write_text(json.dumps({"type": "ready"}), encoding="utf-8")
@@ -267,6 +283,19 @@ def test_review_report_reconstructs_affected_node_evidence_from_impact(tmp_path:
         }),
         encoding="utf-8",
     )
+    rpg_path.write_text(
+        json.dumps({
+            "repo_name": "test",
+            "root": {"id": "planned", "name": "Planned Node", "node_type": "feature", "meta": {"path": "scripts/common/run_report.py"}, "children": []},
+            "edges": [],
+            "dep_graph": {
+                "nodes": {dep_id: {"name": "_render_artifacts", "type": "function", "module": "scripts/common/run_report.py", "rpg_nodes": ["planned"]}},
+                "edges": [],
+            },
+            "_dep_to_rpg_map": {dep_id: ["planned"]},
+        }),
+        encoding="utf-8",
+    )
 
     monkeypatch.setattr(review, "RPG_EDIT_VALIDATE_FILE", validate_path)
     monkeypatch.setattr(review, "RPG_EDIT_LOCATE_FILE", locate_path)
@@ -274,7 +303,7 @@ def test_review_report_reconstructs_affected_node_evidence_from_impact(tmp_path:
     monkeypatch.setattr(review, "RPG_EDIT_CODE_RESULT_FILE", code_path)
     monkeypatch.setattr(review, "RPG_EDIT_APPLY_RESULT_FILE", apply_path)
     monkeypatch.setattr(review, "RPG_EDIT_REVIEW_RESULT_FILE", review_path)
-    monkeypatch.setattr(review, "_focused_graph_artifact", lambda candidates, artifacts: {})
+    monkeypatch.setattr(review, "REPO_RPG_FILE", rpg_path)
     monkeypatch.setattr(
         review,
         "read_head",
@@ -307,17 +336,20 @@ def test_review_report_reconstructs_affected_node_evidence_from_impact(tmp_path:
         assert "1 mapped code relations" in data["retrievals"][0]["hits"][0]["reason"]
         assert "impact callers=0, affected_files=1" in data["retrievals"][0]["hits"][0]["reason"]
         assert data["retrievals"][1]["tool"] == str(impact_path)
-        focused = data["focused_impact"]
+        assert "focused_graph" not in data
+        assert not any(item["label"] == "focused_graph" for item in data["artifacts"])
+        focused = data["focused_view"]
         assert focused["summary"]["selected_feature_groups"] == 1
         assert focused["summary"]["mapped_code_relations"] == 1
         assert focused["summary"]["missing_mappings"] == 0
-        group = focused["groups"][0]
-        assert group["node_id"] == "planned"
-        assert group["missing_states"] == {"locate": "missing"}
-        assert group["code_relations"][0]["dep_node_id"] == dep_id
-        assert group["code_relations"][0]["source"] == "impact"
-        assert group["changed_files"] == ["scripts/common/run_report.py"]
-        assert group["apply"]["status"] == "dep_refreshed"
+        primary = focused["primary_rpg_nodes"][0]
+        assert primary["node_id"] == "planned"
+        assert primary["locate_status"] == "missing"
+        assert primary["changed_files"] == ["scripts/common/run_report.py"]
+        mapping = focused["mappings"][0]
+        assert mapping["code_node_id"] == dep_id
+        assert "impact" in mapping["source"]
+        assert focused["apply"]["status"] == "dep_refreshed"
         return report_path
 
     monkeypatch.setattr(review, "write_command_report", fake_write_command_report)
