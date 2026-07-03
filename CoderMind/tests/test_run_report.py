@@ -61,6 +61,7 @@ def test_write_command_report_escapes_content_and_writes_sections(tmp_path: Path
         "Summary",
         "Stage timeline",
         "Safety boundary",
+        "Focused nodes map",
         "semantic-code impact chain",
         "What changed?",
         "Verification status",
@@ -121,6 +122,103 @@ def test_write_command_report_renders_retrievals_code_deltas_and_focused_view(tm
                     "missing_mappings": 1,
                     "edges": 2,
                     "warnings": 4,
+                },
+                "nodes_view": {
+                    "summary": {
+                        "semantic_nodes": 2,
+                        "code_nodes": 1,
+                        "mappings": 2,
+                        "edges": 2,
+                        "warnings": 4,
+                    },
+                    "semantic_nodes": [
+                        {
+                            "node_id": "n1<script>",
+                            "link_id": "rpg-n1-script",
+                            "name": "Node <unsafe>",
+                            "symbol": "NodeSymbol <unsafe>",
+                            "node_type": "feature<script>",
+                            "breadcrumb": ["Root", "Feature <unsafe>"],
+                            "breadcrumb_path": "Root / Feature <unsafe>",
+                            "state": "mapped",
+                            "mapping_status": "mapped",
+                            "reason": "selected <reason>",
+                            "mapped_code_node_ids": ["a.py:f<script>"],
+                            "changed_files": [{"path": "a.py", "diff_anchor": "diff-a.py"}],
+                            "hidden_counts": {"callers": 3},
+                        },
+                        {
+                            "node_id": "n2",
+                            "link_id": "rpg-n2",
+                            "name": "Missing <mapping>",
+                            "breadcrumb_path": "Root / Missing <path>",
+                            "state": "missing_mapping",
+                            "mapping_status": "missing",
+                            "warning_types": ["missing_mapping"],
+                        },
+                    ],
+                    "code_nodes": [
+                        {
+                            "node_id": "a.py:f<script>",
+                            "dep_node_id": "a.py:f<script>",
+                            "link_id": "code-a.py-f-script",
+                            "symbol": "func <unsafe>",
+                            "path": "a.py",
+                            "type": "function<script>",
+                            "line_range": {"start": 10, "end": 12},
+                            "state": "mapped",
+                            "source": "locate<unsafe>",
+                            "mapped_rpg_node_ids": ["n1<script>"],
+                            "changed_files": [{"path": "a.py", "diff_anchor": "diff-a.py"}],
+                        }
+                    ],
+                    "mappings": [
+                        {
+                            "rpg_node_id": "n1<script>",
+                            "code_node_id": "a.py:f<script>",
+                            "source_link_id": "rpg-n1-script",
+                            "target_link_id": "code-a.py-f-script",
+                            "status": "mapped",
+                            "state": "mapped",
+                            "path": "a.py<script>",
+                            "source": "locate+impact",
+                            "reason": "maps because <reason>",
+                            "changed_files": [{"path": "a.py", "diff_anchor": "diff-a.py"}],
+                        },
+                        {"rpg_node_id": "n2", "source_link_id": "rpg-n2", "status": "missing", "state": "missing_mapping", "reason": "no dep <reason>"},
+                    ],
+                    "edges": [
+                        {
+                            "source_node_id": "caller<script>",
+                            "target_node_id": "a.py:f<script>",
+                            "source_link_id": "context-caller-script",
+                            "target_link_id": "code-a.py-f-script",
+                            "relation": "caller",
+                            "direction": "upstream",
+                            "path": "caller.py<script>",
+                            "source": "impact",
+                            "reason": "calls <reason>",
+                        },
+                        {
+                            "source_node_id": "a.py:f<script>",
+                            "target_node_id": "callee<script>",
+                            "source_link_id": "code-a.py-f-script",
+                            "target_link_id": "context-callee-script",
+                            "relation": "callee",
+                            "direction": "downstream",
+                            "path": "callee.py<script>",
+                            "source": "impact",
+                            "reason": "reaches <reason>",
+                        },
+                    ],
+                    "hidden_counts": {"callers": 3, "edges": 1, "relations": {"caller": 1}},
+                    "warnings": [
+                        {"type": "missing_mapping", "message": "Missing <mapping>", "node_id": "n2", "node_link_id": "rpg-n2"},
+                        {"type": "missing_reason", "message": "Missing <reason>", "node_id": "n3"},
+                        {"type": "too_many_neighbors", "message": "Too many <neighbors>", "hidden_counts": {"edges": 1}},
+                        {"type": "stale_graph", "message": "Stale <graph>", "dep_node_id": "old.py:f"},
+                    ],
+                    "changed_files": [{"path": "a.py", "diff_anchor": "diff-a.py"}],
                 },
                 "primary_rpg_nodes": [
                     {
@@ -190,16 +288,27 @@ def test_write_command_report_renders_retrievals_code_deltas_and_focused_view(tm
     )
 
     html = report.read_text(encoding="utf-8")
+    assert "Focused nodes map" in html
     assert "semantic-code impact chain" in html
+    assert html.count("<h2>Focused nodes map</h2>") == 1
     assert html.count("<h2>semantic-code impact chain</h2>") == 1
     assert "Why these nodes?" not in html
     assert "Focused impact view" not in html
     assert "What changed?" in html
     assert "Feature group" in html
     assert "Semantic → code evidence" in html
+    assert "focus-map" in html
+    assert "One-hop context" in html
+    assert "caller.py&lt;script&gt;" in html
+    assert "Root / Feature &lt;unsafe&gt;" in html
+    assert "NodeSymbol &lt;unsafe&gt;" in html
+    assert "function&lt;script&gt;" in html
+    assert "Lines: 10-12" in html
+    assert "Mapped code:" in html
+    assert "Mapped code: <span class=\"empty\">missing mapping</span>" in html
     assert "href=\"#diff-a.py\"" in html
     assert "id=\"diff-a.py\"" in html
-    assert "Inspector JSON" in html
+    assert html.count("<summary>Inspector JSON</summary>") == 1
     assert "mapped" in html
     assert "missing" in html
     assert "n1&lt;script&gt;" in html
@@ -222,13 +331,19 @@ def test_write_command_report_renders_retrievals_code_deltas_and_focused_view(tm
     assert "maps because <reason>" not in html
     assert "<details><summary>View diff</summary>" in html
     assert "<details open" not in html
+    inspector_json = html.split("<summary>Inspector JSON</summary><pre>", 1)[1].split("</pre>", 1)[0]
+    assert "nodes_view" in inspector_json
+    assert "semantic_nodes" in inspector_json
+    assert "primary_rpg_nodes" not in inspector_json
+    assert "primary_code_nodes" not in inspector_json
+    assert long_diff not in inspector_json
     evidence_json = html.split("<summary>Evidence JSON</summary><pre>", 1)[1].split("</pre>", 1)[0]
     assert "code_deltas" not in evidence_json
     assert "focused_view" not in evidence_json
     assert "focused_impact" not in evidence_json
     assert "focused_graph" not in evidence_json
     assert long_diff not in evidence_json
-    assert len(html) < 18000
+    assert len(html) < 22000
     assert "Focused impact summary" not in html
     assert "Focused graph evidence" not in html
     assert "Graph artifact" not in html

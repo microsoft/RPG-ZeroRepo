@@ -159,7 +159,7 @@ def test_review_publish_report_returns_report_path(tmp_path: Path, monkeypatch) 
             },
             "edges": [],
             "dep_graph": {
-                "nodes": {"a.py:f": {"name": "f", "type": "function", "module": "a.py", "rpg_nodes": ["n1"]}},
+                "nodes": {"a.py:f": {"name": "f", "type": "function", "module": "a.py", "line_start": 10, "line_end": 12, "rpg_nodes": ["n1"]}},
                 "edges": [],
             },
             "_dep_to_rpg_map": {"a.py:f": ["n1"]},
@@ -231,6 +231,7 @@ def test_review_publish_report_returns_report_path(tmp_path: Path, monkeypatch) 
         assert "artifacts" not in evidence
         assert "review_result" not in evidence
         assert "focused_view" not in evidence
+        assert "nodes_view" not in evidence_text
         assert "focused_graph" not in evidence
         assert "focused_impact" not in evidence
         assert "+new <unsafe>" not in evidence_text
@@ -269,6 +270,30 @@ def test_review_publish_report_returns_report_path(tmp_path: Path, monkeypatch) 
         assert mapped["rpg_node_id"] == "n1"
         assert mapped["changed_files"] == ["a.py"]
         assert any(row["type"] == "missing_mapping" and row["node_id"] == "n2" for row in focused["warnings"])
+        nodes_view = focused["nodes_view"]
+        assert nodes_view["summary"]["selected_feature_groups"] == 2
+        semantic_by_id = {row["node_id"]: row for row in nodes_view["semantic_nodes"]}
+        assert semantic_by_id["n1"]["breadcrumb_path"] == "Node"
+        assert semantic_by_id["n1"]["mapping_status"] == "mapped"
+        assert semantic_by_id["n1"]["changed_files"] == [{"path": "a.py", "diff_anchor": "diff-a.py"}]
+        assert semantic_by_id["n1"]["hidden_counts"]["callers"] == 1
+        assert semantic_by_id["n2"]["breadcrumb_path"] == "Node / Missing Node"
+        assert semantic_by_id["n2"]["state"] == "missing_mapping"
+        assert semantic_by_id["n2"]["mapping_status"] == "missing"
+        code = nodes_view["code_nodes"][0]
+        assert code["dep_node_id"] == "a.py:f"
+        assert code["path"] == "a.py"
+        assert code["symbol"] == "f"
+        assert code["type"] == "function"
+        assert code["line_range"] == {"start": 10, "end": 12}
+        assert code["diff_anchor"] == "diff-a.py"
+        bridge_by_rpg = {row["rpg_node_id"]: row for row in nodes_view["mappings"]}
+        assert bridge_by_rpg["n1"]["status"] == "mapped"
+        assert bridge_by_rpg["n1"]["changed_files"] == [{"path": "a.py", "diff_anchor": "diff-a.py"}]
+        assert bridge_by_rpg["n2"]["state"] == "missing_mapping"
+        assert nodes_view["hidden_counts"]["callers"] == 1
+        assert any(row["type"] == "missing_mapping" and row["node_id"] == "n2" for row in nodes_view["warnings"])
+        assert "+new <unsafe>" not in json.dumps(nodes_view, ensure_ascii=False)
         return report_path
 
     monkeypatch.setattr(review, "write_command_report", fake_write_command_report)
@@ -320,7 +345,7 @@ def test_review_report_reconstructs_affected_node_evidence_from_impact(tmp_path:
             "root": {"id": "planned", "name": "Planned Node", "node_type": "feature", "meta": {"path": "scripts/common/run_report.py"}, "children": []},
             "edges": [],
             "dep_graph": {
-                "nodes": {dep_id: {"name": "_render_artifacts", "type": "function", "module": "scripts/common/run_report.py", "rpg_nodes": ["planned"]}},
+                "nodes": {dep_id: {"name": "_render_artifacts", "type": "function", "module": "scripts/common/run_report.py", "line_start": 537, "line_end": 564, "rpg_nodes": ["planned"]}},
                 "edges": [],
             },
             "_dep_to_rpg_map": {dep_id: ["planned"]},
@@ -380,6 +405,7 @@ def test_review_report_reconstructs_affected_node_evidence_from_impact(tmp_path:
         assert "artifacts" not in evidence
         assert "review_result" not in evidence
         assert "focused_view" not in evidence
+        assert "nodes_view" not in evidence_text
         assert "focused_graph" not in evidence
         assert "focused_impact" not in evidence
         assert "failing test" not in evidence_text
@@ -408,6 +434,24 @@ def test_review_report_reconstructs_affected_node_evidence_from_impact(tmp_path:
         mapping = focused["mappings"][0]
         assert mapping["code_node_id"] == dep_id
         assert "impact" in mapping["source"]
+        nodes_view = focused["nodes_view"]
+        assert nodes_view["summary"]["selected_feature_groups"] == 1
+        semantic = nodes_view["semantic_nodes"][0]
+        assert semantic["node_id"] == "planned"
+        assert semantic["breadcrumb_path"] == "Planned Node"
+        assert semantic["locate_status"] == "missing"
+        assert semantic["mapping_status"] == "mapped"
+        assert semantic["changed_files"] == [{"path": "scripts/common/run_report.py", "diff_anchor": "diff-scripts_common_run_report.py"}]
+        code = nodes_view["code_nodes"][0]
+        assert code["dep_node_id"] == dep_id
+        assert code["path"] == "scripts/common/run_report.py"
+        assert code["symbol"] == "_render_artifacts"
+        assert code["line_range"] == {"start": 537, "end": 564}
+        assert code["diff_anchor"] == "diff-scripts_common_run_report.py"
+        bridge = nodes_view["mappings"][0]
+        assert bridge["status"] == "mapped"
+        assert bridge["changed_files"] == [{"path": "scripts/common/run_report.py", "diff_anchor": "diff-scripts_common_run_report.py"}]
+        assert any(row["type"] == "missing_reason" and row["node_id"] == "planned" for row in nodes_view["warnings"])
         assert focused["apply"]["status"] == "dep_refreshed"
         return report_path
 
