@@ -224,10 +224,25 @@ def _normalize_focused_view(value: Any) -> dict[str, Any]:
         dict(warning) if isinstance(warning, Mapping) else {"message": warning}
         for warning in _as_sequence(value.get("warnings"))
     ]
+    nodes_view = value.get("nodes_view")
+    if isinstance(nodes_view, Mapping):
+        normalized["nodes_view"] = _normalize_nodes_view(nodes_view)
     normalized["unmatched_code_deltas"] = [
         dict(delta) if isinstance(delta, Mapping) else {"file": delta}
         for delta in _as_sequence(value.get("unmatched_code_deltas"))
     ]
+    return normalized
+
+
+def _normalize_nodes_view(value: Mapping[str, Any]) -> dict[str, Any]:
+    normalized = dict(value)
+    normalized["summary"] = dict(value.get("summary") or {}) if isinstance(value.get("summary"), Mapping) else {}
+    for key in ("semantic_nodes", "code_nodes", "mappings", "edges", "warnings", "changed_files"):
+        normalized[key] = [
+            dict(item) if isinstance(item, Mapping) else {"detail": item}
+            for item in _as_sequence(value.get(key))
+        ]
+    normalized["hidden_counts"] = dict(value.get("hidden_counts") or {}) if isinstance(value.get("hidden_counts"), Mapping) else {}
     return normalized
 
 
@@ -356,6 +371,14 @@ details summary {{ cursor:pointer; color:var(--accent); font-weight:600; }}
 .focus-summary {{ display:flex; flex-wrap:wrap; gap:8px; margin-bottom:12px; }}
 .focus-summary .badge {{ background:#eef4ff; color:#174ea6; }}
 .warning-list {{ margin:0 0 12px; padding-left:18px; }}
+.focus-map {{ display:grid; grid-template-columns:repeat(auto-fit,minmax(260px,1fr)); gap:12px; align-items:stretch; }}
+.focus-card {{ border:1px solid var(--line); border-radius:12px; padding:12px; background:#fbfdff; display:flex; flex-direction:column; gap:8px; min-width:0; }}
+.focus-card header {{ margin:0; display:flex; flex-wrap:wrap; gap:8px; align-items:center; }}
+.focus-card-title {{ font-weight:700; overflow-wrap:anywhere; word-break:break-word; }}
+.focus-card-meta {{ color:var(--muted); font-size:13px; overflow-wrap:anywhere; word-break:break-word; }}
+.focus-links {{ display:flex; flex-wrap:wrap; gap:6px; }}
+.focus-link {{ border:1px solid var(--line); border-radius:999px; padding:2px 8px; background:#fff; font-size:12px; }}
+@media (max-width:720px) {{ main {{ padding:22px 12px 36px; }} .focus-map {{ grid-template-columns:1fr; }} table {{ min-width:560px; }} }}
 </style>
 </head>
 <body>
@@ -367,6 +390,7 @@ details summary {{ cursor:pointer; color:var(--accent); font-weight:600; }}
 {_render_summary_cards(summary_cards)}
 {_render_timeline(stages)}
 {_render_safety_boundary(user_decisions)}
+{_render_focused_nodes_map(focused_view, code_file_anchors)}
 {_render_semantic_code_impact_chain(retrievals, rpg_nodes, dep_nodes, focused_view, code_file_anchors)}
 {_render_code_deltas(code_deltas, code_delta_anchors)}
 {_render_verification(verification)}
@@ -663,6 +687,9 @@ def _hidden_context_html(hidden_counts: Mapping[str, Any]) -> str:
 
 
 def _focused_inspector_payload(focused_view: Mapping[str, Any]) -> dict[str, Any]:
+    nodes_view = focused_view.get("nodes_view") if isinstance(focused_view.get("nodes_view"), Mapping) else {}
+    if nodes_view:
+        return {"nodes_view": nodes_view}
     payload: dict[str, Any] = {}
     for key, value in focused_view.items():
         if key in {"unmatched_code_deltas"}:
@@ -676,6 +703,184 @@ def _focused_inspector_payload(focused_view: Mapping[str, Any]) -> dict[str, Any
             continue
         payload[key] = value
     return payload
+
+
+def _node_view_id(node: Mapping[str, Any]) -> str:
+    return str(node.get("link_id") or node.get("node_id") or node.get("dep_node_id") or "")
+
+
+def _line_range_text(node: Mapping[str, Any]) -> str:
+    line_range = node.get("line_range") if isinstance(node.get("line_range"), Mapping) else {}
+    start = line_range.get("start") or node.get("line_start") or node.get("start_line") or node.get("lineno") or node.get("line")
+    end = line_range.get("end") or node.get("line_end") or node.get("end_line") or start
+    if start in (None, ""):
+        return "unavailable"
+    if end in (None, "") or str(end) == str(start):
+        return str(start)
+    return f"{start}-{end}"
+
+
+def _changed_refs_html(refs: Sequence[Any], file_anchors: Mapping[str, str]) -> str:
+    links = []
+    for ref in _as_sequence(refs):
+        if isinstance(ref, Mapping):
+            path = ref.get("path") or ref.get("file")
+            anchor = ref.get("diff_anchor") or file_anchors.get(str(path or ""))
+        else:
+            path = ref
+            anchor = file_anchors.get(str(path or ""))
+        if path in (None, ""):
+            continue
+        if anchor:
+            links.append(f"<a class=\"focus-link\" href=\"#{_h_attr(anchor)}\">{_h(path)}</a>")
+        else:
+            links.append(f"<span class=\"focus-link\">{_h(path)}</span>")
+    if not links:
+        return ""
+    return '<div class="focus-links">' + "".join(links) + "</div>"
+
+
+def _focus_card_badges(node: Mapping[str, Any], *keys: str) -> str:
+    badges = []
+    for key in keys:
+        value = node.get(key)
+        if value not in (None, "", [], {}):
+            badges.append(f"<span class=\"badge\">{_h(value)}</span>")
+    return "".join(badges)
+
+
+def _semantic_card(node: Mapping[str, Any], file_anchors: Mapping[str, str]) -> str:
+    node_id = node.get("node_id")
+    link_id = _node_view_id(node)
+    title = node.get("name") or node.get("symbol") or node_id or "semantic node"
+    breadcrumb = node.get("breadcrumb_path") or node.get("breadcrumb") or node.get("feature_path") or node.get("path") or "unavailable"
+    mapped = _as_sequence(node.get("mapped_code_node_ids"))
+    mapped_html = ""
+    if mapped:
+        mapped_html = '<div class="focus-card-meta">Mapped code: ' + ", ".join(f"<code>{_h(item)}</code>" for item in mapped) + "</div>"
+    elif (node.get("mapping_status") or node.get("state")) in {"missing", "missing_mapping"}:
+        mapped_html = '<div class="focus-card-meta">Mapped code: <span class="empty">missing mapping</span></div>'
+    warnings = _as_sequence(node.get("warning_types"))
+    warning_html = '<div class="focus-card-meta">Warnings: ' + ", ".join(f"<code>{_h(item)}</code>" for item in warnings) + "</div>" if warnings else ""
+    return (
+        f"<article class=\"focus-card\" id=\"{_h_attr(link_id)}\">"
+        f"<header><span class=\"badge\">semantic</span>{_focus_card_badges(node, 'state', 'mapping_status', 'locate_status')}</header>"
+        f"<div class=\"focus-card-title\">{_h(title)}</div>"
+        f"<div class=\"focus-card-meta\"><code>{_h(node_id)}</code></div>"
+        f"<div class=\"focus-card-meta\">Breadcrumb: {_h(breadcrumb)}</div>"
+        f"<div class=\"focus-card-meta\">Type: {_h(node.get('node_type') or node.get('type') or 'unavailable')}</div>"
+        f"{mapped_html}{warning_html}{_changed_refs_html(_as_sequence(node.get('changed_files')), file_anchors)}"
+        "</article>"
+    )
+
+
+def _code_card(node: Mapping[str, Any], file_anchors: Mapping[str, str]) -> str:
+    node_id = node.get("node_id") or node.get("dep_node_id")
+    link_id = _node_view_id(node)
+    path = node.get("path") or node.get("module") or node.get("file") or "unavailable"
+    symbol = node.get("symbol") or node.get("name") or "unavailable"
+    changed_refs = _as_sequence(node.get("changed_files"))
+    if not changed_refs and node.get("diff_anchor") and path not in (None, "", "unavailable"):
+        changed_refs = [{"path": path, "diff_anchor": node.get("diff_anchor")}]
+    mapped = _as_sequence(node.get("mapped_rpg_node_ids"))
+    mapped_html = '<div class="focus-card-meta">Mapped features: ' + ", ".join(f"<code>{_h(item)}</code>" for item in mapped) + "</div>" if mapped else ""
+    return (
+        f"<article class=\"focus-card\" id=\"{_h_attr(link_id)}\">"
+        f"<header><span class=\"badge\">code</span>{_focus_card_badges(node, 'state', 'source')}</header>"
+        f"<div class=\"focus-card-title\">{_h(symbol)}</div>"
+        f"<div class=\"focus-card-meta\"><code>{_h(node_id)}</code></div>"
+        f"<div class=\"focus-card-meta\">Path: {_h(path)}</div>"
+        f"<div class=\"focus-card-meta\">Type: {_h(node.get('type') or node.get('kind') or 'unavailable')}</div>"
+        f"<div class=\"focus-card-meta\">Lines: {_h(_line_range_text(node))}</div>"
+        f"{mapped_html}{_changed_refs_html(changed_refs, file_anchors)}"
+        "</article>"
+    )
+
+
+def _mapping_card(mapping: Mapping[str, Any]) -> str:
+    target = mapping.get("code_node_id") or mapping.get("dep_node_id") or "missing mapping"
+    source_link = mapping.get("source_link_id")
+    target_link = mapping.get("target_link_id")
+    source_html = f"<a href=\"#{_h_attr(source_link)}\"><code>{_h(mapping.get('rpg_node_id'))}</code></a>" if source_link else f"<code>{_h(mapping.get('rpg_node_id'))}</code>"
+    target_html = f"<a href=\"#{_h_attr(target_link)}\"><code>{_h(target)}</code></a>" if target_link else f"<code>{_h(target)}</code>"
+    return (
+        "<article class=\"focus-card\">"
+        f"<header><span class=\"badge\">mapping</span>{_focus_card_badges(mapping, 'state', 'status', 'source')}</header>"
+        f"<div class=\"focus-card-title\">{source_html} → {target_html}</div>"
+        f"<div class=\"focus-card-meta\">{_h(mapping.get('path') or mapping.get('reason') or '')}</div>"
+        "</article>"
+    )
+
+
+def _edge_endpoint_html(node_id: Any, link_id: Any) -> str:
+    if link_id not in (None, ""):
+        return f"<a href=\"#{_h_attr(link_id)}\"><code>{_h(node_id)}</code></a>"
+    return f"<code>{_h(node_id)}</code>"
+
+
+def _nodes_view_edges_html(edges: Sequence[Mapping[str, Any]]) -> str:
+    edge_rows = []
+    for edge in edges:
+        source = _edge_endpoint_html(edge.get("source_node_id"), edge.get("source_link_id"))
+        target = _edge_endpoint_html(edge.get("target_node_id"), edge.get("target_link_id"))
+        edge_rows.append(
+            "<tr>"
+            f"<td>{source}</td>"
+            f"<td>{target}</td>"
+            f"<td>{_h(edge.get('relation', ''))}</td>"
+            f"<td>{_h(edge.get('direction', ''))}</td>"
+            f"<td>{_h(edge.get('path', ''))}</td>"
+            f"<td>{_h(edge.get('reason', ''))}</td>"
+            "</tr>"
+        )
+    if not edge_rows:
+        return ""
+    return (
+        "<h3>One-hop context</h3>"
+        "<table><thead><tr><th>Source</th><th>Target</th><th>Relation</th><th>Direction</th><th>Path</th><th>Reason</th></tr></thead><tbody>"
+        + "".join(edge_rows)
+        + "</tbody></table>"
+    )
+
+
+def _render_focused_nodes_map(focused_view: dict[str, Any], file_anchors: Mapping[str, str]) -> str:
+    nodes_view = focused_view.get("nodes_view") if isinstance(focused_view.get("nodes_view"), Mapping) else {}
+    if not nodes_view:
+        return ""
+    summary = nodes_view.get("summary") if isinstance(nodes_view.get("summary"), Mapping) else {}
+    summary_html = _summary_badges(summary, [
+        ("Semantic nodes", "semantic_nodes", len(_as_sequence(nodes_view.get("semantic_nodes")))),
+        ("Code nodes", "code_nodes", len(_as_sequence(nodes_view.get("code_nodes")))),
+        ("Mappings", "mappings", len(_as_sequence(nodes_view.get("mappings")))),
+        ("Edges", "edges", len(_as_sequence(nodes_view.get("edges")))),
+        ("Warnings", "warnings", len(_as_sequence(nodes_view.get("warnings")))),
+    ])
+    semantic_cards = [
+        _semantic_card(node, file_anchors)
+        for node in _as_sequence(nodes_view.get("semantic_nodes"))
+        if isinstance(node, Mapping)
+    ]
+    code_cards = [
+        _code_card(node, file_anchors)
+        for node in _as_sequence(nodes_view.get("code_nodes"))
+        if isinstance(node, Mapping)
+    ]
+    mapping_cards = [
+        _mapping_card(mapping)
+        for mapping in _as_sequence(nodes_view.get("mappings"))
+        if isinstance(mapping, Mapping)
+    ]
+    edge_rows = [edge for edge in _as_sequence(nodes_view.get("edges")) if isinstance(edge, Mapping)]
+    hidden_html = _hidden_context_html(nodes_view.get("hidden_counts") if isinstance(nodes_view.get("hidden_counts"), Mapping) else {})
+    warnings = [warning for warning in _as_sequence(nodes_view.get("warnings")) if isinstance(warning, Mapping)]
+    warnings_html = f"<h3>Warnings</h3>{_chain_warning_html(warnings)}" if warnings else ""
+    body = summary_html
+    if semantic_cards or code_cards or mapping_cards:
+        body += '<div class="focus-map">' + "".join(semantic_cards + code_cards + mapping_cards) + "</div>"
+    else:
+        body += '<p class="empty">No focused nodes map rows recorded.</p>'
+    body += _nodes_view_edges_html(edge_rows) + hidden_html + warnings_html + _focused_graph_metadata(focused_view)
+    return f"<section><h2>Focused nodes map</h2>{body}</section>"
 
 
 def _render_feature_chain_rows(focused_view: dict[str, Any], file_anchors: Mapping[str, str]) -> str:
@@ -862,7 +1067,7 @@ def _render_semantic_code_impact_chain(
         ])
         hidden_counts = focused_view.get("hidden_counts") if isinstance(focused_view.get("hidden_counts"), Mapping) else {}
         hidden_html = _hidden_context_html(hidden_counts)
-        inspector_html = _focused_graph_metadata(focused_view)
+        inspector_html = "" if isinstance(focused_view.get("nodes_view"), Mapping) else _focused_graph_metadata(focused_view)
         body = f"{summary_html}{_render_feature_chain_rows(focused_view, file_anchors)}{hidden_html}{inspector_html}"
     else:
         body = _render_legacy_chain_rows(retrievals, rpg_nodes, dep_nodes)
