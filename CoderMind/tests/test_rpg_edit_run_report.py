@@ -218,6 +218,37 @@ def test_review_publish_report_returns_report_path(tmp_path: Path, monkeypatch) 
         assert "impact callers=1, affected_files=1" in data["retrievals"][0]["hits"][0]["reason"]
         assert data["retrievals"][1]["tool"] == str(impact_path)
         assert data["code_deltas"] == [{"file": "a.py", "change_type": "modify", "diff": "+new <unsafe>"}]
+        artifact_paths = {item["label"]: item["path"] for item in data["artifacts"]}
+        assert artifact_paths["validate"] == str(validate_path)
+        assert artifact_paths["locate"] == str(locate_path)
+        assert artifact_paths["plan"] == str(plan_path)
+        assert artifact_paths["impact"] == str(impact_path)
+        assert artifact_paths["code_result"] == str(code_path)
+        assert artifact_paths["apply_result"] == str(apply_path)
+        assert artifact_paths["review_result"] == str(review_path)
+        evidence = data["evidence"]
+        evidence_text = json.dumps(evidence, ensure_ascii=False)
+        assert "artifacts" not in evidence
+        assert "review_result" not in evidence
+        assert "focused_view" not in evidence
+        assert "focused_graph" not in evidence
+        assert "focused_impact" not in evidence
+        assert "+new <unsafe>" not in evidence_text
+        evidence_paths = {item["label"]: item["path"] for item in evidence["artifact_paths"]}
+        assert evidence_paths == artifact_paths
+        audit = evidence["audit_summary"]
+        assert audit["review"]["status"] == "skipped"
+        assert audit["review"]["success"] is True
+        assert audit["plan"]["affected_nodes"] == ["n1", "n2"]
+        assert audit["plan"]["code_changes"] == [{"file_path": "a.py"}]
+        assert audit["impact"]["result_count"] == 2
+        assert audit["impact"]["mapped_code_relations"] == 1
+        assert audit["code"]["commit_sha"] == "abc123"
+        assert audit["code"]["files_modified"] == ["a.py"]
+        assert audit["apply"]["status"] == "success"
+        assert audit["apply"]["dep_graph_refreshed"] is True
+        assert audit["apply"]["rollback_path"] == str(backup_path)
+        assert audit["apply"]["test_status"] == "passed"
         assert "focused_graph" not in data
         assert "focused_impact" not in data
         assert not any(item["label"] == "focused_graph" for item in data["artifacts"])
@@ -336,6 +367,34 @@ def test_review_report_reconstructs_affected_node_evidence_from_impact(tmp_path:
         assert "1 mapped code relations" in data["retrievals"][0]["hits"][0]["reason"]
         assert "impact callers=0, affected_files=1" in data["retrievals"][0]["hits"][0]["reason"]
         assert data["retrievals"][1]["tool"] == str(impact_path)
+        artifact_paths = {item["label"]: item["path"] for item in data["artifacts"]}
+        assert artifact_paths["validate"] == str(validate_path)
+        assert artifact_paths["locate"] == str(locate_path)
+        assert artifact_paths["plan"] == str(plan_path)
+        assert artifact_paths["impact"] == str(impact_path)
+        assert artifact_paths["code_result"] == str(code_path)
+        assert artifact_paths["apply_result"] == str(apply_path)
+        assert artifact_paths["review_result"] == str(review_path)
+        evidence = data["evidence"]
+        evidence_text = json.dumps(evidence, ensure_ascii=False)
+        assert "artifacts" not in evidence
+        assert "review_result" not in evidence
+        assert "focused_view" not in evidence
+        assert "focused_graph" not in evidence
+        assert "focused_impact" not in evidence
+        assert "failing test" not in evidence_text
+        evidence_paths = {item["label"]: item["path"] for item in evidence["artifact_paths"]}
+        assert evidence_paths == artifact_paths
+        audit = evidence["audit_summary"]
+        assert audit["review"]["status"] == "skipped"
+        assert audit["plan"]["affected_nodes"] == ["planned"]
+        assert audit["plan"]["code_changes"] == [{"file_path": "scripts/common/run_report.py"}]
+        assert audit["impact"]["result_count"] == 1
+        assert audit["impact"]["mapped_code_relations"] == 1
+        assert audit["code"]["files_modified"] == ["scripts/common/run_report.py"]
+        assert audit["apply"]["status"] == "dep_refreshed"
+        assert audit["apply"]["test_status"] == "failed"
+        assert audit["apply"]["rollback_path"].endswith("dep_graph.before-edit-456.json")
         assert "focused_graph" not in data
         assert not any(item["label"] == "focused_graph" for item in data["artifacts"])
         focused = data["focused_view"]

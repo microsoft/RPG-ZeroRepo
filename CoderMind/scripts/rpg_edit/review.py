@@ -934,6 +934,133 @@ def _rollback_path(apply_result: Dict[str, Any]) -> Any:
     return backups.get("rpg") or backups.get("dep_graph") or apply_result.get("rollback_command")
 
 
+def _artifact_path_pointers(artifact_rows: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    pointers: List[Dict[str, Any]] = []
+    for row in artifact_rows:
+        pointer: Dict[str, Any] = {}
+        for key in ("label", "path", "status"):
+            if row.get(key) not in (None, ""):
+                pointer[key] = row.get(key)
+        if pointer:
+            pointers.append(pointer)
+    return pointers
+
+
+def _compact_plan_audit(plan: Dict[str, Any]) -> Dict[str, Any]:
+    changes = []
+    for change in plan.get("code_changes") or []:
+        if not isinstance(change, dict):
+            continue
+        row: Dict[str, Any] = {}
+        for key in ("file_path", "change_type", "action"):
+            if change.get(key) not in (None, ""):
+                row[key] = change.get(key)
+        if row:
+            changes.append(row)
+    return {
+        "affected_nodes": [str(node_id) for node_id in _listify(plan.get("affected_nodes"))],
+        "code_changes": changes,
+    }
+
+
+def _compact_impact_audit(impact: Dict[str, Any]) -> Dict[str, Any]:
+    results = impact.get("results") if isinstance(impact.get("results"), dict) else {}
+    affected_files: List[Any] = []
+    mapped_relations = 0
+    node_summaries = []
+    for node_id, row in results.items():
+        row = row if isinstance(row, dict) else {}
+        dep_nodes = _listify(row.get("dep_nodes"))
+        files = _listify(row.get("affected_files"))
+        affected_files.extend(files)
+        mapped_relations += len(dep_nodes)
+        summary = row.get("impact_summary") if isinstance(row.get("impact_summary"), dict) else {}
+        node_summaries.append({
+            "node_id": node_id,
+            "mapped_code_relations": len(dep_nodes),
+            "affected_files": len(files),
+            "total_callers": summary.get("total_callers", len(row.get("callers") or [])),
+            "total_callees": summary.get("total_callees", len(row.get("callees") or [])),
+        })
+    return {
+        "type": impact.get("type"),
+        "result_count": len(results),
+        "affected_files": _ordered_unique(affected_files),
+        "mapped_code_relations": mapped_relations,
+        "results": node_summaries,
+    }
+
+
+def _compact_code_audit(code_result: Dict[str, Any]) -> Dict[str, Any]:
+    return {
+        "success": code_result.get("success"),
+        "last_status": code_result.get("last_status"),
+        "commit_sha": code_result.get("commit_sha"),
+        "files_modified": [str(path) for path in _listify(code_result.get("files_modified"))],
+        "iterations": len(code_result.get("iterations") or []),
+    }
+
+
+def _compact_apply_audit(apply_result: Dict[str, Any]) -> Dict[str, Any]:
+    applied = []
+    for feature in apply_result.get("applied_features") or []:
+        if not isinstance(feature, dict):
+            continue
+        row: Dict[str, Any] = {}
+        for key in ("node_id", "action", "change"):
+            if feature.get(key) not in (None, ""):
+                row[key] = feature.get(key)
+        if row:
+            applied.append(row)
+    test_result = apply_result.get("test_result") if isinstance(apply_result.get("test_result"), dict) else {}
+    return {
+        "status": _apply_status(apply_result),
+        "dep_graph_refreshed": apply_result.get("dep_graph_refreshed"),
+        "applied_features": applied,
+        "rollback_path": _rollback_path(apply_result),
+        "test_status": _status_from_bool(test_result.get("passed")),
+    }
+
+
+def _compact_review_audit(result: Dict[str, Any]) -> Dict[str, Any]:
+    return {
+        "status": result.get("type", "review"),
+        "success": result.get("success", result.get("type") == "skipped"),
+        "iterations": len(result.get("iterations") or []),
+        "suggestions": len(result.get("suggestions") or []),
+        "reason": result.get("reason"),
+    }
+
+
+def _compact_review_evidence(
+    artifacts: Dict[str, Any],
+    artifact_rows: List[Dict[str, Any]],
+    result: Dict[str, Any],
+) -> Dict[str, Any]:
+    validate = artifacts.get("validate") if isinstance(artifacts.get("validate"), dict) else {}
+    locate = artifacts.get("locate") if isinstance(artifacts.get("locate"), dict) else {}
+    plan = artifacts.get("plan") if isinstance(artifacts.get("plan"), dict) else {}
+    impact = artifacts.get("impact") if isinstance(artifacts.get("impact"), dict) else {}
+    code_result = artifacts.get("code_result") if isinstance(artifacts.get("code_result"), dict) else {}
+    apply_result = artifacts.get("apply_result") if isinstance(artifacts.get("apply_result"), dict) else {}
+    return {
+        "artifact_paths": _artifact_path_pointers(artifact_rows),
+        "audit_summary": {
+            "validate": {"type": validate.get("type"), "message": validate.get("message")},
+            "locate": {
+                "type": locate.get("type"),
+                "query": locate.get("query"),
+                "candidate_count": len(locate.get("results") or []),
+            },
+            "plan": _compact_plan_audit(plan),
+            "impact": _compact_impact_audit(impact),
+            "code": _compact_code_audit(code_result),
+            "apply": _compact_apply_audit(apply_result),
+            "review": _compact_review_audit(result),
+        },
+    }
+
+
 def _user_decision(result: Dict[str, Any], artifacts: Dict[str, Any]) -> UserDecisionEvent:
     apply_result = artifacts.get("apply_result") if isinstance(artifacts.get("apply_result"), dict) else {}
     code_result = artifacts.get("code_result") if isinstance(artifacts.get("code_result"), dict) else {}
@@ -973,7 +1100,7 @@ def _publish_review_report(result: Dict[str, Any], plan_path: Path, impact_path:
     code_deltas = _code_delta_rows(artifacts)
     focused_view = _feature_evidence_groups(artifacts, candidates, code_deltas, result)
     artifact_rows = _artifact_links(plan_path, impact_path)
-    evidence = {"artifacts": artifacts, "review_result": result, "focused_view": focused_view}
+    evidence = _compact_review_evidence(artifacts, artifact_rows, result)
     try:
         report_run = CommandRun(
             command="rpg_edit",

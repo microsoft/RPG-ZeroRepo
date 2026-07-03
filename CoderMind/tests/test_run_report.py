@@ -61,8 +61,7 @@ def test_write_command_report_escapes_content_and_writes_sections(tmp_path: Path
         "Summary",
         "Stage timeline",
         "Safety boundary",
-        "Why these nodes?",
-        "Focused impact view",
+        "semantic-code impact chain",
         "What changed?",
         "Verification status",
         "Artifact links",
@@ -191,17 +190,15 @@ def test_write_command_report_renders_retrievals_code_deltas_and_focused_view(tm
     )
 
     html = report.read_text(encoding="utf-8")
-    assert "Why these nodes?" in html
-    assert "Retrieval evidence" in html
+    assert "semantic-code impact chain" in html
+    assert html.count("<h2>semantic-code impact chain</h2>") == 1
+    assert "Why these nodes?" not in html
+    assert "Focused impact view" not in html
     assert "What changed?" in html
-    assert "Focused impact view" in html
-    assert html.count("<h2>Focused impact view</h2>") == 1
-    assert "RPG_EDIT_LOCATE_FILE" in html
-    assert "Primary RPG nodes" in html
-    assert "Primary code nodes" in html
-    assert "Semantic-code mappings" in html
-    assert "Capped neighborhood" in html
-    assert "Hidden context" in html
+    assert "Feature group" in html
+    assert "Semantic → code evidence" in html
+    assert "href=\"#diff-a.py\"" in html
+    assert "id=\"diff-a.py\"" in html
     assert "Inspector JSON" in html
     assert "mapped" in html
     assert "missing" in html
@@ -218,14 +215,20 @@ def test_write_command_report_renders_retrievals_code_deltas_and_focused_view(tm
     assert "stale_graph" in html
     assert "Hidden 4 additional caller neighbors." in html
     assert '"caller": 1' in html
-    assert '"focused_view"' in html
-    assert "+line 0 &lt;script&gt;alert(0)&lt;/script&gt;" in html
+    assert html.count("+line 0 &lt;script&gt;alert(0)&lt;/script&gt;") == 1
     assert "+line 0 <script>alert(0)</script>" not in html
     assert "Node <unsafe>" not in html
     assert "a.py<script>" not in html
     assert "maps because <reason>" not in html
     assert "<details><summary>View diff</summary>" in html
     assert "<details open" not in html
+    evidence_json = html.split("<summary>Evidence JSON</summary><pre>", 1)[1].split("</pre>", 1)[0]
+    assert "code_deltas" not in evidence_json
+    assert "focused_view" not in evidence_json
+    assert "focused_impact" not in evidence_json
+    assert "focused_graph" not in evidence_json
+    assert long_diff not in evidence_json
+    assert len(html) < 18000
     assert "Focused impact summary" not in html
     assert "Focused graph evidence" not in html
     assert "Graph artifact" not in html
@@ -276,6 +279,7 @@ def test_write_command_report_does_not_invent_node_rows_from_counts(tmp_path: Pa
     html = report.read_text(encoding="utf-8")
     assert "Why these nodes?" not in html
     assert "Focused impact view" not in html
+    assert "semantic-code impact chain" not in html
     assert '"dep_nodes": 4' in html
     assert '<td><code>4</code></td>' not in html
 
