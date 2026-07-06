@@ -439,6 +439,7 @@ def test_attach_update_report_uses_update_rpg_result_fields(tmp_path, monkeypatc
     assert cards["RPG nodes"] == "4504 (delta: +2)"
     assert cards["dep graph"] == "nodes=2708 (delta: +46), edges=5498 (delta: +103)"
     assert artifacts["rpg_json"] == "/tmp/rpg.json"
+    assert captured["status"] == "success"
     assert captured["steps"][0]["reason"] == "2 changed files"
     assert captured["steps"][1]["reason"] == "3 semantic files, modified=3"
 

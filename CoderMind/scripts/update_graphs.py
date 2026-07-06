@@ -171,7 +171,7 @@ def _attach_update_report(result: dict) -> dict:
         report_path = write_command_report(CommandRun(
             command="update_rpg",
             title="CoderMind update_rpg Explain View",
-            status=result.get("mode") or result.get("status"),
+            status=result.get("status", result.get("mode")),
             summary=[
                 {"label": "mode", "value": result.get("mode", "")},
                 {
