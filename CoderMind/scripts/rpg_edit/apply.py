@@ -59,12 +59,16 @@ def _rollback(backups: Dict[str, str], rpg_path: Path, dep_graph_path: Path) -> 
         shutil.copy2(backups["dep_graph"], dep_graph_path)
 
 
+def _is_rpg_edit_branch(branch: Any) -> bool:
+    return isinstance(branch, str) and branch.startswith("rpg-edit/")
+
+
 def _rollback_command(timestamp: str | None, before_state: dict | None) -> str | None:
     if not timestamp:
         return None
     command = f"{cmd_for('rpg_edit/apply.py')} --rollback {shlex.quote(str(timestamp))}"
     branch = before_state.get("head_branch") if isinstance(before_state, dict) else None
-    if branch:
+    if _is_rpg_edit_branch(branch):
         command += f" --rollback-branch {shlex.quote(str(branch))}"
     return command
 
