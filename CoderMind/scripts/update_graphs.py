@@ -127,7 +127,7 @@ def _git_delta_files(prev_ref: str, workspace_root: str) -> list[dict[str, str]]
 
     try:
         output = subprocess.check_output(
-            ["git", "diff", "--name-status", f"{prev_ref}..HEAD", "--", "."],
+            ["git", "diff", "--relative", "--name-status", f"{prev_ref}..HEAD", "--", "."],
             cwd=workspace_root,
             stderr=subprocess.DEVNULL,
             text=True,
