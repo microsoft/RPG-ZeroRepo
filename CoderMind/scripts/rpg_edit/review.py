@@ -432,6 +432,196 @@ def _warning_link_fields(warning: Dict[str, Any], rpg_nodes: Dict[str, Dict[str,
     return row
 
 
+def _hierarchy_segments(value: Any) -> List[str]:
+    if isinstance(value, (list, tuple)):
+        return [str(item) for item in value if item not in (None, "")]
+    if value in (None, ""):
+        return []
+    text = str(value)
+    separator = " / " if " / " in text else "/"
+    return [part.strip() for part in text.split(separator) if part.strip()]
+
+
+def _hierarchy_child(parent: Dict[str, Any], child_id: str, name: str, kind: str) -> Dict[str, Any]:
+    children = parent.setdefault("children", [])
+    for child in children:
+        if isinstance(child, dict) and child.get("id") == child_id:
+            return child
+    child = {"id": child_id, "name": name, "kind": kind, "children": []}
+    children.append(child)
+    return child
+
+
+def _append_hierarchy_leaf(parent: Dict[str, Any], leaf: Dict[str, Any]) -> None:
+    children = parent.setdefault("children", [])
+    leaf_id = leaf.get("id")
+    if any(isinstance(child, dict) and child.get("id") == leaf_id for child in children):
+        return
+    children.append(leaf)
+
+
+def _add_hierarchy_path(root: Dict[str, Any], parts: List[str], leaf: Dict[str, Any], group_kind: str) -> None:
+    parent = root
+    trail: List[str] = []
+    for part in parts:
+        trail.append(part)
+        parent = _hierarchy_child(parent, _node_link_id(group_kind, "/".join(trail)), part, group_kind)
+    _append_hierarchy_leaf(parent, leaf)
+
+
+def _semantic_hierarchy_parts(node: Dict[str, Any]) -> List[str]:
+    for key in ("breadcrumb", "breadcrumb_path", "feature_path", "path"):
+        parts = _hierarchy_segments(node.get(key))
+        if parts:
+            return parts[:-1] if len(parts) > 1 else []
+    return []
+
+
+def _code_hierarchy_parts(node: Dict[str, Any]) -> List[str]:
+    for key in ("path", "module", "file"):
+        parts = _hierarchy_segments(node.get(key))
+        if parts:
+            return parts[:-1]
+    return []
+
+
+def _focused_graph_hierarchy(
+    semantic_nodes: List[Dict[str, Any]],
+    code_nodes: List[Dict[str, Any]],
+    mappings: List[Dict[str, Any]],
+    edges: List[Dict[str, Any]],
+    hidden_counts: Dict[str, Any],
+    warnings: List[Dict[str, Any]],
+) -> Dict[str, Any]:
+    root: Dict[str, Any] = {
+        "id": "focused-graph-root",
+        "name": "Focused graph",
+        "kind": "root",
+        "meta": {"hidden_counts": hidden_counts, "warnings": len(warnings), "edges": len(edges)},
+        "children": [],
+    }
+    semantic_root = _hierarchy_child(root, "focused-semantic-root", "Semantic scope", "semantic_group")
+    code_root = _hierarchy_child(root, "focused-code-root", "Code scope", "code_group")
+    mapping_root = _hierarchy_child(root, "focused-mapping-root", "Mappings", "mapping_group")
+    context_root = _hierarchy_child(root, "focused-context-root", "One-hop context", "context_group")
+
+    known_link_ids: set[str] = set()
+    for node in semantic_nodes:
+        link_id = str(node.get("link_id") or _node_link_id("rpg", node.get("node_id")))
+        known_link_ids.add(link_id)
+        leaf = {
+            "id": link_id,
+            "node_id": node.get("node_id"),
+            "name": node.get("name") or node.get("symbol") or node.get("node_id") or "semantic node",
+            "kind": "semantic",
+            "state": node.get("state"),
+            "mapping_status": node.get("mapping_status"),
+        }
+        _add_hierarchy_path(semantic_root, _semantic_hierarchy_parts(node), leaf, "semantic-path")
+
+    for node in code_nodes:
+        code_id = node.get("node_id") or node.get("dep_node_id")
+        link_id = str(node.get("link_id") or _node_link_id("code", code_id))
+        known_link_ids.add(link_id)
+        leaf = {
+            "id": link_id,
+            "node_id": code_id,
+            "name": node.get("symbol") or node.get("name") or code_id or "code node",
+            "kind": "code",
+            "state": node.get("state"),
+            "path": node.get("path"),
+        }
+        _add_hierarchy_path(code_root, _code_hierarchy_parts(node), leaf, "code-path")
+
+    for mapping in mappings:
+        link_id = str(mapping.get("link_id") or _node_link_id("map", f"{mapping.get('rpg_node_id')}-{mapping.get('code_node_id') or 'missing'}"))
+        known_link_ids.add(link_id)
+        target = mapping.get("code_node_id") or mapping.get("dep_node_id") or "missing mapping"
+        _append_hierarchy_leaf(mapping_root, {
+            "id": link_id,
+            "name": f"{mapping.get('rpg_node_id')} → {target}",
+            "kind": "mapping",
+            "state": mapping.get("state") or mapping.get("status"),
+            "rpg_node_id": mapping.get("rpg_node_id"),
+            "code_node_id": mapping.get("code_node_id") or mapping.get("dep_node_id"),
+        })
+
+    context_link_ids: set[str] = set()
+    for edge in edges:
+        for endpoint_key, link_key in (("source_node_id", "source_link_id"), ("target_node_id", "target_link_id")):
+            link_id = edge.get(link_key)
+            node_id = edge.get(endpoint_key)
+            if link_id in (None, "") or str(link_id) in known_link_ids or str(link_id) in context_link_ids:
+                continue
+            context_link_ids.add(str(link_id))
+            _append_hierarchy_leaf(context_root, {
+                "id": str(link_id),
+                "node_id": node_id,
+                "name": node_id or "context node",
+                "kind": "context",
+            })
+    return root
+
+
+def _focused_graph_default_focus(
+    semantic_nodes: List[Dict[str, Any]],
+    code_nodes: List[Dict[str, Any]],
+    mappings: List[Dict[str, Any]],
+    edges: List[Dict[str, Any]],
+    warnings: List[Dict[str, Any]],
+) -> Dict[str, Any]:
+    semantic_links = [str(node.get("link_id") or _node_link_id("rpg", node.get("node_id"))) for node in semantic_nodes]
+    code_links = [str(node.get("link_id") or _node_link_id("code", node.get("node_id") or node.get("dep_node_id"))) for node in code_nodes]
+    changed_code_links = [
+        str(node.get("link_id") or _node_link_id("code", node.get("node_id") or node.get("dep_node_id")))
+        for node in code_nodes
+        if node.get("changed") or node.get("changed_files") or node.get("diff_anchor")
+    ]
+    warning_links = []
+    for warning in warnings:
+        warning_links.extend(_listify(warning.get("node_link_id")) + _listify(warning.get("code_link_id")))
+    node_link_ids = _ordered_unique(semantic_links + changed_code_links + warning_links)
+    if not node_link_ids:
+        node_link_ids = _ordered_unique(semantic_links + code_links)
+    return {
+        "node_link_ids": node_link_ids,
+        "semantic_node_ids": _ordered_unique([node.get("node_id") for node in semantic_nodes]),
+        "code_node_ids": _ordered_unique([node.get("node_id") or node.get("dep_node_id") for node in code_nodes]),
+        "mapping_link_ids": _ordered_unique([mapping.get("link_id") for mapping in mappings]),
+        "edge_link_ids": _ordered_unique([edge.get("link_id") for edge in edges]),
+        "edge_depth": 1,
+        "show_edges": True,
+    }
+
+
+def _focused_graph_metadata(
+    semantic_nodes: List[Dict[str, Any]],
+    code_nodes: List[Dict[str, Any]],
+    mappings: List[Dict[str, Any]],
+    edges: List[Dict[str, Any]],
+    hidden_counts: Dict[str, Any],
+    warnings: List[Dict[str, Any]],
+    caps: Optional[Dict[str, Any]],
+    graph_context: Optional[Dict[str, Any]],
+) -> Dict[str, Any]:
+    hierarchy = _focused_graph_hierarchy(semantic_nodes, code_nodes, mappings, edges, hidden_counts, warnings)
+    default_focus = _focused_graph_default_focus(semantic_nodes, code_nodes, mappings, edges, warnings)
+    focused_graph: Dict[str, Any] = {
+        "schema": "cmind.focused_graph.v1",
+        "hierarchy": hierarchy,
+        "default_focus": default_focus,
+    }
+    if caps:
+        focused_graph["caps"] = caps
+    if graph_context:
+        focused_graph["graph_context"] = graph_context
+    if hidden_counts:
+        focused_graph["hidden_counts"] = hidden_counts
+    if warnings:
+        focused_graph["warning_count"] = len(warnings)
+    return focused_graph
+
+
 def _build_nodes_view(
     primary_rpg_nodes: List[Dict[str, Any]],
     primary_code_nodes: List[Dict[str, Any]],
@@ -441,6 +631,9 @@ def _build_nodes_view(
     warnings: List[Dict[str, Any]],
     changed_files: List[str],
     diff_anchors: Dict[str, str],
+    *,
+    caps: Optional[Dict[str, Any]] = None,
+    graph_context: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
     rpg_by_id = {str(row.get("node_id")): row for row in primary_rpg_nodes if row.get("node_id") not in (None, "")}
     code_by_id = {str(row.get("node_id") or row.get("dep_node_id")): row for row in primary_code_nodes if (row.get("node_id") or row.get("dep_node_id")) not in (None, "")}
@@ -543,12 +736,14 @@ def _build_nodes_view(
     for edge in edges:
         source_id = edge.get("source_node_id")
         target_id = edge.get("target_node_id")
+        relation = edge.get("relation") or "dependency"
         row: Dict[str, Any] = {
+            "link_id": _node_link_id("edge", f"{source_id}-{relation}-{target_id}"),
             "source_node_id": source_id,
             "target_node_id": target_id,
             "source_link_id": _edge_endpoint_link_id(source_id, rpg_by_id, code_by_id),
             "target_link_id": _edge_endpoint_link_id(target_id, rpg_by_id, code_by_id),
-            "relation": edge.get("relation") or "dependency",
+            "relation": relation,
             "state": edge.get("status") or "visible",
         }
         for key in ("direction", "source", "path", "reason", "rpg_node_id", "neighbor_node_id", "name"):
@@ -556,6 +751,16 @@ def _build_nodes_view(
         edge_rows.append(row)
 
     warning_rows = [_warning_link_fields(warning, rpg_by_id, code_by_id) for warning in warnings if isinstance(warning, dict)]
+    focused_graph = _focused_graph_metadata(
+        semantic_nodes,
+        code_nodes,
+        mapping_rows,
+        edge_rows,
+        hidden_counts,
+        warning_rows,
+        caps or {},
+        graph_context or {},
+    )
     return {
         "summary": {
             "semantic_nodes": len(semantic_nodes),
@@ -572,6 +777,11 @@ def _build_nodes_view(
         "hidden_counts": hidden_counts,
         "warnings": warning_rows,
         "changed_files": _changed_file_refs(changed_files, diff_anchors),
+        "hierarchy": focused_graph["hierarchy"],
+        "default_focus": focused_graph["default_focus"],
+        "focused_graph": focused_graph,
+        "caps": caps or {},
+        "graph_context": graph_context or {},
     }
 
 
@@ -1097,7 +1307,29 @@ def _feature_evidence_groups(
     mapped_code_relations = sum(1 for row in mapping_rows_all if row.get("code_node_id"))
     missing_mappings = sum(1 for row in mapping_rows_all if row.get("status") == "missing")
     diff_anchors = _diff_anchor_map(code_deltas)
-    nodes_view = _build_nodes_view(primary_rpg_nodes, primary_code_nodes, mappings, edges, hidden_counts, warnings, changed_files, diff_anchors)
+    focused_caps = {
+        "primary_rpg_nodes": _FOCUSED_RPG_NODE_CAP,
+        "primary_code_nodes": _FOCUSED_CODE_NODE_CAP,
+        "edges": _FOCUSED_EDGE_CAP,
+    }
+    graph_context = {
+        "current_graph_available": current_graph_available,
+        "current_rpg_nodes": len(current_rpg_nodes),
+        "current_dep_nodes": len(current_dep_nodes),
+        "current_dep_edges": len(current_dep_edges),
+    }
+    nodes_view = _build_nodes_view(
+        primary_rpg_nodes,
+        primary_code_nodes,
+        mappings,
+        edges,
+        hidden_counts,
+        warnings,
+        changed_files,
+        diff_anchors,
+        caps=focused_caps,
+        graph_context=graph_context,
+    )
     summary = {
         "selected_feature_groups": len(primary_rpg_nodes_all),
         "primary_rpg_nodes": len(primary_rpg_nodes),
@@ -1126,11 +1358,7 @@ def _feature_evidence_groups(
         "warnings": warnings,
         "changed_files": changed_files,
         "unmatched_code_deltas": unmatched_code_deltas,
-        "caps": {
-            "primary_rpg_nodes": _FOCUSED_RPG_NODE_CAP,
-            "primary_code_nodes": _FOCUSED_CODE_NODE_CAP,
-            "edges": _FOCUSED_EDGE_CAP,
-        },
+        "caps": focused_caps,
         "apply": {
             "status": _apply_status(apply_result),
             "dep_graph_refreshed": apply_result.get("dep_graph_refreshed"),
