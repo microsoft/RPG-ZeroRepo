@@ -285,7 +285,7 @@ do **not** silently `git stash`, as that would hide their work.
 **Step 5b — Update RPG feature graph:**
 
 ```bash
-cmind script rpg_edit/apply.py --phase rpg-only --json
+cmind script rpg_edit/apply.py --phase rpg-only --confirmed --json
 ```
 
 This applies `feature_changes` to the RPG and saves it (reading the plan
@@ -317,7 +317,7 @@ code + dep_graph land together:
 
 ```bash
 cmind script rpg_edit/apply.py --phase dep-refresh \
-    --backup-ts <timestamp_from_5b> --json
+    --backup-ts <timestamp_from_5b> --confirmed --json
 
 git add -A && git commit --amend --no-edit
 ```

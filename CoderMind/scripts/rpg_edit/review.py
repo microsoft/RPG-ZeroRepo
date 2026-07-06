@@ -284,19 +284,6 @@ def _code_delta_rows(artifacts: Dict[str, Any]) -> List[Dict[str, Any]]:
     return rows
 
 
-def _focused_graph_artifact(candidates: List[Dict[str, Any]], artifacts: Dict[str, Any]) -> Dict[str, Any]:
-    dep_rows = _dep_node_rows(candidates)
-    selected_rpg = sorted({str(row.get("node_id")) for row in candidates if row.get("node_id")})
-    selected_dep = sorted({str(row.get("node_id")) for row in dep_rows if row.get("node_id")})
-    if not selected_rpg and not selected_dep:
-        return {}
-    return {
-        "status": "embedded",
-        "selected_rpg_nodes": selected_rpg,
-        "selected_dep_nodes": selected_dep,
-    }
-
-
 def _dep_node_path(dep_id: Any) -> str:
     if dep_id in (None, ""):
         return ""
@@ -763,7 +750,6 @@ def _feature_evidence_groups(
     candidates: List[Dict[str, Any]],
     code_deltas: List[Dict[str, Any]],
     result: Dict[str, Any],
-    focused_graph: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
     locate = artifacts.get("locate") if isinstance(artifacts.get("locate"), dict) else {}
     plan = artifacts.get("plan") if isinstance(artifacts.get("plan"), dict) else {}
@@ -1139,12 +1125,20 @@ def _review_timeline(result: Dict[str, Any], artifacts: Dict[str, Any]) -> List[
     plan = artifacts.get("plan") if isinstance(artifacts.get("plan"), dict) else None
     impact = artifacts.get("impact") if isinstance(artifacts.get("impact"), dict) else None
     code_result = artifacts.get("code_result") if isinstance(artifacts.get("code_result"), dict) else None
+    apply_result = artifacts.get("apply_result") if isinstance(artifacts.get("apply_result"), dict) else None
+    apply_reason = "artifact not found"
+    if apply_result is not None:
+        apply_reason = (
+            f"{len(apply_result.get('applied_features') or [])} applied features; "
+            f"dep_graph_refreshed={apply_result.get('dep_graph_refreshed')}"
+        )
     return [
         {"name": "validate", "status": validate.get("type") if validate else "missing", "reason": validate.get("message", "") if validate else "artifact not found"},
         {"name": "locate", "status": locate.get("type") if locate else "missing", "reason": f"{len(locate.get('results') or [])} candidates" if locate else "artifact not found"},
         {"name": "plan", "status": "available" if plan else "missing", "reason": f"{len(plan.get('code_changes') or [])} code changes" if plan else "artifact not found"},
         {"name": "impact", "status": impact.get("type", "available") if impact else "missing", "reason": f"{len((impact.get('results') or {}))} impact result sets" if impact else "artifact not found"},
         {"name": "code", "status": code_result.get("last_status") if code_result else "missing", "reason": code_result.get("last_error") or f"success={code_result.get('success')}" if code_result else "artifact not found"},
+        {"name": "apply/dep-refresh", "status": _apply_status(apply_result or {}), "reason": apply_reason},
         {"name": "review", "status": result.get("type"), "reason": result.get("reason") or f"success={result.get('success')}"},
     ]
 
@@ -1153,10 +1147,30 @@ def _review_verification(result: Dict[str, Any], artifacts: Dict[str, Any]) -> L
     checks: List[Dict[str, Any]] = []
     validate = artifacts.get("validate") if isinstance(artifacts.get("validate"), dict) else None
     code_result = artifacts.get("code_result") if isinstance(artifacts.get("code_result"), dict) else None
+    apply_result = artifacts.get("apply_result") if isinstance(artifacts.get("apply_result"), dict) else None
     if validate:
         checks.append({"name": "validate", "status": validate.get("type"), "detail": validate.get("message", "")})
     if code_result:
         checks.append({"name": "code", "status": code_result.get("success"), "detail": code_result.get("last_error") or code_result.get("last_status")})
+    if apply_result is None:
+        checks.append({"name": "apply", "status": "missing", "detail": "artifact not found"})
+    else:
+        checks.append({
+            "name": "apply",
+            "status": _apply_status(apply_result),
+            "detail": f"{len(apply_result.get('applied_features') or [])} applied features",
+        })
+    test_result = apply_result.get("test_result") if isinstance(apply_result, dict) and isinstance(apply_result.get("test_result"), dict) else {}
+    checks.append({
+        "name": "test",
+        "status": _test_status(result, code_result or {}, apply_result or {}),
+        "detail": "apply test_result" if test_result else "review/code status fallback",
+    })
+    checks.append({
+        "name": "dep_graph refresh",
+        "status": apply_result.get("dep_graph_refreshed") if apply_result is not None else "missing",
+        "detail": f"apply status={_apply_status(apply_result or {})}" if apply_result is not None else "artifact not found",
+    })
     checks.append({"name": "review", "status": result.get("success", result.get("type") == "skipped"), "detail": result.get("reason") or result.get("type")})
     for iteration in result.get("iterations") or []:
         checks.append({
@@ -1280,13 +1294,17 @@ def _compact_apply_audit(apply_result: Dict[str, Any]) -> Dict[str, Any]:
         if row:
             applied.append(row)
     test_result = apply_result.get("test_result") if isinstance(apply_result.get("test_result"), dict) else {}
-    return {
+    audit = {
         "status": _apply_status(apply_result),
         "dep_graph_refreshed": apply_result.get("dep_graph_refreshed"),
         "applied_features": applied,
         "rollback_path": _rollback_path(apply_result),
         "test_status": _status_from_bool(test_result.get("passed")),
     }
+    for key in ("backup_timestamp", "backups", "confirmed", "before_state", "rollback_command"):
+        if apply_result.get(key) not in (None, "", [], {}):
+            audit[key] = apply_result.get(key)
+    return audit
 
 
 def _compact_review_audit(result: Dict[str, Any]) -> Dict[str, Any]:

@@ -1074,45 +1074,6 @@ def _render_semantic_code_impact_chain(
     return f"<section><h2>semantic-code impact chain</h2>{body}</section>"
 
 
-def _render_why_these_nodes(
-    retrievals: list[dict[str, Any]],
-    rpg_nodes: list[dict[str, Any]],
-    dep_nodes: list[dict[str, Any]],
-) -> str:
-    return _render_semantic_code_impact_chain(retrievals, rpg_nodes, dep_nodes, {}, {})
-
-
-def _render_node_rows(title: str, nodes: list[dict[str, Any]], *, dep_graph: bool) -> str:
-    if not nodes:
-        return f"<h3>{_h(title)}</h3><p class=\"empty\">No node evidence recorded.</p>"
-    rows = []
-    if dep_graph:
-        for node in nodes:
-            dep_id = node.get("dep_node_id") or node.get("node_id")
-            rows.append(
-                "<tr>"
-                f"<td><code>{_h(dep_id)}</code></td>"
-                f"<td>{_h(node.get('path', ''))}</td>"
-                f"<td><code>{_h(node.get('source_feature', ''))}</code></td>"
-                f"<td>{_h(node.get('relation') or node.get('change') or node.get('status', ''))}</td>"
-                "</tr>"
-            )
-        body = "<table><thead><tr><th>Code node</th><th>Path</th><th>Feature</th><th>Relation/state</th></tr></thead><tbody>" + "".join(rows) + "</tbody></table>"
-    else:
-        for node in nodes:
-            rows.append(
-                "<tr>"
-                f"<td><code>{_h(node.get('node_id', ''))}</code></td>"
-                f"<td>{_h(node.get('name', ''))}</td>"
-                f"<td>{_h(node.get('type') or node.get('node_type') or '')}</td>"
-                f"<td>{_h(node.get('path', ''))}</td>"
-                f"<td>{_h(node.get('score') or node.get('status') or '')}</td>"
-                "</tr>"
-            )
-        body = "<table><thead><tr><th>Feature</th><th>Name</th><th>Type</th><th>Path</th><th>Score/state</th></tr></thead><tbody>" + "".join(rows) + "</tbody></table>"
-    return f"<h3>{_h(title)}</h3>{body}"
-
-
 def _focused_graph_metadata(focused_view: dict[str, Any]) -> str:
     data = json.dumps(_focused_inspector_payload(focused_view), indent=2, ensure_ascii=False, default=_json_default)
     return f"<details><summary>Inspector JSON</summary><pre>{_h(data)}</pre></details>"
@@ -1130,33 +1091,6 @@ def _focused_node_cell(node_id: Any, node: Mapping[str, Any] | None) -> str:
     if node.get("path"):
         parts.append(f"<div class=\"reason\">{_h(node.get('path'))}</div>")
     return "".join(parts) or "<span class=\"empty\">missing</span>"
-
-
-def _render_focused_impact(focused_view: dict[str, Any]) -> str:
-    return _render_semantic_code_impact_chain([], [], [], focused_view, {})
-
-
-def _render_focused_impact_group(group: Mapping[str, Any]) -> str:
-    relation = group.get("relation") or "dependency"
-    edges = [edge for edge in _as_sequence(group.get("edges")) if isinstance(edge, Mapping)]
-    hidden = group.get("hidden") or 0
-    edge_rows = []
-    for edge in edges:
-        edge_rows.append(
-            "<tr>"
-            f"<td><code>{_h(edge.get('source_node_id', ''))}</code></td>"
-            f"<td><code>{_h(edge.get('target_node_id', ''))}</code></td>"
-            f"<td>{_h(edge.get('direction', ''))}</td>"
-            f"<td>{_h(edge.get('path', ''))}</td>"
-            f"<td>{_h(edge.get('source', ''))}</td>"
-            f"<td>{_h(edge.get('reason', ''))}</td>"
-            "</tr>"
-        )
-    rows_html = "<p class=\"empty\">No visible rows for this relation.</p>"
-    if edge_rows:
-        rows_html = "<table><thead><tr><th>Source</th><th>Target</th><th>Direction</th><th>Path</th><th>Source</th><th>Reason</th></tr></thead><tbody>" + "".join(edge_rows) + "</tbody></table>"
-    hidden_html = f"<p class=\"reason\">Hidden { _h(hidden) } additional {_h(relation)} neighbors.</p>" if hidden else ""
-    return f"<details><summary>{_h(relation)} neighborhood ({_h(len(edges))} shown)</summary>{hidden_html}{rows_html}</details>"
 
 
 def _render_artifacts(artifacts: list[dict[str, Any]]) -> str:

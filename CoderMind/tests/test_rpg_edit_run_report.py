@@ -49,6 +49,44 @@ def test_code_result_is_persisted(tmp_path: Path, monkeypatch) -> None:
     assert data == {"success": True, "commit_sha": "abc123"}
 
 
+def test_apply_result_preserves_rpg_metadata_when_dep_refresh_reuses_backup_ts(tmp_path: Path, monkeypatch) -> None:
+    apply = _load_script("rpg_edit_apply_persist_test", _SCRIPTS / "rpg_edit" / "apply.py")
+
+    result_path = tmp_path / "rpg_edit_apply_result.json"
+    monkeypatch.setattr(apply, "RPG_EDIT_APPLY_RESULT_FILE", result_path)
+    previous = {
+        "type": "rpg_updated",
+        "backup_timestamp": "123",
+        "backups": {"rpg": "rpg.before-edit-123.json"},
+        "applied_features": [{"node_id": "n1", "action": "modified"}],
+        "confirmed": True,
+        "before_state": {"head_commit": "before123"},
+        "rollback_command": "cmind script rpg_edit/apply.py --rollback 123 --rollback-branch rpg-edit/test",
+        "rollback_path": "rpg.before-edit-123.json",
+    }
+    result_path.write_text(json.dumps(previous), encoding="utf-8")
+
+    result = apply._record_apply_result(
+        {"type": "dep_refreshed", "backup_timestamp": "123"},
+        backup_timestamp="123",
+        backups={},
+        applied_features=[],
+        dep_graph_refreshed=True,
+        before_state={"head_commit": "current123"},
+        confirmed=True,
+    )
+
+    assert result["type"] == "dep_refreshed"
+    assert result["applied_features"] == [{"node_id": "n1", "action": "modified"}]
+    assert result["backups"] == {"rpg": "rpg.before-edit-123.json"}
+    assert result["confirmed"] is True
+    assert result["before_state"] == {"head_commit": "before123"}
+    assert result["rollback_command"] == "cmind script rpg_edit/apply.py --rollback 123 --rollback-branch rpg-edit/test"
+    assert result["rollback_path"] == "rpg.before-edit-123.json"
+    assert result["dep_graph_refreshed"] is True
+    assert json.loads(result_path.read_text(encoding="utf-8")) == result
+
+
 def test_code_result_clears_recovered_subagent_error(tmp_path: Path, monkeypatch) -> None:
     code = _load_script("rpg_edit_code_retry_test", _SCRIPTS / "rpg_edit" / "code.py")
 
@@ -204,6 +242,15 @@ def test_review_publish_report_returns_report_path(tmp_path: Path, monkeypatch) 
         )
         assert review_artifact["status"] == "available"
         assert apply_artifact["status"] == "available"
+        steps_by_name = {row["name"]: row for row in data["steps"]}
+        assert steps_by_name["apply/dep-refresh"]["status"] == "success"
+        assert "1 applied features" in steps_by_name["apply/dep-refresh"]["reason"]
+        assert "dep_graph_refreshed=True" in steps_by_name["apply/dep-refresh"]["reason"]
+        verification_by_name = {row["name"]: row for row in data["verification"]}
+        assert verification_by_name["apply"]["status"] == "success"
+        assert verification_by_name["apply"]["detail"] == "1 applied features"
+        assert verification_by_name["test"]["status"] == "passed"
+        assert verification_by_name["dep_graph refresh"]["status"] is True
         decision = data["user_decisions"][0]
         assert decision["decision"] == "apply"
         assert decision["branch"] == "rpg-edit/test"
@@ -248,7 +295,13 @@ def test_review_publish_report_returns_report_path(tmp_path: Path, monkeypatch) 
         assert audit["code"]["files_modified"] == ["a.py"]
         assert audit["apply"]["status"] == "success"
         assert audit["apply"]["dep_graph_refreshed"] is True
+        assert audit["apply"]["applied_features"] == [{"node_id": "n1", "action": "modified"}]
         assert audit["apply"]["rollback_path"] == str(backup_path)
+        assert audit["apply"]["backup_timestamp"] == "123"
+        assert audit["apply"]["backups"] == {"rpg": str(backup_path)}
+        assert audit["apply"]["confirmed"] is True
+        assert audit["apply"]["before_state"]["head_commit"] == "before123"
+        assert audit["apply"]["rollback_command"] == "cmind script rpg_edit/apply.py --rollback 123"
         assert audit["apply"]["test_status"] == "passed"
         assert "focused_graph" not in data
         assert "focused_impact" not in data
@@ -327,14 +380,23 @@ def test_review_report_reconstructs_affected_node_evidence_from_impact(tmp_path:
         encoding="utf-8",
     )
     code_path.write_text(json.dumps({"success": True, "files_modified": ["scripts/common/run_report.py"], "last_status": "complete"}), encoding="utf-8")
+    dep_backup_path = tmp_path / "dep_graph.before-edit-456.json"
+    rpg_backup_path = tmp_path / "rpg.before-edit-456.json"
     apply_path.write_text(
         json.dumps({
             "type": "dep_refreshed",
             "backup_timestamp": "456",
-            "backups": {"dep_graph": str(tmp_path / "dep_graph.before-edit-456.json")},
-            "applied_features": [],
+            "backups": {"rpg": str(rpg_backup_path), "dep_graph": str(dep_backup_path)},
+            "applied_features": [{"node_id": "planned", "action": "modified"}],
             "dep_graph_refreshed": True,
-            "rollback_command": "cmind script rpg_edit/apply.py --rollback 456",
+            "rollback_command": "cmind script rpg_edit/apply.py --rollback 456 --rollback-branch rpg-edit/test",
+            "before_state": {
+                "head_commit": "before456",
+                "head_short": "before",
+                "head_branch": "rpg-edit/test",
+                "head_timestamp": "2026-06-30T12:45:00+00:00",
+            },
+            "confirmed": True,
             "test_result": {"passed": False, "output": "failing test"},
         }),
         encoding="utf-8",
@@ -373,14 +435,23 @@ def test_review_report_reconstructs_affected_node_evidence_from_impact(tmp_path:
 
     def fake_write_command_report(run):
         data = run.to_dict()
+        steps_by_name = {row["name"]: row for row in data["steps"]}
+        assert steps_by_name["apply/dep-refresh"]["status"] == "dep_refreshed"
+        assert "1 applied features" in steps_by_name["apply/dep-refresh"]["reason"]
+        assert "dep_graph_refreshed=True" in steps_by_name["apply/dep-refresh"]["reason"]
+        verification_by_name = {row["name"]: row for row in data["verification"]}
+        assert verification_by_name["apply"]["status"] == "dep_refreshed"
+        assert verification_by_name["apply"]["detail"] == "1 applied features"
+        assert verification_by_name["test"]["status"] == "failed"
+        assert verification_by_name["dep_graph refresh"]["status"] is True
         decision = data["user_decisions"][0]
         assert decision["decision"] == "apply"
-        assert decision["branch"] == "fallback-branch"
-        assert decision["before_state"]["head_commit"] == "current456"
-        assert "confirmed" not in decision
+        assert decision["branch"] == "rpg-edit/test"
+        assert decision["before_state"]["head_commit"] == "before456"
+        assert decision["confirmed"] is True
         assert decision["apply_status"] == "dep_refreshed"
         assert decision["test_status"] == "failed"
-        assert decision["rollback_path"].endswith("dep_graph.before-edit-456.json")
+        assert decision["rollback_path"] == str(rpg_backup_path)
         assert any(item["label"] == "apply_result" for item in data["artifacts"])
         assert data["rpg_deltas"] == [{"node_id": "planned", "name": "Planned Node"}]
         assert data["dep_graph_deltas"] == [
@@ -419,8 +490,15 @@ def test_review_report_reconstructs_affected_node_evidence_from_impact(tmp_path:
         assert audit["impact"]["mapped_code_relations"] == 1
         assert audit["code"]["files_modified"] == ["scripts/common/run_report.py"]
         assert audit["apply"]["status"] == "dep_refreshed"
+        assert audit["apply"]["dep_graph_refreshed"] is True
+        assert audit["apply"]["applied_features"] == [{"node_id": "planned", "action": "modified"}]
         assert audit["apply"]["test_status"] == "failed"
-        assert audit["apply"]["rollback_path"].endswith("dep_graph.before-edit-456.json")
+        assert audit["apply"]["rollback_path"] == str(rpg_backup_path)
+        assert audit["apply"]["backup_timestamp"] == "456"
+        assert audit["apply"]["backups"] == {"rpg": str(rpg_backup_path), "dep_graph": str(dep_backup_path)}
+        assert audit["apply"]["confirmed"] is True
+        assert audit["apply"]["before_state"]["head_commit"] == "before456"
+        assert audit["apply"]["rollback_command"] == "cmind script rpg_edit/apply.py --rollback 456 --rollback-branch rpg-edit/test"
         assert "focused_graph" not in data
         assert not any(item["label"] == "focused_graph" for item in data["artifacts"])
         focused = data["focused_view"]
