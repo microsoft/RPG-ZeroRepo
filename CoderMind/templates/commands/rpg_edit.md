@@ -333,8 +333,13 @@ cmind script smoke_test.py --json
 1. **Impact review** — run targeted tests and verify affected functionality:
 
 ```bash
-cmind script rpg_edit/review.py --json
+cmind script rpg_edit/review.py --report-scope final --json
 ```
+
+The outer `rpg_edit` flow owns the sole user-visible final report;
+intermediate or nested review runs should use `--report-scope internal`
+or `--no-report` so their artifacts can be linked without publishing a
+second final report.
 
 The review script reads the plan and impact JSON from their default
 home-dir locations and automatically:
