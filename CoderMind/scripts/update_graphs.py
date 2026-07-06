@@ -171,7 +171,7 @@ def _attach_update_report(result: dict) -> dict:
         report_path = write_command_report(CommandRun(
             command="update_rpg",
             title="CoderMind update_rpg Explain View",
-            status=result.get("status", result.get("mode")),
+            status=result.get("status") or ("error" if result.get("error") else result.get("mode")),
             summary=[
                 {"label": "mode", "value": result.get("mode", "")},
                 {
@@ -210,7 +210,7 @@ def _attach_update_report(result: dict) -> dict:
                 ),
                 StepEvent(
                     name="sync graph",
-                    status=result.get("status", result.get("mode", "")),
+                    status=result.get("status") or ("error" if result.get("error") else result.get("mode", "")),
                     reason=result.get("reason", ""),
                 ),
                 StepEvent(
@@ -230,7 +230,7 @@ def _attach_update_report(result: dict) -> dict:
                 ArtifactEvent(label="rpg_html", path=result.get("viz_path")),
             ],
             verification=[
-                VerificationEvent(name="update_rpg", status=result.get("status", result.get("mode"))),
+                VerificationEvent(name="update_rpg", status=result.get("status") or ("error" if result.get("error") else result.get("mode"))),
                 VerificationEvent(name="viz", status=viz_status),
             ],
             evidence=result,
