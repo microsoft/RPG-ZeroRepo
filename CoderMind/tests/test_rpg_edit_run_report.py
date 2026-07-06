@@ -351,7 +351,7 @@ def test_review_publish_report_returns_report_path(tmp_path: Path, monkeypatch) 
 
     monkeypatch.setattr(review, "write_command_report", fake_write_command_report)
 
-    result = review._publish_review_report({"type": "skipped", "success": True}, plan_path, impact_path)
+    result = review._publish_review_report({"type": "skipped", "success": True}, plan_path, impact_path, report_scope="final")
 
     assert result["report_path"] == str(report_path)
     persisted = json.loads(review_path.read_text(encoding="utf-8"))
@@ -535,6 +535,129 @@ def test_review_report_reconstructs_affected_node_evidence_from_impact(tmp_path:
 
     monkeypatch.setattr(review, "write_command_report", fake_write_command_report)
 
-    result = review._publish_review_report({"type": "skipped", "success": True}, plan_path, impact_path)
+    result = review._publish_review_report({"type": "skipped", "success": True}, plan_path, impact_path, report_scope="final")
 
     assert result["report_path"] == str(report_path)
+
+
+def _patch_minimal_review_report(review, tmp_path: Path, monkeypatch) -> tuple[Path, None, Path]:
+    plan_path = tmp_path / "plan.json"
+    review_path = tmp_path / "review.json"
+    plan_path.write_text(json.dumps({"affected_nodes": [], "code_changes": []}), encoding="utf-8")
+
+    monkeypatch.setattr(review, "RPG_EDIT_REVIEW_RESULT_FILE", review_path)
+    monkeypatch.setattr(review, "RPG_EDIT_VALIDATE_FILE", tmp_path / "validate.json")
+    monkeypatch.setattr(review, "RPG_EDIT_LOCATE_FILE", tmp_path / "locate.json")
+    monkeypatch.setattr(review, "RPG_EDIT_CODE_RESULT_FILE", tmp_path / "code.json")
+    monkeypatch.setattr(review, "RPG_EDIT_APPLY_RESULT_FILE", tmp_path / "apply.json")
+    monkeypatch.setattr(review, "REPORTS_DIR", tmp_path / "reports")
+    monkeypatch.setattr(review, "_load_review_artifacts", lambda plan, impact: {"plan": {"affected_nodes": [], "code_changes": []}})
+    monkeypatch.setattr(review, "_selected_candidate_rows", lambda artifacts: [])
+    monkeypatch.setattr(review, "_code_delta_rows", lambda artifacts: [])
+    monkeypatch.setattr(review, "_feature_evidence_groups", lambda artifacts, candidates, code_deltas, result: {})
+    monkeypatch.setattr(review, "_review_summary_cards", lambda result, artifacts, focused_view: [])
+    monkeypatch.setattr(review, "_review_timeline", lambda result, artifacts: [])
+    monkeypatch.setattr(review, "_retrieval_rows", lambda artifacts, candidates: [])
+    monkeypatch.setattr(review, "_review_verification", lambda result, artifacts: [])
+    monkeypatch.setattr(review, "_user_decision", lambda result, artifacts: review.UserDecisionEvent(decision="apply"))
+    return plan_path, None, review_path
+
+
+def test_review_report_scope_none_persists_without_html(tmp_path: Path, monkeypatch) -> None:
+    review = _load_script("rpg_edit_review_scope_none_test", _SCRIPTS / "rpg_edit" / "review.py")
+    plan_path, impact_path, review_path = _patch_minimal_review_report(review, tmp_path, monkeypatch)
+
+    def fake_write_command_report(run):
+        raise AssertionError("write_command_report should not be called for report_scope=none")
+
+    monkeypatch.setattr(review, "write_command_report", fake_write_command_report)
+
+    result = review._publish_review_report(
+        {"type": "skipped", "success": True},
+        plan_path,
+        impact_path,
+        report_scope="none",
+        parent_run_id="parent-1",
+    )
+
+    assert "report_path" not in result
+    assert result["published_to"] is None
+    assert result["report_scope"] == "none"
+    assert result["is_final"] is False
+    assert result["parent_run_id"] == "parent-1"
+    persisted = json.loads(review_path.read_text(encoding="utf-8"))
+    assert persisted["report_scope"] == "none"
+    assert persisted["published_to"] is None
+    assert "report_path" not in persisted
+
+
+def test_review_report_scope_internal_writes_under_internal_report_dir(tmp_path: Path, monkeypatch) -> None:
+    review = _load_script("rpg_edit_review_scope_internal_test", _SCRIPTS / "rpg_edit" / "review.py")
+    plan_path, impact_path, review_path = _patch_minimal_review_report(review, tmp_path, monkeypatch)
+    captured: dict[str, dict] = {}
+
+    def fake_write_command_report(run):
+        data = run.to_dict()
+        captured["data"] = data
+        target_dir = Path(data["report_dir"])
+        assert target_dir == tmp_path / "reports" / "internal"
+        report_path = target_dir / "internal-report.html"
+        target_dir.mkdir(parents=True, exist_ok=True)
+        report_path.write_text("<html></html>", encoding="utf-8")
+        return report_path
+
+    monkeypatch.setattr(review, "write_command_report", fake_write_command_report)
+
+    result = review._publish_review_report(
+        {"type": "skipped", "success": True},
+        plan_path,
+        impact_path,
+        report_scope="internal",
+        parent_run_id="parent-2",
+    )
+
+    assert result["report_path"] == str(tmp_path / "reports" / "internal" / "internal-report.html")
+    assert result["internal_report_paths"] == [result["report_path"]]
+    assert result["report_scope"] == "internal"
+    assert result["is_final"] is False
+    evidence = captured["data"]["evidence"]
+    assert evidence["report_scope"] == "internal"
+    assert evidence["is_final"] is False
+    assert evidence["parent_run_id"] == "parent-2"
+    assert evidence["published_to"].startswith(str(tmp_path / "reports" / "internal" / "cmind_run_rpg_edit_"))
+    persisted = json.loads(review_path.read_text(encoding="utf-8"))
+    assert persisted["internal_report_paths"] == [result["report_path"]]
+
+
+def test_review_final_report_preserves_internal_report_artifacts(tmp_path: Path, monkeypatch) -> None:
+    review = _load_script("rpg_edit_review_scope_final_artifacts_test", _SCRIPTS / "rpg_edit" / "review.py")
+    plan_path, impact_path, _review_path = _patch_minimal_review_report(review, tmp_path, monkeypatch)
+    writes: list[dict] = []
+
+    def fake_write_command_report(run):
+        data = run.to_dict()
+        writes.append(data)
+        target_dir = Path(data["report_dir"])
+        target_dir.mkdir(parents=True, exist_ok=True)
+        report_path = target_dir / f"{data['evidence']['report_scope']}-{len(writes)}.html"
+        report_path.write_text("<html></html>", encoding="utf-8")
+        return report_path
+
+    monkeypatch.setattr(review, "write_command_report", fake_write_command_report)
+
+    first = review._publish_review_report({"type": "skipped", "success": True}, plan_path, impact_path, report_scope="internal")
+    second = review._publish_review_report({"type": "skipped", "success": True}, plan_path, impact_path, report_scope="internal")
+    final = review._publish_review_report({"type": "skipped", "success": True}, plan_path, impact_path, report_scope="final")
+
+    internal_paths = [first["report_path"], second["report_path"]]
+    assert final["internal_report_paths"] == internal_paths
+    final_data = writes[-1]
+    artifact_paths = {item["label"]: item["path"] for item in final_data["artifacts"]}
+    assert artifact_paths["internal_report_1"] == internal_paths[0]
+    assert artifact_paths["internal_report_2"] == internal_paths[1]
+    evidence_paths = {item["label"]: item["path"] for item in final_data["evidence"]["artifact_paths"]}
+    assert evidence_paths["internal_report_1"] == internal_paths[0]
+    assert evidence_paths["internal_report_2"] == internal_paths[1]
+    assert final_data["report_dir"] == str(tmp_path / "reports")
+    assert final_data["evidence"]["report_scope"] == "final"
+    assert final_data["evidence"]["is_final"] is True

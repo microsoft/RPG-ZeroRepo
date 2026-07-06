@@ -25,6 +25,7 @@ import re
 import shutil
 import sys
 import time
+import uuid
 from pathlib import Path
 from string import Template
 from typing import Any, Dict, List, Optional, Tuple
@@ -93,7 +94,47 @@ def _load_review_artifacts(plan_path: Path, impact_path: Optional[Path]) -> Dict
     }
 
 
-def _artifact_links(plan_path: Path, impact_path: Optional[Path]) -> List[Dict[str, Any]]:
+_REPORT_SCOPES = {"final", "internal", "none"}
+
+
+def _normalize_report_scope(report_scope: str) -> str:
+    scope = str(report_scope or "final").strip().lower()
+    if scope not in _REPORT_SCOPES:
+        raise ValueError(f"report_scope must be one of {sorted(_REPORT_SCOPES)}, got {report_scope!r}")
+    return scope
+
+
+def _report_target_dir(report_scope: str, report_dir: Optional[Path]) -> Path:
+    base_dir = Path(report_dir) if report_dir is not None else REPORTS_DIR
+    return base_dir / "internal" if report_scope == "internal" else base_dir
+
+
+def _report_filename_slug(value: str) -> str:
+    slug = re.sub(r"[^A-Za-z0-9_.-]+", "_", value).strip("._-")
+    return slug or "command"
+
+
+def _expected_report_path(report_dir: Path, run_id: str) -> Path:
+    return report_dir / f"cmind_run_rpg_edit_{_report_filename_slug(run_id)}.html"
+
+
+def _load_existing_review_result() -> Dict[str, Any]:
+    result = _load_json_artifact(RPG_EDIT_REVIEW_RESULT_FILE)
+    return result if isinstance(result, dict) else {}
+
+
+def _existing_internal_report_paths(result: Dict[str, Any]) -> List[str]:
+    paths = _listify(result.get("internal_report_paths"))
+    if result.get("report_scope") == "internal" and result.get("report_path"):
+        paths.extend(_listify(result.get("report_path")))
+    return _ordered_unique(paths)
+
+
+def _artifact_links(
+    plan_path: Path,
+    impact_path: Optional[Path],
+    internal_report_paths: Optional[List[str]] = None,
+) -> List[Dict[str, Any]]:
     paths = {
         "validate": RPG_EDIT_VALIDATE_FILE,
         "locate": RPG_EDIT_LOCATE_FILE,
@@ -109,6 +150,12 @@ def _artifact_links(plan_path: Path, impact_path: Optional[Path]) -> List[Dict[s
             continue
         status = "available" if path.exists() or label == "review_result" else "missing"
         links.append({"label": label, "path": str(path), "status": status})
+    for index, path in enumerate(_ordered_unique(internal_report_paths or []), start=1):
+        try:
+            status = "available" if Path(path).exists() else "missing"
+        except (OSError, ValueError):
+            status = "missing"
+        links.append({"label": f"internal_report_{index}", "path": path, "status": status})
     return links
 
 
@@ -1328,7 +1375,7 @@ def _compact_review_evidence(
     impact = artifacts.get("impact") if isinstance(artifacts.get("impact"), dict) else {}
     code_result = artifacts.get("code_result") if isinstance(artifacts.get("code_result"), dict) else {}
     apply_result = artifacts.get("apply_result") if isinstance(artifacts.get("apply_result"), dict) else {}
-    return {
+    evidence = {
         "artifact_paths": _artifact_path_pointers(artifact_rows),
         "audit_summary": {
             "validate": {"type": validate.get("type"), "message": validate.get("message")},
@@ -1344,6 +1391,9 @@ def _compact_review_evidence(
             "review": _compact_review_audit(result),
         },
     }
+    for key in ("run_id", "parent_run_id", "is_final", "report_scope", "published_to"):
+        evidence[key] = result.get(key)
+    return evidence
 
 
 def _user_decision(result: Dict[str, Any], artifacts: Dict[str, Any]) -> UserDecisionEvent:
@@ -1367,30 +1417,64 @@ def _user_decision(result: Dict[str, Any], artifacts: Dict[str, Any]) -> UserDec
 
 
 class _ReportPayload:
-    def __init__(self, run: CommandRun, focused_view: Dict[str, Any]):
+    def __init__(self, run: CommandRun, focused_view: Dict[str, Any], report_dir: Optional[Path] = None):
         self.run = run
         self.focused_view = focused_view
+        self.report_dir = report_dir
 
     def to_dict(self) -> Dict[str, Any]:
         data = self.run.to_dict()
         if self.focused_view:
             data["focused_view"] = self.focused_view
+        if self.report_dir is not None:
+            data["report_dir"] = str(self.report_dir)
         return data
 
 
-def _publish_review_report(result: Dict[str, Any], plan_path: Path, impact_path: Optional[Path]) -> Dict[str, Any]:
+def _publish_review_report(
+    result: Dict[str, Any],
+    plan_path: Path,
+    impact_path: Optional[Path],
+    *,
+    report_scope: str = "final",
+    report_dir: Optional[Path] = None,
+    parent_run_id: Optional[str] = None,
+) -> Dict[str, Any]:
+    report_scope = _normalize_report_scope(report_scope)
+    previous_result = _load_existing_review_result()
+    internal_report_paths = _existing_internal_report_paths(previous_result)
+    run_id = str(result.get("run_id") or uuid.uuid4().hex)
+    if parent_run_id is None:
+        parent_run_id = result.get("parent_run_id")
+
+    result["run_id"] = run_id
+    result["parent_run_id"] = parent_run_id
+    result["is_final"] = report_scope == "final"
+    result["report_scope"] = report_scope
+    result["internal_report_paths"] = internal_report_paths
+
+    if report_scope == "none":
+        result["published_to"] = None
+        result.pop("report_path", None)
+        _write_review_result(result)
+        return result
+
+    target_report_dir = _report_target_dir(report_scope, report_dir)
+    result["published_to"] = str(_expected_report_path(target_report_dir, run_id))
     _write_review_result(result)
+
     artifacts = _load_review_artifacts(plan_path, impact_path)
     candidates = _selected_candidate_rows(artifacts)
     code_deltas = _code_delta_rows(artifacts)
     focused_view = _feature_evidence_groups(artifacts, candidates, code_deltas, result)
-    artifact_rows = _artifact_links(plan_path, impact_path)
+    artifact_rows = _artifact_links(plan_path, impact_path, internal_report_paths)
     evidence = _compact_review_evidence(artifacts, artifact_rows, result)
     try:
         report_run = CommandRun(
             command="rpg_edit",
             title="CoderMind rpg_edit Explain View",
             status=str(result.get("type", "review")),
+            timestamp=run_id,
             summary=_review_summary_cards(result, artifacts, focused_view),
             steps=[
                 StepEvent(name=row.get("name", "stage"), status=row.get("status"), reason=row.get("reason", ""))
@@ -1440,8 +1524,11 @@ def _publish_review_report(result: Dict[str, Any], plan_path: Path, impact_path:
             user_decisions=[_user_decision(result, artifacts)],
             evidence=evidence,
         )
-        report_path = write_command_report(_ReportPayload(report_run, focused_view))
+        report_path = write_command_report(_ReportPayload(report_run, focused_view, target_report_dir))
         result["report_path"] = str(report_path)
+        result["published_to"] = str(report_path)
+        if report_scope == "internal":
+            result["internal_report_paths"] = _ordered_unique(internal_report_paths + [str(report_path)])
     except Exception as exc:
         result["report_error"] = str(exc)
     _write_review_result(result)
@@ -1796,6 +1883,9 @@ def impact_review(
     repo_path: Path,
     max_iterations: int = 3,
     timeout: int = 600,
+    report_scope: str = "final",
+    report_dir: Optional[Path] = None,
+    parent_run_id: Optional[str] = None,
 ) -> Dict[str, Any]:
     """Run impact-scoped review with iterative repair."""
     from run_batch import dispatch_sub_agent
@@ -1956,7 +2046,14 @@ def impact_review(
                 all_suggestions.append(s)
     if all_suggestions:
         results["suggestions"] = all_suggestions
-    return _publish_review_report(results, plan_path, impact_path)
+    return _publish_review_report(
+        results,
+        plan_path,
+        impact_path,
+        report_scope=report_scope,
+        report_dir=report_dir,
+        parent_run_id=parent_run_id,
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -1978,9 +2075,18 @@ def main():
                         help="Maximum review+repair iterations (default: 3)")
     parser.add_argument("--timeout", type=int, default=600,
                         help="Sub-agent timeout per iteration in seconds (default: 600)")
+    parser.add_argument("--report-scope", choices=sorted(_REPORT_SCOPES), default="final",
+                        help="HTML report publication scope (default: %(default)s)")
+    parser.add_argument("--no-report", action="store_true",
+                        help="Persist review JSON without writing an HTML report")
+    parser.add_argument("--report-dir", type=Path, default=None,
+                        help="Base report directory (default: .cmind/reports)")
+    parser.add_argument("--parent-run-id", default=None,
+                        help="Parent command run ID to record in report evidence")
     parser.add_argument("--json", action="store_true",
                         help="Output as JSON")
     args = parser.parse_args()
+    report_scope = "none" if args.no_report else args.report_scope
 
     logging.basicConfig(
         level=logging.INFO,
@@ -1993,7 +2099,14 @@ def main():
 
     if not args.plan.exists():
         result = {"type": "error", "message": f"Plan not found: {args.plan}"}
-        result = _publish_review_report(result, args.plan, args.impact)
+        result = _publish_review_report(
+            result,
+            args.plan,
+            args.impact,
+            report_scope=report_scope,
+            report_dir=args.report_dir,
+            parent_run_id=args.parent_run_id,
+        )
         print(json.dumps(result) if args.json else f"Error: {result['message']}")
         return 1
 
@@ -2015,7 +2128,14 @@ def main():
                           f"(callers={total_callers}, files={affected_files}). "
                           f"Agent self-review is sufficient.",
             }
-            result = _publish_review_report(result, args.plan, args.impact)
+            result = _publish_review_report(
+                result,
+                args.plan,
+                args.impact,
+                report_scope=report_scope,
+                report_dir=args.report_dir,
+                parent_run_id=args.parent_run_id,
+            )
             print(json.dumps(result, indent=2) if args.json else
                   f"Skipped: {result['reason']}\nReport: {result.get('report_path', '')}")
             return 0
@@ -2026,6 +2146,9 @@ def main():
         repo_path=repo_path,
         max_iterations=args.max_iterations,
         timeout=args.timeout,
+        report_scope=report_scope,
+        report_dir=args.report_dir,
+        parent_run_id=args.parent_run_id,
     )
 
     if args.json:
