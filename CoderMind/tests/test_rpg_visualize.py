@@ -88,7 +88,8 @@ def test_generate_html_escapes_html_and_script_contexts() -> None:
     assert "\\u003c/script\\u003e\\u003cscript\\u003ealert(1)\\u003c/script\\u003e" in html
     assert RAW_SCRIPT not in html
     assert SCRIPT_BREAKOUT not in html
-    assert "https://d3js.org" not in html
+    assert "https://d3js.org v7.9.0" in html
+    assert '<script src="https://d3js.org' not in html
     assert 'src="https://d3js.org/d3.v7.min.js"' not in html
 
 

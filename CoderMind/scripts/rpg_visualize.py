@@ -45,8 +45,6 @@ def _inline_d3() -> str:
         source = _D3_ASSET.read_text(encoding="utf-8").strip()
     except OSError:
         return ""
-    if source.startswith("// https://d3js.org"):
-        source = source.split("\n", 1)[1] if "\n" in source else ""
     return source.replace("</script", "<\\/script")
 
 
