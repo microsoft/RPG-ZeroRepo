@@ -15,10 +15,37 @@ Usage:
 """
 
 import argparse
+import html
 import json
 import sys
 from pathlib import Path
 from typing import Any, Dict, List
+
+
+_D3_ASSET = Path(__file__).resolve().parent / "common" / "assets" / "d3.v7.min.js"
+
+
+def _html_escape(value: Any) -> str:
+    return html.escape(str(value), quote=True)
+
+
+def _json_for_script(value: Any) -> str:
+    data = json.dumps(value, ensure_ascii=False)
+    return (
+        data.replace("&", "\\u0026")
+        .replace("<", "\\u003c")
+        .replace(">", "\\u003e")
+        .replace(" ", "\\u2028")
+        .replace(" ", "\\u2029")
+    )
+
+
+def _inline_d3() -> str:
+    try:
+        source = _D3_ASSET.read_text(encoding="utf-8").strip()
+    except OSError:
+        return ""
+    return source.replace("</script", "<\\/script")
 
 
 def load_json(path: str | Path) -> dict:
@@ -417,7 +444,7 @@ def generate_html(data: dict) -> str:
     dep = extract_dep_graph(data)
     dep_tree = build_dep_tree(data)
     dep_to_rpg = data.get("_dep_to_rpg_map", {})
-    repo_name = data.get("repo_name", "Unknown")
+    repo_name_html = _html_escape(data.get("repo_name", "Unknown"))
     feat_node_count = count_nodes(tree)
     feat_edge_count = len(semantic_edges)
 
@@ -426,32 +453,35 @@ def generate_html(data: dict) -> str:
     for e in semantic_edges:
         r = e.get("relation", "unknown")
         edge_types[r] = edge_types.get(r, 0) + 1
-    feat_edge_summary = ", ".join(f"{k}: {v}" for k, v in sorted(edge_types.items()))
+    feat_edge_summary = _html_escape(", ".join(f"{k}: {v}" for k, v in sorted(edge_types.items())))
 
     # Dep stats
     dep_node_count = len(dep["nodes"])
     dep_edge_count = len(dep["edges"])
-    dep_edge_summary = ", ".join(f"{k}: {v}" for k, v in sorted(dep["stats"].items()))
+    dep_edge_summary = _html_escape(", ".join(f"{k}: {v}" for k, v in sorted(dep["stats"].items())))
     has_dep = dep_node_count > 0
 
     map_count = sum(len(v) for v in dep_to_rpg.values())
     has_map = len(dep_to_rpg) > 0
 
-    tree_json = json.dumps(tree)
-    edges_json = json.dumps(semantic_edges)
-    dep_nodes_json = json.dumps(dep["nodes"])
-    dep_edges_json = json.dumps(dep["edges"])
-    dep_parent_json = json.dumps(dep["parent_map"])
-    dep_tree_json = json.dumps(dep_tree)
-    dep_to_rpg_json = json.dumps(dep_to_rpg)
+    tree_json = _json_for_script(tree)
+    edges_json = _json_for_script(semantic_edges)
+    dep_nodes_json = _json_for_script(dep["nodes"])
+    dep_edges_json = _json_for_script(dep["edges"])
+    dep_parent_json = _json_for_script(dep["parent_map"])
+    dep_tree_json = _json_for_script(dep_tree)
+    dep_to_rpg_json = _json_for_script(dep_to_rpg)
+    d3_js = _inline_d3()
 
     return f"""<!DOCTYPE html>
 <html lang="en">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>RPG: {repo_name}</title>
-<script src="https://d3js.org/d3.v7.min.js"></script>
+<title>RPG: {repo_name_html}</title>
+<script>
+{d3_js}
+</script>
 <style>
 * {{ margin: 0; padding: 0; box-sizing: border-box; }}
 body {{ background: #0d1117; color: #c9d1d9; font-family: -apple-system, BlinkMacSystemFont,
@@ -537,7 +567,7 @@ svg {{ width: 100vw; height: 100vh; }}
 </head>
 <body>
 <div id="header">
-  <h1>RPG: {repo_name}</h1>
+  <h1>RPG: {repo_name_html}</h1>
   <div id="tabs">
     <button id="tab-feat" class="active" onclick="switchTab('feat')">Feat Graph</button>
     <button id="tab-dep" onclick="switchTab('dep')">Dep Graph</button>
@@ -638,6 +668,17 @@ const depEdgeClassMap = {{
   imports: 'dep-link-imports', invokes: 'dep-link-invokes',
   inherits: 'dep-link-inherits',
 }};
+
+const htmlEscapes = {{
+  '&': '&amp;',
+  '<': '&lt;',
+  '>': '&gt;',
+  '"': '&quot;',
+  "'": '&#39;',
+}};
+function escapeHtml(value) {{
+  return String(value ?? '').replace(/[&<>"']/g, ch => htmlEscapes[ch]);
+}}
 
 const margin = {{ top: 50, right: 200, bottom: 20, left: 80 }};
 const svg = d3.select('#canvas');
@@ -820,17 +861,21 @@ function showTooltipFeat(event, d) {{
   const path = meta.path || '';
   const desc = meta.description || '';
   const connected = semanticEdges.filter(e => e.src === d.data.id || e.dst === d.data.id);
+  const relations = [...new Set(connected.map(e => e.relation || 'unknown'))]
+    .map(escapeHtml).join(', ');
   const edgeInfo = connected.length > 0
-    ? `<div class="tt-edges">${{connected.length}} edge(s): ${{
-        [...new Set(connected.map(e => e.relation))].join(', ')
-      }}</div>` : '';
+    ? `<div class="tt-edges">${{connected.length}} edge(s): ${{relations}}</div>` : '';
+  const typeInfo = tn ? `<div class="tt-type">${{escapeHtml(tn)}}</div>` : '';
+  const pathInfo = path && path !== '.' ? `<div class="tt-path">${{escapeHtml(path)}}</div>` : '';
+  const descInfo = desc ? `<div style="color:#8b949e;font-size:11px;margin-top:2px">${{escapeHtml(desc.slice(0, 200))}}</div>` : '';
+  const collapsedInfo = d._children ? `<div style="color:#1f6feb;font-size:11px">${{d._children.length}} children (collapsed)</div>` : '';
   tip.innerHTML = `
-    <div class="tt-name">${{d.data.name || d.data.id}}</div>
-    ${{tn ? `<div class="tt-type">${{tn}}</div>` : ''}}
-    ${{path && path !== '.' ? `<div class="tt-path">${{path}}</div>` : ''}}
-    ${{desc ? `<div style="color:#8b949e;font-size:11px;margin-top:2px">${{desc.slice(0, 200)}}</div>` : ''}}
+    <div class="tt-name">${{escapeHtml(d.data.name || d.data.id)}}</div>
+    ${{typeInfo}}
+    ${{pathInfo}}
+    ${{descInfo}}
     ${{edgeInfo}}
-    ${{d._children ? `<div style="color:#1f6feb;font-size:11px">${{d._children.length}} children (collapsed)</div>` : ''}}
+    ${{collapsedInfo}}
   `;
   tip.style.display = 'block';
   tip.style.left = (event.clientX + 12) + 'px';
@@ -1474,8 +1519,8 @@ function depDrawHulls() {{
       const tip = document.getElementById('tooltip');
       const descCount = (depAllDescendants[d.id] || new Set()).size;
       tip.innerHTML = `
-        <div class="tt-name">${{d.name || d.id}}</div>
-        <div class="tt-type">${{d.type}}</div>
+        <div class="tt-name">${{escapeHtml(d.name || d.id)}}</div>
+        <div class="tt-type">${{escapeHtml(d.type)}}</div>
         <div style="color:#8b949e;font-size:11px">Click to select · Double-click to collapse (${{descCount}} nodes)</div>
       `;
       tip.style.display = 'block';
@@ -1513,19 +1558,20 @@ function depDrawHulls() {{
 function showTooltipDep(event, d) {{
   const tip = document.getElementById('tooltip');
   const rpgInfo = d.rpg_nodes && d.rpg_nodes.length > 0
-    ? `<div style="color:#79c0ff;font-size:11px;margin-top:2px">RPG nodes: ${{d.rpg_nodes.join(', ')}}</div>` : '';
+    ? `<div style="color:#79c0ff;font-size:11px;margin-top:2px">RPG nodes: ${{d.rpg_nodes.map(escapeHtml).join(', ')}}</div>` : '';
 
   const descCount = d.isCollapsed ? (depAllDescendants[d.id] || new Set()).size : 0;
   const collapseInfo = d.isCollapsed
     ? `<div style="color:#1f6feb;font-size:11px">${{descCount}} nodes collapsed (double-click to expand)</div>` : '';
   const expandInfo = d.hasChildren && !d.isCollapsed
     ? `<div style="color:#8b949e;font-size:11px">Double-click to collapse</div>` : '';
+  const moduleInfo = d.module ? `<div style="color:#8b949e;font-size:11px">${{escapeHtml(d.module)}}</div>` : '';
 
   tip.innerHTML = `
-    <div class="tt-name">${{d.name || d.id}}</div>
-    <div class="tt-type">${{d.type}}</div>
-    <div class="tt-path">${{d.id}}</div>
-    ${{d.module ? `<div style="color:#8b949e;font-size:11px">${{d.module}}</div>` : ''}}
+    <div class="tt-name">${{escapeHtml(d.name || d.id)}}</div>
+    <div class="tt-type">${{escapeHtml(d.type)}}</div>
+    <div class="tt-path">${{escapeHtml(d.id)}}</div>
+    ${{moduleInfo}}
     ${{collapseInfo}}
     ${{expandInfo}}
     ${{rpgInfo}}
@@ -1804,7 +1850,7 @@ function mapHighlight(nodeId, side, event) {{
   const connected = mapEdges.filter(e => side === 'feat' ? e.feat_id === nodeId : e.dep_id === nodeId);
   if (connected.length === 0) {{
     const tip = document.getElementById('tooltip');
-    tip.innerHTML = `<div class="tt-name">${{nodeId}}</div><div class="tt-type" style="color:#484f58">No mapping</div>`;
+    tip.innerHTML = `<div class="tt-name">${{escapeHtml(nodeId)}}</div><div class="tt-type" style="color:#484f58">No mapping</div>`;
     tip.style.display = 'block';
     tip.style.left = (event.clientX + 12) + 'px';
     tip.style.top = (event.clientY - 10) + 'px';
@@ -1835,9 +1881,9 @@ function mapHighlight(nodeId, side, event) {{
 
   const tip = document.getElementById('tooltip');
   const names = side === 'feat'
-    ? connected.map(e => e.dep_id).join('<br>')
-    : connected.map(e => e.feat_id).join('<br>');
-  tip.innerHTML = `<div class="tt-name">${{nodeId}}</div>
+    ? connected.map(e => escapeHtml(e.dep_id)).join('<br>')
+    : connected.map(e => escapeHtml(e.feat_id)).join('<br>');
+  tip.innerHTML = `<div class="tt-name">${{escapeHtml(nodeId)}}</div>
     <div class="tt-type">${{connected.length}} mapping(s)</div>
     <div class="tt-path">${{names}}</div>`;
   tip.style.display = 'block';
