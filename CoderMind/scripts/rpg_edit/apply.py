@@ -92,6 +92,22 @@ def _record_apply_result(
     confirmed: bool | None = None,
 ) -> Dict[str, Any]:
     backups = backups or {}
+    preserved: Dict[str, Any] = {}
+    if backup_timestamp is not None and RPG_EDIT_APPLY_RESULT_FILE.exists():
+        try:
+            previous = json.loads(RPG_EDIT_APPLY_RESULT_FILE.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            previous = {}
+        if isinstance(previous, dict) and str(previous.get("backup_timestamp")) == str(backup_timestamp):
+            preserved = previous
+    for key in ("applied_features", "backups", "confirmed", "before_state", "rollback_command", "rollback_path"):
+        previous_value = preserved.get(key)
+        if previous_value in (None, "", [], {}):
+            continue
+        if result.get(key) in (None, "", [], {}):
+            result[key] = previous_value
+    if not backups and isinstance(result.get("backups"), dict):
+        backups = result["backups"]
     if backup_timestamp is not None:
         result.setdefault("backup_timestamp", backup_timestamp)
         result.setdefault("rollback_command", _rollback_command(backup_timestamp, before_state))

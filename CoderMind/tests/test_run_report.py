@@ -19,7 +19,17 @@ from common.run_events import (
     UserDecisionEvent,
     VerificationEvent,
 )
+import common.run_report as run_report
 from common.run_report import write_command_report
+
+
+def test_run_report_exposes_current_impact_renderers_only() -> None:
+    assert hasattr(run_report, "_render_semantic_code_impact_chain")
+    assert hasattr(run_report, "_render_focused_nodes_map")
+    assert not hasattr(run_report, "_render_why_these_nodes")
+    assert not hasattr(run_report, "_render_node_rows")
+    assert not hasattr(run_report, "_render_focused_impact")
+    assert not hasattr(run_report, "_render_focused_impact_group")
 
 
 def test_write_command_report_escapes_content_and_writes_sections(tmp_path: Path) -> None:
