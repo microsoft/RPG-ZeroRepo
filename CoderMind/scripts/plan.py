@@ -291,7 +291,11 @@ def decide(states: list[StageState], force: bool) -> None:
             state.reason = "up-to-date"
         else:
             state.will_run = True
-            state.reason = f"type={state.type}"
+            # Preserve useful messages for warnings (don't overwrite state.message)
+            if state.message:
+                state.reason = state.message
+            else:
+                state.reason = f"type={state.type}"
             cascade = True
 
 
