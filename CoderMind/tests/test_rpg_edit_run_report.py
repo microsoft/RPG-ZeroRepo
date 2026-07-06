@@ -279,7 +279,10 @@ def test_review_publish_report_returns_report_path(tmp_path: Path, monkeypatch) 
         assert "review_result" not in evidence
         assert "focused_view" not in evidence
         assert "nodes_view" not in evidence_text
+        assert "default_focus" not in evidence_text
+        assert "hierarchy" not in evidence_text
         assert "focused_graph" not in evidence
+        assert "focused_graph" not in evidence_text
         assert "focused_impact" not in evidence
         assert "+new <unsafe>" not in evidence_text
         evidence_paths = {item["label"]: item["path"] for item in evidence["artifact_paths"]}
@@ -346,6 +349,18 @@ def test_review_publish_report_returns_report_path(tmp_path: Path, monkeypatch) 
         assert bridge_by_rpg["n2"]["state"] == "missing_mapping"
         assert nodes_view["hidden_counts"]["callers"] == 1
         assert any(row["type"] == "missing_mapping" and row["node_id"] == "n2" for row in nodes_view["warnings"])
+        assert nodes_view["hierarchy"]["id"] == "focused-graph-root"
+        assert nodes_view["default_focus"]["node_link_ids"]
+        assert "rpg-n1" in nodes_view["default_focus"]["node_link_ids"]
+        assert nodes_view["default_focus"]["edge_depth"] == 1
+        assert nodes_view["default_focus"]["show_edges"] is True
+        assert nodes_view["focused_graph"]["schema"] == "cmind.focused_graph.v1"
+        assert nodes_view["focused_graph"]["hierarchy"]["id"] == "focused-graph-root"
+        assert nodes_view["focused_graph"]["default_focus"] == nodes_view["default_focus"]
+        assert nodes_view["caps"] == {"primary_rpg_nodes": 20, "primary_code_nodes": 50, "edges": 80}
+        assert nodes_view["graph_context"]["current_graph_available"] is True
+        assert nodes_view["graph_context"]["current_rpg_nodes"] == 2
+        assert nodes_view["graph_context"]["current_dep_nodes"] == 1
         assert "+new <unsafe>" not in json.dumps(nodes_view, ensure_ascii=False)
         return report_path
 
@@ -477,7 +492,10 @@ def test_review_report_reconstructs_affected_node_evidence_from_impact(tmp_path:
         assert "review_result" not in evidence
         assert "focused_view" not in evidence
         assert "nodes_view" not in evidence_text
+        assert "default_focus" not in evidence_text
+        assert "hierarchy" not in evidence_text
         assert "focused_graph" not in evidence
+        assert "focused_graph" not in evidence_text
         assert "focused_impact" not in evidence
         assert "failing test" not in evidence_text
         evidence_paths = {item["label"]: item["path"] for item in evidence["artifact_paths"]}
@@ -530,6 +548,15 @@ def test_review_report_reconstructs_affected_node_evidence_from_impact(tmp_path:
         assert bridge["status"] == "mapped"
         assert bridge["changed_files"] == [{"path": "scripts/common/run_report.py", "diff_anchor": "diff-scripts_common_run_report.py"}]
         assert any(row["type"] == "missing_reason" and row["node_id"] == "planned" for row in nodes_view["warnings"])
+        assert nodes_view["hierarchy"]["id"] == "focused-graph-root"
+        assert nodes_view["default_focus"]["node_link_ids"] == ["rpg-planned", "code-scripts-common-run_report.py-_render_artifacts"]
+        assert nodes_view["default_focus"]["edge_depth"] == 1
+        assert nodes_view["focused_graph"]["schema"] == "cmind.focused_graph.v1"
+        assert nodes_view["focused_graph"]["default_focus"] == nodes_view["default_focus"]
+        assert nodes_view["caps"] == {"primary_rpg_nodes": 20, "primary_code_nodes": 50, "edges": 80}
+        assert nodes_view["graph_context"]["current_graph_available"] is True
+        assert nodes_view["graph_context"]["current_rpg_nodes"] == 1
+        assert nodes_view["graph_context"]["current_dep_nodes"] == 1
         assert focused["apply"]["status"] == "dep_refreshed"
         return report_path
 

@@ -14,6 +14,7 @@ from common.paths import REPORTS_DIR
 from common.run_events import _to_plain
 
 _MAX_SUMMARY_CARDS = 7
+_D3_ASSET = Path(__file__).resolve().parent / "assets" / "d3.v7.min.js"
 
 
 def write_command_report(
@@ -378,6 +379,20 @@ details summary {{ cursor:pointer; color:var(--accent); font-weight:600; }}
 .focus-card-meta {{ color:var(--muted); font-size:13px; overflow-wrap:anywhere; word-break:break-word; }}
 .focus-links {{ display:flex; flex-wrap:wrap; gap:6px; }}
 .focus-link {{ border:1px solid var(--line); border-radius:999px; padding:2px 8px; background:#fff; font-size:12px; }}
+.focused-graph-section {{ overflow-x:hidden; }}
+.focused-graph-toolbar {{ display:flex; flex-wrap:wrap; gap:8px; align-items:center; margin:10px 0 12px; }}
+.focused-graph-toolbar button, .focused-graph-toolbar input {{ border:1px solid var(--line); border-radius:8px; background:#fff; color:var(--text); padding:6px 10px; font:inherit; }}
+.focused-graph-toolbar label {{ display:inline-flex; gap:6px; align-items:center; color:var(--muted); }}
+.focused-graph-stage {{ border:1px solid var(--line); border-radius:12px; background:#fbfdff; min-height:480px; position:relative; overflow:hidden; }}
+.focused-graph-svg {{ display:block; width:100%; height:480px; }}
+.focused-graph-fallback {{ margin:12px; padding:12px; border:1px dashed var(--line); border-radius:10px; background:#fff; color:var(--muted); }}
+.focused-graph-legend {{ display:flex; flex-wrap:wrap; gap:8px; margin:8px 0 12px; }}
+.legend-item {{ display:inline-flex; gap:6px; align-items:center; color:var(--muted); font-size:13px; }}
+.legend-swatch {{ width:10px; height:10px; border-radius:999px; display:inline-block; border:1px solid var(--line); }}
+.legend-semantic {{ background:#2563eb; }}
+.legend-code {{ background:#16a34a; }}
+.legend-mapping {{ background:#f59e0b; }}
+.legend-context {{ background:#64748b; }}
 @media (max-width:720px) {{ main {{ padding:22px 12px 36px; }} .focus-map {{ grid-template-columns:1fr; }} table {{ min-width:560px; }} }}
 </style>
 </head>
@@ -390,8 +405,7 @@ details summary {{ cursor:pointer; color:var(--accent); font-weight:600; }}
 {_render_summary_cards(summary_cards)}
 {_render_timeline(stages)}
 {_render_safety_boundary(user_decisions)}
-{_render_focused_nodes_map(focused_view, code_file_anchors)}
-{_render_semantic_code_impact_chain(retrievals, rpg_nodes, dep_nodes, focused_view, code_file_anchors)}
+{_render_focused_graph(focused_view, code_file_anchors)}
 {_render_code_deltas(code_deltas, code_delta_anchors)}
 {_render_verification(verification)}
 {_render_artifacts(artifacts)}
@@ -843,7 +857,319 @@ def _nodes_view_edges_html(edges: Sequence[Mapping[str, Any]]) -> str:
     )
 
 
-def _render_focused_nodes_map(focused_view: dict[str, Any], file_anchors: Mapping[str, str]) -> str:
+def _inline_d3() -> str:
+    try:
+        return _D3_ASSET.read_text(encoding="utf-8").strip()
+    except OSError:
+        return ""
+
+
+def _json_for_script(value: Any) -> str:
+    data = json.dumps(value, ensure_ascii=False, default=_json_default)
+    return (
+        data.replace("&", "\\u0026")
+        .replace("<", "\\u003c")
+        .replace(">", "\\u003e")
+        .replace(" ", "\\u2028")
+        .replace(" ", "\\u2029")
+    )
+
+
+def _graph_label(row: Mapping[str, Any], fallback: Any) -> str:
+    for key in ("name", "symbol", "label", "path", "node_id", "dep_node_id", "id"):
+        value = row.get(key)
+        if value not in (None, ""):
+            return str(value)
+    return str(fallback or "node")
+
+
+def _graph_diff_ref(row: Mapping[str, Any], file_anchors: Mapping[str, str]) -> dict[str, str]:
+    refs = _as_sequence(row.get("changed_files"))
+    path = row.get("path") or row.get("file") or row.get("module")
+    if not refs and row.get("diff_anchor") and path not in (None, ""):
+        refs = [{"path": path, "diff_anchor": row.get("diff_anchor")}]
+    for ref in refs:
+        if isinstance(ref, Mapping):
+            ref_path = ref.get("path") or ref.get("file")
+            anchor = ref.get("diff_anchor") or file_anchors.get(str(ref_path or ""))
+        else:
+            ref_path = ref
+            anchor = file_anchors.get(str(ref_path or ""))
+        if ref_path not in (None, "") and anchor:
+            return {"path": str(ref_path), "href": f"#{anchor}"}
+    return {}
+
+
+def _graph_node_id(row: Mapping[str, Any], kind: str) -> str:
+    explicit = _node_view_id(row)
+    if explicit:
+        return explicit
+    if kind == "mapping":
+        node_id = f"{row.get('rpg_node_id') or 'semantic'}-{row.get('code_node_id') or row.get('dep_node_id') or 'missing'}"
+    else:
+        node_id = row.get("node_id") or row.get("dep_node_id") or row.get("id") or kind
+    return f"{kind}-{_slug(str(node_id))}"
+
+
+def _append_graph_node(nodes: list[dict[str, Any]], seen: set[str], row: Mapping[str, Any], kind: str, file_anchors: Mapping[str, str]) -> str:
+    node_id = _graph_node_id(row, kind)
+    if node_id in seen:
+        return node_id
+    seen.add(node_id)
+    payload: dict[str, Any] = {
+        "id": node_id,
+        "kind": kind,
+        "label": _graph_label(row, row.get("node_id") or row.get("dep_node_id") or node_id),
+        "node_id": row.get("node_id") or row.get("dep_node_id"),
+        "state": row.get("state") or row.get("status") or row.get("mapping_status"),
+    }
+    for key in ("path", "type", "node_type", "source", "mapping_status", "locate_status", "breadcrumb_path"):
+        if row.get(key) not in (None, ""):
+            payload[key] = row.get(key)
+    diff_ref = _graph_diff_ref(row, file_anchors)
+    if diff_ref:
+        payload["diff"] = diff_ref
+    nodes.append(payload)
+    return node_id
+
+
+def _append_context_node(nodes: list[dict[str, Any]], seen: set[str], link_id: Any, node_id: Any) -> str:
+    graph_id = str(link_id or f"context-{_slug(str(node_id or 'node'))}")
+    if graph_id not in seen:
+        seen.add(graph_id)
+        nodes.append({"id": graph_id, "kind": "context", "label": str(node_id or "context"), "node_id": node_id, "state": "context"})
+    return graph_id
+
+
+def _focused_graph_payload(focused_view: Mapping[str, Any], file_anchors: Mapping[str, str]) -> dict[str, Any]:
+    nodes_view = focused_view.get("nodes_view") if isinstance(focused_view.get("nodes_view"), Mapping) else {}
+    summary = nodes_view.get("summary") if isinstance(nodes_view.get("summary"), Mapping) else focused_view.get("summary", {})
+    semantic_nodes = [node for node in _as_sequence(nodes_view.get("semantic_nodes")) if isinstance(node, Mapping)]
+    code_nodes = [node for node in _as_sequence(nodes_view.get("code_nodes")) if isinstance(node, Mapping)]
+    mappings = [mapping for mapping in _as_sequence(nodes_view.get("mappings")) if isinstance(mapping, Mapping)]
+    context_edges = [edge for edge in _as_sequence(nodes_view.get("edges")) if isinstance(edge, Mapping)]
+    hidden_counts = nodes_view.get("hidden_counts") if isinstance(nodes_view.get("hidden_counts"), Mapping) else focused_view.get("hidden_counts", {})
+    warnings = [warning for warning in _as_sequence(nodes_view.get("warnings")) if isinstance(warning, Mapping)]
+    nodes: list[dict[str, Any]] = []
+    seen_nodes: set[str] = set()
+    rpg_links: dict[str, str] = {}
+    code_links: dict[str, str] = {}
+
+    for node in semantic_nodes:
+        link_id = _append_graph_node(nodes, seen_nodes, node, "semantic", file_anchors)
+        node_id = node.get("node_id")
+        if node_id not in (None, ""):
+            rpg_links[str(node_id)] = link_id
+    for node in code_nodes:
+        link_id = _append_graph_node(nodes, seen_nodes, node, "code", file_anchors)
+        node_id = node.get("node_id") or node.get("dep_node_id")
+        if node_id not in (None, ""):
+            code_links[str(node_id)] = link_id
+
+    links: list[dict[str, Any]] = []
+    for mapping in mappings:
+        mapping_id = _append_graph_node(nodes, seen_nodes, mapping, "mapping", file_anchors)
+        rpg_id = mapping.get("rpg_node_id") or mapping.get("node_id")
+        code_id = mapping.get("code_node_id") or mapping.get("dep_node_id")
+        source = mapping.get("source_link_id") or rpg_links.get(str(rpg_id or ""))
+        target = mapping.get("target_link_id") or code_links.get(str(code_id or ""))
+        if source:
+            links.append({"id": f"{mapping_id}-semantic", "source": source, "target": mapping_id, "kind": "mapping", "relation": mapping.get("status") or "mapped"})
+        if target:
+            links.append({"id": f"{mapping_id}-code", "source": mapping_id, "target": target, "kind": "mapping", "relation": mapping.get("source") or "code"})
+
+    for edge in context_edges:
+        source = edge.get("source_link_id")
+        target = edge.get("target_link_id")
+        if not source:
+            source = _append_context_node(nodes, seen_nodes, None, edge.get("source_node_id"))
+        elif str(source) not in seen_nodes:
+            _append_context_node(nodes, seen_nodes, source, edge.get("source_node_id"))
+        if not target:
+            target = _append_context_node(nodes, seen_nodes, None, edge.get("target_node_id"))
+        elif str(target) not in seen_nodes:
+            _append_context_node(nodes, seen_nodes, target, edge.get("target_node_id"))
+        links.append({
+            "id": edge.get("link_id") or f"edge-{len(links) + 1}",
+            "source": str(source),
+            "target": str(target),
+            "kind": "context",
+            "relation": edge.get("relation") or "dependency",
+            "direction": edge.get("direction"),
+        })
+
+    focused_graph = nodes_view.get("focused_graph") if isinstance(nodes_view.get("focused_graph"), Mapping) else {}
+    hierarchy = nodes_view.get("hierarchy") or focused_graph.get("hierarchy") or {}
+    default_focus = nodes_view.get("default_focus") or focused_graph.get("default_focus") or {}
+    return {
+        "schema": "cmind.focused_graph.render.v1",
+        "summary": summary,
+        "nodes": nodes,
+        "links": links,
+        "semantic_nodes": semantic_nodes,
+        "code_nodes": code_nodes,
+        "mappings": mappings,
+        "edges": context_edges,
+        "hidden_counts": hidden_counts,
+        "warnings": warnings,
+        "hierarchy": hierarchy,
+        "default_focus": default_focus,
+    }
+
+
+def _focused_graph_evidence(nodes_view: Mapping[str, Any], file_anchors: Mapping[str, str]) -> str:
+    semantic_cards = [
+        _semantic_card(node, file_anchors)
+        for node in _as_sequence(nodes_view.get("semantic_nodes"))
+        if isinstance(node, Mapping)
+    ]
+    code_cards = [
+        _code_card(node, file_anchors)
+        for node in _as_sequence(nodes_view.get("code_nodes"))
+        if isinstance(node, Mapping)
+    ]
+    mapping_cards = [
+        _mapping_card(mapping)
+        for mapping in _as_sequence(nodes_view.get("mappings"))
+        if isinstance(mapping, Mapping)
+    ]
+    edge_rows = [edge for edge in _as_sequence(nodes_view.get("edges")) if isinstance(edge, Mapping)]
+    body = "<h3>Focused graph evidence</h3>"
+    if semantic_cards or code_cards or mapping_cards:
+        body += '<div class="focus-map">' + "".join(semantic_cards + code_cards + mapping_cards) + "</div>"
+    else:
+        body += '<p class="empty">No focused graph evidence rows recorded.</p>'
+    body += _nodes_view_edges_html(edge_rows)
+    return body
+
+
+def _focused_graph_runtime() -> str:
+    return r"""
+(function(){
+  const section = document.currentScript.closest('[data-focused-graph]');
+  if (!section) return;
+  const dataEl = section.querySelector('[data-focused-graph-json]');
+  const svg = section.querySelector('[data-focused-graph-svg]');
+  const fallback = section.querySelector('[data-focused-graph-fallback]');
+  if (!window.d3 || !dataEl || !svg) return;
+  if (fallback) fallback.hidden = true;
+  const data = JSON.parse(dataEl.textContent || '{}');
+  const ns = 'http://www.w3.org/2000/svg';
+  let scale = 1;
+  let showEdges = true;
+  let query = '';
+  function make(tag, attrs, text) {
+    const el = document.createElementNS(ns, tag);
+    Object.entries(attrs || {}).forEach(([key, value]) => el.setAttribute(key, value));
+    if (text !== undefined) el.textContent = text;
+    return el;
+  }
+  function fill(kind) {
+    return kind === 'semantic' ? '#2563eb' : kind === 'code' ? '#16a34a' : kind === 'mapping' ? '#f59e0b' : '#64748b';
+  }
+  function layout(nodes) {
+    const groups = {semantic: [], mapping: [], code: [], context: []};
+    nodes.forEach(node => (groups[node.kind] || groups.context).push(node));
+    const x = {semantic: 150, mapping: 420, code: 690, context: 840};
+    Object.entries(groups).forEach(([kind, rows]) => {
+      const gap = Math.max(44, Math.min(78, 380 / Math.max(rows.length, 1)));
+      const start = 240 - ((rows.length - 1) * gap) / 2;
+      rows.forEach((node, index) => { node.x = x[kind] || 500; node.y = start + index * gap; });
+    });
+  }
+  function render() {
+    const nodes = (data.nodes || []).map(node => ({...node}));
+    const byId = new Map(nodes.map(node => [node.id, node]));
+    layout(nodes);
+    while (svg.firstChild) svg.removeChild(svg.firstChild);
+    svg.setAttribute('viewBox', `0 0 ${960 / scale} ${480 / scale}`);
+    const links = data.links || [];
+    if (showEdges) {
+      links.forEach(link => {
+        const source = byId.get(link.source), target = byId.get(link.target);
+        if (!source || !target) return;
+        const line = make('line', {x1: source.x, y1: source.y, x2: target.x, y2: target.y, stroke: link.kind === 'mapping' ? '#f59e0b' : '#94a3b8', 'stroke-width': link.kind === 'mapping' ? 2 : 1.4, opacity: .78});
+        svg.appendChild(line);
+      });
+    }
+    nodes.forEach(node => {
+      const matches = !query || `${node.label} ${node.node_id || ''} ${node.path || ''}`.toLowerCase().includes(query);
+      const group = make('g', {transform: `translate(${node.x},${node.y})`, opacity: matches ? '1' : '.18'});
+      group.appendChild(make('circle', {r: node.kind === 'mapping' ? 6 : 8, fill: fill(node.kind), stroke: '#fff', 'stroke-width': 2}));
+      group.appendChild(make('text', {x: 13, y: 4, 'font-size': 12, fill: '#1f2937'}, (node.label || node.id || '').slice(0, 42)));
+      group.appendChild(make('title', {}, `${node.kind}: ${node.label || node.id}`));
+      svg.appendChild(group);
+    });
+  }
+  section.querySelector('[data-action="reset"]')?.addEventListener('click', () => { scale = 1; query = ''; showEdges = true; const search = section.querySelector('[data-action="search"]'); if (search) search.value = ''; const edges = section.querySelector('[data-action="edges"]'); if (edges) edges.checked = true; render(); });
+  section.querySelector('[data-action="depth-plus"]')?.addEventListener('click', () => { scale = Math.min(1.8, scale + .15); render(); });
+  section.querySelector('[data-action="depth-minus"]')?.addEventListener('click', () => { scale = Math.max(.7, scale - .15); render(); });
+  section.querySelector('[data-action="edges"]')?.addEventListener('change', event => { showEdges = event.target.checked; render(); });
+  section.querySelector('[data-action="search"]')?.addEventListener('input', event => { query = event.target.value.toLowerCase(); render(); });
+  render();
+})();
+"""
+
+
+def _render_focused_graph(focused_view: dict[str, Any], file_anchors: Mapping[str, str]) -> str:
+    nodes_view = focused_view.get("nodes_view") if isinstance(focused_view.get("nodes_view"), Mapping) else {}
+    if not focused_view and not nodes_view:
+        return ""
+    summary = nodes_view.get("summary") if isinstance(nodes_view.get("summary"), Mapping) else focused_view.get("summary", {})
+    summary_html = _summary_badges(summary, [
+        ("Semantic nodes", "semantic_nodes", len(_as_sequence(nodes_view.get("semantic_nodes")))),
+        ("Code nodes", "code_nodes", len(_as_sequence(nodes_view.get("code_nodes")))),
+        ("Mappings", "mappings", len(_as_sequence(nodes_view.get("mappings")))),
+        ("Edges", "edges", len(_as_sequence(nodes_view.get("edges")))),
+        ("Warnings", "warnings", len(_as_sequence(nodes_view.get("warnings")))),
+    ])
+    hidden_counts = nodes_view.get("hidden_counts") if isinstance(nodes_view.get("hidden_counts"), Mapping) else focused_view.get("hidden_counts", {})
+    hidden_html = _hidden_context_html(hidden_counts if isinstance(hidden_counts, Mapping) else {})
+    warnings = [warning for warning in _as_sequence(nodes_view.get("warnings") or focused_view.get("warnings")) if isinstance(warning, Mapping)]
+    warnings_html = f"<h3>Warnings</h3>{_chain_warning_html(warnings)}" if warnings else ""
+    graph_payload = _focused_graph_payload(focused_view, file_anchors)
+    graph_json = _json_for_script(graph_payload)
+    d3_js = _inline_d3()
+    fallback_hidden = " hidden" if d3_js else ""
+    d3_missing_note = "" if d3_js else '<p class="reason">Local D3 asset missing; showing the static fallback.</p>'
+    scripts = ""
+    if d3_js:
+        scripts = f"<script>{d3_js}</script><script>{_focused_graph_runtime()}</script>"
+    inspector_payload = {"focused_graph": graph_payload, "nodes_view": nodes_view}
+    inspector = json.dumps(inspector_payload, indent=2, ensure_ascii=False, default=_json_default)
+    controls = (
+        '<div class="focused-graph-toolbar">'
+        '<button type="button" data-action="reset">Reset</button>'
+        '<button type="button" data-action="depth-plus">+1</button>'
+        '<button type="button" data-action="depth-minus">-1</button>'
+        '<label><input type="checkbox" data-action="edges" checked> Edges</label>'
+        '<input type="search" data-action="search" placeholder="Search nodes" aria-label="Search focused graph nodes">'
+        '</div>'
+    )
+    legend = (
+        '<div class="focused-graph-legend" aria-label="Focused graph legend">'
+        '<span class="legend-item"><span class="legend-swatch legend-semantic"></span>Semantic</span>'
+        '<span class="legend-item"><span class="legend-swatch legend-code"></span>Code</span>'
+        '<span class="legend-item"><span class="legend-swatch legend-mapping"></span>Mapping</span>'
+        '<span class="legend-item"><span class="legend-swatch legend-context"></span>Context edge</span>'
+        '</div>'
+    )
+    return (
+        '<section class="focused-graph-section" data-focused-graph><h2>Focused graph</h2>'
+        f"{summary_html}{controls}{legend}{warnings_html}{hidden_html}"
+        f"<script type=\"application/json\" data-focused-graph-json>{graph_json}</script>"
+        '<div class="focused-graph-stage">'
+        '<svg class="focused-graph-svg" data-focused-graph-svg role="img" aria-label="Focused graph view" width="960" height="480"></svg>'
+        f'<div class="focused-graph-fallback" data-focused-graph-fallback{fallback_hidden}>Static focused graph fallback is available when D3 cannot run.{d3_missing_note}</div>'
+        '</div>'
+        f"{_focused_graph_evidence(nodes_view, file_anchors)}"
+        f"<details><summary>Inspector JSON</summary><pre>{_h(inspector)}</pre></details>"
+        f"{scripts}"
+        '</section>'
+    )
+
+
+def _legacy_render_focused_nodes_map(focused_view: dict[str, Any], file_anchors: Mapping[str, str]) -> str:
     nodes_view = focused_view.get("nodes_view") if isinstance(focused_view.get("nodes_view"), Mapping) else {}
     if not nodes_view:
         return ""
@@ -1046,7 +1372,7 @@ def _render_legacy_chain_rows(
     return "".join(blocks)
 
 
-def _render_semantic_code_impact_chain(
+def _legacy_render_semantic_code_impact_chain(
     retrievals: list[dict[str, Any]],
     rpg_nodes: list[dict[str, Any]],
     dep_nodes: list[dict[str, Any]],
@@ -1149,7 +1475,7 @@ def _compact_payload(value: Any, *, depth: int = 0) -> Any:
         compacted: dict[str, Any] = {}
         for key, item in value.items():
             key_text = str(key)
-            if key_text in {"code_deltas", "focused_view", "focused_impact", "focused_graph", "evidence"}:
+            if key_text in {"code_deltas", "focused_view", "nodes_view", "focused_impact", "focused_graph", "evidence"}:
                 continue
             if key_text == "diff":
                 compacted["has_diff"] = bool(item)

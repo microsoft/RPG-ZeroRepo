@@ -24,8 +24,10 @@ from common.run_report import write_command_report
 
 
 def test_run_report_exposes_current_impact_renderers_only() -> None:
-    assert hasattr(run_report, "_render_semantic_code_impact_chain")
-    assert hasattr(run_report, "_render_focused_nodes_map")
+    assert hasattr(run_report, "_render_focused_graph")
+    assert hasattr(run_report, "_inline_d3")
+    assert not hasattr(run_report, "_render_semantic_code_impact_chain")
+    assert not hasattr(run_report, "_render_focused_nodes_map")
     assert not hasattr(run_report, "_render_why_these_nodes")
     assert not hasattr(run_report, "_render_node_rows")
     assert not hasattr(run_report, "_render_focused_impact")
@@ -71,8 +73,7 @@ def test_write_command_report_escapes_content_and_writes_sections(tmp_path: Path
         "Summary",
         "Stage timeline",
         "Safety boundary",
-        "Focused nodes map",
-        "semantic-code impact chain",
+        "Focused graph",
         "What changed?",
         "Verification status",
         "Artifact links",
@@ -229,6 +230,25 @@ def test_write_command_report_renders_retrievals_code_deltas_and_focused_view(tm
                         {"type": "stale_graph", "message": "Stale <graph>", "dep_node_id": "old.py:f"},
                     ],
                     "changed_files": [{"path": "a.py", "diff_anchor": "diff-a.py"}],
+                    "hierarchy": {
+                        "id": "focused-graph-root",
+                        "name": "Focused graph",
+                        "kind": "root",
+                        "children": [
+                            {"id": "rpg-n1-script", "name": "Node <unsafe>", "kind": "semantic"},
+                            {"id": "code-a.py-f-script", "name": "func <unsafe>", "kind": "code"},
+                        ],
+                    },
+                    "default_focus": {
+                        "node_link_ids": ["rpg-n1-script", "code-a.py-f-script"],
+                        "edge_depth": 1,
+                        "show_edges": True,
+                    },
+                    "focused_graph": {
+                        "schema": "cmind.focused_graph.v1",
+                        "hierarchy": {"id": "focused-graph-root"},
+                        "default_focus": {"node_link_ids": ["rpg-n1-script"]},
+                    },
                 },
                 "primary_rpg_nodes": [
                     {
@@ -298,17 +318,37 @@ def test_write_command_report_renders_retrievals_code_deltas_and_focused_view(tm
     )
 
     html = report.read_text(encoding="utf-8")
-    assert "Focused nodes map" in html
-    assert "semantic-code impact chain" in html
-    assert html.count("<h2>Focused nodes map</h2>") == 1
-    assert html.count("<h2>semantic-code impact chain</h2>") == 1
+    assert "Focused graph" in html
+    assert "Focused nodes map" not in html
+    assert "semantic-code impact chain" not in html
+    assert html.count("<h2>Focused graph</h2>") == 1
     assert "Why these nodes?" not in html
     assert "Focused impact view" not in html
     assert "What changed?" in html
-    assert "Feature group" in html
-    assert "Semantic → code evidence" in html
+    assert "Focused graph evidence" in html
     assert "focus-map" in html
     assert "One-hop context" in html
+    assert "data-focused-graph-json" in html
+    assert "focused-graph-svg" in html
+    assert "https://d3js.org v7.9.0" in html
+    assert "<script src=" not in html
+    assert "data-action=\"reset\"" in html
+    assert "data-action=\"depth-plus\"" in html
+    assert "data-action=\"depth-minus\"" in html
+    assert "data-action=\"edges\"" in html
+    assert "data-action=\"search\"" in html
+    assert "Reset" in html
+    assert "+1" in html
+    assert "-1" in html
+    assert "Edges" in html
+    assert "Search nodes" in html
+    assert "Static focused graph fallback is available when D3 cannot run." in html
+    assert "semantic_nodes" in html
+    assert "code_nodes" in html
+    assert "mappings" in html
+    assert "hierarchy" in html
+    assert "default_focus" in html
+    assert "focused_graph" in html
     assert "caller.py&lt;script&gt;" in html
     assert "Root / Feature &lt;unsafe&gt;" in html
     assert "NodeSymbol &lt;unsafe&gt;" in html
@@ -323,7 +363,6 @@ def test_write_command_report_renders_retrievals_code_deltas_and_focused_view(tm
     assert "missing" in html
     assert "n1&lt;script&gt;" in html
     assert "Node &lt;unsafe&gt;" in html
-    assert "feature/&lt;unsafe&gt;" in html
     assert "a.py:f&lt;script&gt;" in html
     assert "a.py&lt;script&gt;" in html
     assert "maps because &lt;reason&gt;" in html
@@ -342,23 +381,53 @@ def test_write_command_report_renders_retrievals_code_deltas_and_focused_view(tm
     assert "<details><summary>View diff</summary>" in html
     assert "<details open" not in html
     inspector_json = html.split("<summary>Inspector JSON</summary><pre>", 1)[1].split("</pre>", 1)[0]
+    assert "focused_graph" in inspector_json
     assert "nodes_view" in inspector_json
     assert "semantic_nodes" in inspector_json
+    assert "hierarchy" in inspector_json
+    assert "default_focus" in inspector_json
     assert "primary_rpg_nodes" not in inspector_json
     assert "primary_code_nodes" not in inspector_json
     assert long_diff not in inspector_json
     evidence_json = html.split("<summary>Evidence JSON</summary><pre>", 1)[1].split("</pre>", 1)[0]
     assert "code_deltas" not in evidence_json
     assert "focused_view" not in evidence_json
+    assert "nodes_view" not in evidence_json
     assert "focused_impact" not in evidence_json
     assert "focused_graph" not in evidence_json
     assert long_diff not in evidence_json
-    assert len(html) < 22000
     assert "Focused impact summary" not in html
-    assert "Focused graph evidence" not in html
     assert "Graph artifact" not in html
     assert "Inspector metadata" not in html
-    assert "focused_graph" not in html
+
+
+def test_write_command_report_renders_static_fallback_without_d3(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.setattr(run_report, "_D3_ASSET", tmp_path / "missing-d3.v7.min.js")
+
+    report = write_command_report(
+        {
+            "command": "rpg_edit",
+            "focused_view": {
+                "nodes_view": {
+                    "summary": {"semantic_nodes": 1, "code_nodes": 0, "mappings": 0, "edges": 0, "warnings": 0},
+                    "semantic_nodes": [{"node_id": "n1", "link_id": "rpg-n1", "name": "Node"}],
+                    "code_nodes": [],
+                    "mappings": [],
+                    "edges": [],
+                    "hidden_counts": {},
+                    "warnings": [],
+                }
+            },
+            "timestamp": "fixed",
+        },
+        report_dir=tmp_path,
+    )
+
+    html = report.read_text(encoding="utf-8")
+    assert "Focused graph" in html
+    assert "Local D3 asset missing; showing the static fallback." in html
+    assert "https://d3js.org" not in html
+    assert "Static focused graph fallback is available when D3 cannot run." in html
 
 
 def test_write_command_report_limits_summary_cards(tmp_path: Path) -> None:
