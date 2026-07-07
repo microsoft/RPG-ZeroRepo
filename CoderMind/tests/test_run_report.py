@@ -352,7 +352,13 @@ def test_write_command_report_renders_retrievals_code_deltas_and_focused_view(tm
     assert "focused-graph-node.hidden" in html
     assert "focused-graph-link.active" in html
     assert "focused-graph-link.dimmed" in html
+    assert "Hierarchy" in html
+    assert '"kind": "hierarchy"' in html
+    assert "const groups = {hierarchy: [], semantic: [], mapping: [], code: [], context: []};" in html
+    assert "const availableY = Math.max(120, height - marginY * 2);" in html
     assert "collapsedHierarchyIds" in html
+    assert "return list(hierarchyAncestorsById.get(nodeId)).some(id => collapsedHierarchyIds.has(id));" in html
+    assert "if (collapsedHierarchyIds.has(nodeId)) return true;" not in html
     assert "return nodeId !== rootHierarchyId && (hierarchyChildrenById.get(nodeId) || []).length ? nodeId : '';" in html
     assert "return hierarchyNodeById.has(nodeId) ? nodeId : '';" not in html
     assert "visibleNodeIds" in html

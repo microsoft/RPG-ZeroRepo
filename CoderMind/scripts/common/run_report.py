@@ -952,6 +952,46 @@ def _append_context_node(nodes: list[dict[str, Any]], seen: set[str], link_id: A
     return graph_id
 
 
+def _append_hierarchy_nodes(
+    nodes: list[dict[str, Any]],
+    links: list[dict[str, Any]],
+    seen_nodes: set[str],
+    hierarchy: Any,
+) -> None:
+    if not isinstance(hierarchy, Mapping):
+        return
+    seen_links = {str(link.get("id")) for link in links if isinstance(link, Mapping) and link.get("id") not in (None, "")}
+
+    def node_id(row: Mapping[str, Any]) -> str:
+        return str(row.get("id") or row.get("link_id") or row.get("node_id") or "")
+
+    def visit(row: Any) -> str:
+        if not isinstance(row, Mapping):
+            return ""
+        row_id = node_id(row)
+        children = [child for child in _as_sequence(row.get("children")) if isinstance(child, Mapping)]
+        if row_id and children and row_id not in seen_nodes:
+            seen_nodes.add(row_id)
+            nodes.append({
+                "id": row_id,
+                "kind": "hierarchy",
+                "label": str(row.get("name") or row.get("node_id") or row_id),
+                "node_id": row.get("node_id") or row_id,
+                "state": row.get("state") or row.get("kind") or "hierarchy",
+                "type": row.get("kind") or "hierarchy",
+            })
+        for child in children:
+            child_id = visit(child)
+            if row_id in seen_nodes and child_id in seen_nodes:
+                link_id = f"hierarchy-{_slug(row_id)}-{_slug(child_id)}"
+                if link_id not in seen_links:
+                    seen_links.add(link_id)
+                    links.append({"id": link_id, "source": row_id, "target": child_id, "kind": "hierarchy", "relation": "contains"})
+        return row_id
+
+    visit(hierarchy)
+
+
 def _focused_graph_payload(focused_view: Mapping[str, Any], file_anchors: Mapping[str, str]) -> dict[str, Any]:
     nodes_view = focused_view.get("nodes_view") if isinstance(focused_view.get("nodes_view"), Mapping) else {}
     summary = nodes_view.get("summary") if isinstance(nodes_view.get("summary"), Mapping) else focused_view.get("summary", {})
@@ -1012,6 +1052,7 @@ def _focused_graph_payload(focused_view: Mapping[str, Any], file_anchors: Mappin
     focused_graph = nodes_view.get("focused_graph") if isinstance(nodes_view.get("focused_graph"), Mapping) else {}
     hierarchy = nodes_view.get("hierarchy") or focused_graph.get("hierarchy") or {}
     default_focus = nodes_view.get("default_focus") or focused_graph.get("default_focus") or {}
+    _append_hierarchy_nodes(nodes, links, seen_nodes, hierarchy)
     return {
         "schema": "cmind.focused_graph.render.v1",
         "summary": summary,
@@ -1100,7 +1141,7 @@ def _focused_graph_runtime() -> str:
   const linksByNode = new Map(nodes.map(node => [node.id, new Set()]));
 
   function fill(kind) {
-    return kind === 'semantic' ? '#2563eb' : kind === 'code' ? '#16a34a' : kind === 'mapping' ? '#f59e0b' : '#64748b';
+    return kind === 'semantic' ? '#2563eb' : kind === 'code' ? '#16a34a' : kind === 'mapping' ? '#f59e0b' : kind === 'hierarchy' ? '#8b5cf6' : '#64748b';
   }
   function linkKey(link) {
     return text(link.id || `${link.source}-${link.target}`);
@@ -1140,11 +1181,13 @@ def _focused_graph_runtime() -> str:
   });
 
   function layout(rows) {
-    const groups = {semantic: [], mapping: [], code: [], context: []};
+    const groups = {hierarchy: [], semantic: [], mapping: [], code: [], context: []};
     rows.forEach(node => (groups[node.kind] || groups.context).push(node));
-    const x = {semantic: 150, mapping: 420, code: 690, context: 840};
+    const x = {hierarchy: 90, semantic: 240, mapping: 455, code: 690, context: 850};
+    const marginY = 36;
+    const availableY = Math.max(120, height - marginY * 2);
     Object.entries(groups).forEach(([kind, groupRows]) => {
-      const gap = Math.max(44, Math.min(78, 380 / Math.max(groupRows.length, 1)));
+      const gap = groupRows.length > 1 ? Math.min(78, availableY / (groupRows.length - 1)) : 0;
       const start = height / 2 - ((groupRows.length - 1) * gap) / 2;
       groupRows.forEach((node, index) => { node.x = x[kind] || width / 2; node.y = start + index * gap; });
     });
@@ -1172,7 +1215,6 @@ def _focused_graph_runtime() -> str:
   }
 
   function isCollapsed(nodeId) {
-    if (collapsedHierarchyIds.has(nodeId)) return true;
     return list(hierarchyAncestorsById.get(nodeId)).some(id => collapsedHierarchyIds.has(id));
   }
 
@@ -1382,6 +1424,7 @@ def _render_focused_graph(focused_view: dict[str, Any], file_anchors: Mapping[st
         '<span class="legend-item"><span class="legend-swatch legend-semantic"></span>Semantic</span>'
         '<span class="legend-item"><span class="legend-swatch legend-code"></span>Code</span>'
         '<span class="legend-item"><span class="legend-swatch legend-mapping"></span>Mapping</span>'
+        '<span class="legend-item"><span class="legend-swatch" style="background:#8b5cf6"></span>Hierarchy</span>'
         '<span class="legend-item"><span class="legend-swatch legend-context"></span>Context edge</span>'
         '</div>'
     )
