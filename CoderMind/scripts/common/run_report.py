@@ -414,11 +414,10 @@ details summary {{ cursor:pointer; color:var(--accent); font-weight:600; }}
 <div class=\"meta\"><span>Command: <strong>{_h(command)}</strong></span><span>Generated: {_h(generated_at)}</span>{status_html}</div>
 </header>
 {_render_summary_cards(summary_cards)}
-{_render_timeline(stages)}
+{_render_timeline(stages, verification)}
 {_render_safety_boundary(user_decisions)}
 {_render_focused_graph(focused_view, code_file_anchors)}
 {_render_code_deltas(code_deltas, code_delta_anchors)}
-{_render_verification(verification)}
 {_render_artifacts(artifacts)}
 {_render_evidence(evidence)}
 </main>
@@ -450,40 +449,31 @@ def _render_summary_cards(cards: list[dict[str, Any]]) -> str:
     return f"<section><h2>Summary</h2>{body}</section>"
 
 
-def _render_timeline(stages: list[dict[str, Any]]) -> str:
-    if not stages:
-        body = "<p class=\"empty\">No stages recorded.</p>"
-    else:
-        items = []
-        for stage in stages:
-            duration = stage.get("duration")
-            duration_text = f"<span class=\"badge\">{_h(duration)}s</span>" if duration not in (None, "") else ""
-            items.append(
-                "<li>"
-                f"<div class=\"stage-head\"><strong>{_h(stage.get('name', 'stage'))}</strong>"
-                f"<span class=\"badge\">{_h(stage.get('status', 'recorded'))}</span>{duration_text}</div>"
-                f"<div class=\"reason\">{_h(stage.get('reason', ''))}</div>"
-                "</li>"
-            )
+def _render_timeline(stages: list[dict[str, Any]], checks: list[dict[str, Any]]) -> str:
+    items = []
+    for stage in stages:
+        duration = stage.get("duration")
+        duration_text = f"<span class=\"badge\">{_h(duration)}s</span>" if duration not in (None, "") else ""
+        items.append(
+            "<li>"
+            f"<div class=\"stage-head\"><strong>{_h(stage.get('name', 'stage'))}</strong>"
+            f"<span class=\"badge\">{_h(stage.get('status', 'recorded'))}</span>{duration_text}</div>"
+            f"<div class=\"reason\">{_h(stage.get('reason', ''))}</div>"
+            "</li>"
+        )
+    for check in checks:
+        items.append(
+            "<li>"
+            f"<div class=\"stage-head\"><strong>{_h(check.get('name') or 'verification')}</strong>"
+            f"<span class=\"badge\">{_h(check.get('status', ''))}</span></div>"
+            f"<div class=\"reason\">{_h(check.get('detail', ''))}</div>"
+            "</li>"
+        )
+    if items:
         body = '<ol class="timeline">' + "".join(items) + "</ol>"
-    return f"<section><h2>Stage timeline</h2>{body}</section>"
-
-
-def _render_verification(checks: list[dict[str, Any]]) -> str:
-    if not checks:
-        body = "<p class=\"empty\">No verification status recorded.</p>"
     else:
-        rows = []
-        for check in checks:
-            rows.append(
-                "<tr>"
-                f"<td>{_h(check.get('name') or 'verification')}</td>"
-                f"<td>{_h(check.get('status', ''))}</td>"
-                f"<td>{_h(check.get('detail', ''))}</td>"
-                "</tr>"
-            )
-        body = "<table><thead><tr><th>Check</th><th>Status</th><th>Detail</th></tr></thead><tbody>" + "".join(rows) + "</tbody></table>"
-    return f"<section><h2>Verification status</h2>{body}</section>"
+        body = "<p class=\"empty\">No stages recorded.</p>"
+    return f"<section><h2>Stage timeline</h2>{body}</section>"
 
 
 def _render_safety_boundary(decisions: list[dict[str, Any]]) -> str:
@@ -837,37 +827,6 @@ def _mapping_card(mapping: Mapping[str, Any]) -> str:
     )
 
 
-def _edge_endpoint_html(node_id: Any, link_id: Any) -> str:
-    if link_id not in (None, ""):
-        return f"<a href=\"#{_h_attr(link_id)}\"><code>{_h(node_id)}</code></a>"
-    return f"<code>{_h(node_id)}</code>"
-
-
-def _nodes_view_edges_html(edges: Sequence[Mapping[str, Any]]) -> str:
-    edge_rows = []
-    for edge in edges:
-        source = _edge_endpoint_html(edge.get("source_node_id"), edge.get("source_link_id"))
-        target = _edge_endpoint_html(edge.get("target_node_id"), edge.get("target_link_id"))
-        edge_rows.append(
-            "<tr>"
-            f"<td>{source}</td>"
-            f"<td>{target}</td>"
-            f"<td>{_h(edge.get('relation', ''))}</td>"
-            f"<td>{_h(edge.get('direction', ''))}</td>"
-            f"<td>{_h(edge.get('path', ''))}</td>"
-            f"<td>{_h(edge.get('reason', ''))}</td>"
-            "</tr>"
-        )
-    if not edge_rows:
-        return ""
-    return (
-        "<h3>One-hop context</h3>"
-        "<table><thead><tr><th>Source</th><th>Target</th><th>Relation</th><th>Direction</th><th>Path</th><th>Reason</th></tr></thead><tbody>"
-        + "".join(edge_rows)
-        + "</tbody></table>"
-    )
-
-
 def _inline_d3() -> str:
     try:
         return _D3_ASSET.read_text(encoding="utf-8").strip()
@@ -1067,32 +1026,6 @@ def _focused_graph_payload(focused_view: Mapping[str, Any], file_anchors: Mappin
         "hierarchy": hierarchy,
         "default_focus": default_focus,
     }
-
-
-def _focused_graph_evidence(nodes_view: Mapping[str, Any], file_anchors: Mapping[str, str]) -> str:
-    semantic_cards = [
-        _semantic_card(node, file_anchors)
-        for node in _as_sequence(nodes_view.get("semantic_nodes"))
-        if isinstance(node, Mapping)
-    ]
-    code_cards = [
-        _code_card(node, file_anchors)
-        for node in _as_sequence(nodes_view.get("code_nodes"))
-        if isinstance(node, Mapping)
-    ]
-    mapping_cards = [
-        _mapping_card(mapping)
-        for mapping in _as_sequence(nodes_view.get("mappings"))
-        if isinstance(mapping, Mapping)
-    ]
-    edge_rows = [edge for edge in _as_sequence(nodes_view.get("edges")) if isinstance(edge, Mapping)]
-    body = "<h3>Focused graph evidence</h3>"
-    if semantic_cards or code_cards or mapping_cards:
-        body += '<div class="focus-map">' + "".join(semantic_cards + code_cards + mapping_cards) + "</div>"
-    else:
-        body += '<p class="empty">No focused graph evidence rows recorded.</p>'
-    body += _nodes_view_edges_html(edge_rows)
-    return body
 
 
 def _focused_graph_runtime() -> str:
@@ -1436,7 +1369,6 @@ def _render_focused_graph(focused_view: dict[str, Any], file_anchors: Mapping[st
         '<svg class="focused-graph-svg" data-focused-graph-svg role="img" aria-label="Focused graph view" width="960" height="480"></svg>'
         f'<div class="focused-graph-fallback" data-focused-graph-fallback{fallback_hidden}>Static focused graph fallback is available when D3 cannot run.{d3_missing_note}</div>'
         '</div>'
-        f"{_focused_graph_evidence(nodes_view, file_anchors)}"
         f"<details><summary>Inspector JSON</summary><pre>{_h(inspector)}</pre></details>"
         f"{scripts}"
         '</section>'
@@ -1470,7 +1402,6 @@ def _legacy_render_focused_nodes_map(focused_view: dict[str, Any], file_anchors:
         for mapping in _as_sequence(nodes_view.get("mappings"))
         if isinstance(mapping, Mapping)
     ]
-    edge_rows = [edge for edge in _as_sequence(nodes_view.get("edges")) if isinstance(edge, Mapping)]
     hidden_html = _hidden_context_html(nodes_view.get("hidden_counts") if isinstance(nodes_view.get("hidden_counts"), Mapping) else {})
     warnings = [warning for warning in _as_sequence(nodes_view.get("warnings")) if isinstance(warning, Mapping)]
     warnings_html = f"<h3>Warnings</h3>{_chain_warning_html(warnings)}" if warnings else ""
@@ -1479,7 +1410,7 @@ def _legacy_render_focused_nodes_map(focused_view: dict[str, Any], file_anchors:
         body += '<div class="focus-map">' + "".join(semantic_cards + code_cards + mapping_cards) + "</div>"
     else:
         body += '<p class="empty">No focused nodes map rows recorded.</p>'
-    body += _nodes_view_edges_html(edge_rows) + hidden_html + warnings_html + _focused_graph_metadata(focused_view)
+    body += hidden_html + warnings_html + _focused_graph_metadata(focused_view)
     return f"<section><h2>Focused nodes map</h2>{body}</section>"
 
 

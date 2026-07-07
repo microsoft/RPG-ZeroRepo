@@ -75,7 +75,6 @@ def test_write_command_report_escapes_content_and_writes_sections(tmp_path: Path
         "Safety boundary",
         "Focused graph",
         "What changed?",
-        "Verification status",
         "Artifact links",
         "Evidence JSON",
     ]
@@ -84,7 +83,8 @@ def test_write_command_report_escapes_content_and_writes_sections(tmp_path: Path
     assert "Summary" in html
     assert "Stage timeline" in html
     assert "Safety boundary" in html
-    assert "Verification status" in html
+    assert "Verification status" not in html
+    assert "pytest" in html
     assert "Artifact links" in html
     assert "Evidence JSON" in html
     assert "Before state" in html
@@ -325,9 +325,9 @@ def test_write_command_report_renders_retrievals_code_deltas_and_focused_view(tm
     assert "Why these nodes?" not in html
     assert "Focused impact view" not in html
     assert "What changed?" in html
-    assert "Focused graph evidence" in html
-    assert "focus-map" in html
-    assert "One-hop context" in html
+    assert "Focused graph evidence" not in html
+    assert '<div class="focus-map">' not in html
+    assert "One-hop context" not in html
     assert "data-focused-graph-json" in html
     assert "focused-graph-svg" in html
     assert "https://d3js.org v7.9.0" in html
@@ -378,10 +378,11 @@ def test_write_command_report_renders_retrievals_code_deltas_and_focused_view(tm
     assert "Root / Feature &lt;unsafe&gt;" in html
     assert "NodeSymbol &lt;unsafe&gt;" in html
     assert "function&lt;script&gt;" in html
-    assert "Lines: 10-12" in html
-    assert "Mapped code:" in html
-    assert "Mapped code: <span class=\"empty\">missing mapping</span>" in html
-    assert "href=\"#diff-a.py\"" in html
+    assert '"kind": "context"' in html
+    assert '"relation": "caller"' in html
+    assert '"href": "#diff-a.py"' in html
+    assert "Lines: 10-12" not in html
+    assert "Mapped code:" not in html
     assert "id=\"diff-a.py\"" in html
     assert html.count("<summary>Inspector JSON</summary>") == 1
     assert "mapped" in html
@@ -529,8 +530,14 @@ def test_write_command_report_infers_artifact_status_and_preserves_verification_
     assert "<td>missing_json</td>" in html
     assert html.count("<td>available</td>") == 1
     assert html.count("<td>missing</td>") == 1
-    assert "<td>from message</td>" in html
-    assert "<td>from reason</td>" in html
+    assert "Verification status" not in html
+    assert "Stage timeline" in html
+    assert "<strong>message</strong>" in html
+    assert "<strong>reason</strong>" in html
+    assert "from message" in html
+    assert "from reason" in html
+    assert "<td>from message</td>" not in html
+    assert "<td>from reason</td>" not in html
 
 
 def test_all_event_types_serialize_with_optional_fields(tmp_path: Path) -> None:
