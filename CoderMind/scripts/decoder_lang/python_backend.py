@@ -14,7 +14,6 @@ from __future__ import annotations
 import ast
 import keyword
 import logging
-from abc import abstractmethod
 from pathlib import Path
 from typing import Any
 
@@ -423,7 +422,6 @@ class PythonBackend:
     # 3. Build / test environment — not wired into the decoder yet
     # ------------------------------------------------------------------
 
-    @abstractmethod
     def detect_env(self, repo_root: Path) -> EnvHandle | None:
         """Return an existing Python test environment when supported."""
         raise NotImplementedError(
@@ -432,7 +430,6 @@ class PythonBackend:
             "for now.",
         )
 
-    @abstractmethod
     def ensure_env(self, repo_root: Path) -> EnvHandle:
         """Always available on a host that's already running Python
         (the decoder itself), so this never raises
@@ -441,7 +438,6 @@ class PythonBackend:
             "PythonBackend.ensure_env is not wired into the decoder.",
         )
 
-    @abstractmethod
     def test_command(
         self,
         env: EnvHandle,
@@ -454,7 +450,6 @@ class PythonBackend:
             "build_batch_pytest_cmd for now.",
         )
 
-    @abstractmethod
     def install_deps_command(
         self,
         env: EnvHandle,
@@ -469,7 +464,6 @@ class PythonBackend:
     # 4. Test-output parsing — not wired into the decoder yet
     # ------------------------------------------------------------------
 
-    @abstractmethod
     def parse_test_output(self, raw: str, exit_code: int) -> TestRunResult:
         """Parse native Python test output when backend-driven tests run."""
         raise NotImplementedError(

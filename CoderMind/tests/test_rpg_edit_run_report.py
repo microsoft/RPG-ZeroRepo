@@ -373,6 +373,32 @@ def test_review_publish_report_returns_report_path(tmp_path: Path, monkeypatch) 
     assert persisted["report_path"] == str(report_path)
 
 
+def test_rollback_command_only_uses_rpg_edit_branch(tmp_path: Path, monkeypatch) -> None:
+    apply_module = _load_script("rpg_edit_apply_test", _SCRIPTS / "rpg_edit" / "apply.py")
+
+    result = apply_module._rollback_command(
+        "123",
+        {
+            "head_commit": "before123",
+            "head_short": "before1",
+            "head_branch": "feature/my-branch",
+            "head_timestamp": "2026-06-30T12:00:00+00:00",
+        },
+    )
+    assert result == "cmind script rpg_edit/apply.py --rollback 123"
+
+    result = apply_module._rollback_command(
+        "123",
+        {
+            "head_commit": "before123",
+            "head_short": "before1",
+            "head_branch": "rpg-edit/test",
+            "head_timestamp": "2026-06-30T12:00:00+00:00",
+        },
+    )
+    assert result == "cmind script rpg_edit/apply.py --rollback 123 --rollback-branch rpg-edit/test"
+
+
 def test_review_report_reconstructs_affected_node_evidence_from_impact(tmp_path: Path, monkeypatch) -> None:
     review = _load_script("rpg_edit_review_impact_test", _SCRIPTS / "rpg_edit" / "review.py")
 
