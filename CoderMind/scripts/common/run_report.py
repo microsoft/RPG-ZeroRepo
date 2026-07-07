@@ -384,7 +384,18 @@ details summary {{ cursor:pointer; color:var(--accent); font-weight:600; }}
 .focused-graph-toolbar button, .focused-graph-toolbar input {{ border:1px solid var(--line); border-radius:8px; background:#fff; color:var(--text); padding:6px 10px; font:inherit; }}
 .focused-graph-toolbar label {{ display:inline-flex; gap:6px; align-items:center; color:var(--muted); }}
 .focused-graph-stage {{ border:1px solid var(--line); border-radius:12px; background:#fbfdff; min-height:480px; position:relative; overflow:hidden; }}
-.focused-graph-svg {{ display:block; width:100%; height:480px; }}
+.focused-graph-svg {{ display:block; width:100%; height:480px; cursor:grab; touch-action:none; }}
+.focused-graph-svg:active {{ cursor:grabbing; }}
+.focused-graph-link {{ transition:opacity .15s ease, stroke-width .15s ease; }}
+.focused-graph-link.active {{ opacity:1; stroke:#0f172a; stroke-width:2.6; }}
+.focused-graph-link.dimmed {{ opacity:.14; }}
+.focused-graph-link.hidden {{ display:none; }}
+.focused-graph-node {{ cursor:pointer; transition:opacity .15s ease; }}
+.focused-graph-node circle {{ transition:stroke .15s ease, stroke-width .15s ease; }}
+.focused-graph-node.selected circle, .focused-graph-node.active circle {{ stroke:#0f172a; stroke-width:3; }}
+.focused-graph-node.dragging {{ cursor:grabbing; }}
+.focused-graph-node.dimmed {{ opacity:.18; }}
+.focused-graph-node.hidden {{ display:none; }}
 .focused-graph-fallback {{ margin:12px; padding:12px; border:1px dashed var(--line); border-radius:10px; background:#fff; color:var(--muted); }}
 .focused-graph-legend {{ display:flex; flex-wrap:wrap; gap:8px; margin:8px 0 12px; }}
 .legend-item {{ display:inline-flex; gap:6px; align-items:center; color:var(--muted); font-size:13px; }}
@@ -1054,59 +1065,279 @@ def _focused_graph_runtime() -> str:
   if (!window.d3 || !dataEl || !svg) return;
   if (fallback) fallback.hidden = true;
   const data = JSON.parse(dataEl.textContent || '{}');
-  const ns = 'http://www.w3.org/2000/svg';
-  let scale = 1;
-  let showEdges = true;
+  const width = Number(svg.getAttribute('width')) || 960;
+  const height = Number(svg.getAttribute('height')) || 480;
+  const defaultFocus = data.default_focus || {};
+  const defaultShowEdges = defaultFocus.show_edges !== false;
+  const text = value => value === undefined || value === null ? '' : String(value);
+  const list = value => Array.isArray(value) ? value : [];
+  let hierarchyDepth = Math.max(0, Number(defaultFocus.hierarchy_depth ?? defaultFocus.edge_depth ?? 1) || 0);
+  const defaultHierarchyDepth = hierarchyDepth;
+  let showEdges = defaultShowEdges;
   let query = '';
-  function make(tag, attrs, text) {
-    const el = document.createElementNS(ns, tag);
-    Object.entries(attrs || {}).forEach(([key, value]) => el.setAttribute(key, value));
-    if (text !== undefined) el.textContent = text;
-    return el;
-  }
+  let selectedId = null;
+  let visibleNodeIds = new Set();
+  const collapsedHierarchyIds = new Set();
+  const nodes = list(data.nodes).map((node, index) => ({
+    ...node,
+    id: text(node.id || node.node_id || `node-${index + 1}`),
+    kind: text(node.kind || 'context'),
+    label: text(node.label || node.name || node.node_id || node.id || `node-${index + 1}`),
+  }));
+  const nodeById = new Map(nodes.map(node => [node.id, node]));
+  const links = list(data.links).map((link, index) => {
+    const source = text(link.source && link.source.id ? link.source.id : link.source);
+    const target = text(link.target && link.target.id ? link.target.id : link.target);
+    return {...link, id: text(link.id || `link-${index + 1}`), source, target};
+  }).filter(link => nodeById.has(link.source) && nodeById.has(link.target));
+  const hierarchyNodeById = new Map();
+  const hierarchyParentById = new Map();
+  const hierarchyChildrenById = new Map();
+  const hierarchyDepthById = new Map();
+  const hierarchyAncestorsById = new Map();
+  const rootHierarchyId = text(data.hierarchy && data.hierarchy.id);
+  const adjacency = new Map(nodes.map(node => [node.id, new Set()]));
+  const linksByNode = new Map(nodes.map(node => [node.id, new Set()]));
+
   function fill(kind) {
     return kind === 'semantic' ? '#2563eb' : kind === 'code' ? '#16a34a' : kind === 'mapping' ? '#f59e0b' : '#64748b';
   }
-  function layout(nodes) {
+  function linkKey(link) {
+    return text(link.id || `${link.source}-${link.target}`);
+  }
+  function collectHierarchy(row, parentId, depth, ancestors) {
+    if (!row || typeof row !== 'object') return;
+    const id = text(row.id || row.link_id || row.node_id);
+    if (!id) return;
+    const children = list(row.children).map(child => text(child && (child.id || child.link_id || child.node_id))).filter(Boolean);
+    hierarchyNodeById.set(id, row);
+    hierarchyChildrenById.set(id, children);
+    hierarchyDepthById.set(id, depth);
+    hierarchyAncestorsById.set(id, ancestors);
+    if (parentId) hierarchyParentById.set(id, parentId);
+    list(row.children).forEach(child => collectHierarchy(child, id, depth + 1, ancestors.concat(id)));
+  }
+  collectHierarchy(data.hierarchy, '', 0, []);
+  let maxHierarchyDepth = Math.max(1, defaultHierarchyDepth);
+  hierarchyDepthById.forEach(depth => { maxHierarchyDepth = Math.max(maxHierarchyDepth, depth); });
+  const maxDepth = Math.max(maxHierarchyDepth, Math.min(Math.max(nodes.length - 1, 1), 8));
+
+  links.forEach(link => {
+    adjacency.get(link.source)?.add(link.target);
+    adjacency.get(link.target)?.add(link.source);
+    linksByNode.get(link.source)?.add(linkKey(link));
+    linksByNode.get(link.target)?.add(linkKey(link));
+  });
+
+  const defaultFocusIds = new Set(list(defaultFocus.node_link_ids).map(text).filter(id => nodeById.has(id)));
+  const semanticFocusIds = new Set(list(defaultFocus.semantic_node_ids).map(text));
+  const codeFocusIds = new Set(list(defaultFocus.code_node_ids).map(text));
+  const mappingFocusIds = new Set(list(defaultFocus.mapping_link_ids).map(text));
+  nodes.forEach(node => {
+    if (semanticFocusIds.has(text(node.node_id)) || codeFocusIds.has(text(node.node_id)) || mappingFocusIds.has(node.id)) {
+      defaultFocusIds.add(node.id);
+    }
+  });
+
+  function layout(rows) {
     const groups = {semantic: [], mapping: [], code: [], context: []};
-    nodes.forEach(node => (groups[node.kind] || groups.context).push(node));
+    rows.forEach(node => (groups[node.kind] || groups.context).push(node));
     const x = {semantic: 150, mapping: 420, code: 690, context: 840};
-    Object.entries(groups).forEach(([kind, rows]) => {
-      const gap = Math.max(44, Math.min(78, 380 / Math.max(rows.length, 1)));
-      const start = 240 - ((rows.length - 1) * gap) / 2;
-      rows.forEach((node, index) => { node.x = x[kind] || 500; node.y = start + index * gap; });
+    Object.entries(groups).forEach(([kind, groupRows]) => {
+      const gap = Math.max(44, Math.min(78, 380 / Math.max(groupRows.length, 1)));
+      const start = height / 2 - ((groupRows.length - 1) * gap) / 2;
+      groupRows.forEach((node, index) => { node.x = x[kind] || width / 2; node.y = start + index * gap; });
     });
   }
-  function render() {
-    const nodes = (data.nodes || []).map(node => ({...node}));
-    const byId = new Map(nodes.map(node => [node.id, node]));
-    layout(nodes);
-    while (svg.firstChild) svg.removeChild(svg.firstChild);
-    svg.setAttribute('viewBox', `0 0 ${960 / scale} ${480 / scale}`);
-    const links = data.links || [];
-    if (showEdges) {
-      links.forEach(link => {
-        const source = byId.get(link.source), target = byId.get(link.target);
-        if (!source || !target) return;
-        const line = make('line', {x1: source.x, y1: source.y, x2: target.x, y2: target.y, stroke: link.kind === 'mapping' ? '#f59e0b' : '#94a3b8', 'stroke-width': link.kind === 'mapping' ? 2 : 1.4, opacity: .78});
-        svg.appendChild(line);
+
+  function expandFromFocus(seedIds, depthLimit) {
+    const visible = new Set([...seedIds].filter(id => nodeById.has(id)));
+    let frontier = new Set(visible);
+    for (let depth = 0; depth < depthLimit && frontier.size; depth += 1) {
+      const next = new Set();
+      frontier.forEach(id => (adjacency.get(id) || new Set()).forEach(neighbor => {
+        if (!visible.has(neighbor)) {
+          visible.add(neighbor);
+          next.add(neighbor);
+        }
+      }));
+      frontier = next;
+    }
+    return visible;
+  }
+
+  function nodeMatches(node) {
+    if (!query) return true;
+    return `${node.label} ${node.node_id || ''} ${node.path || ''} ${node.kind || ''}`.toLowerCase().includes(query);
+  }
+
+  function isCollapsed(nodeId) {
+    if (collapsedHierarchyIds.has(nodeId)) return true;
+    return list(hierarchyAncestorsById.get(nodeId)).some(id => collapsedHierarchyIds.has(id));
+  }
+
+  function nearestHierarchyToggle(nodeId) {
+    return nodeId !== rootHierarchyId && (hierarchyChildrenById.get(nodeId) || []).length ? nodeId : '';
+  }
+
+  function computeVisibleNodeIds() {
+    const seeds = defaultFocusIds.size ? defaultFocusIds : new Set(nodes.map(node => node.id));
+    const visible = expandFromFocus(seeds, hierarchyDepth);
+    if (hierarchyNodeById.size) {
+      nodes.forEach(node => {
+        const depth = hierarchyDepthById.get(node.id);
+        if (depth !== undefined && depth <= hierarchyDepth) visible.add(node.id);
       });
     }
+    if (query) nodes.forEach(node => { if (nodeMatches(node)) visible.add(node.id); });
     nodes.forEach(node => {
-      const matches = !query || `${node.label} ${node.node_id || ''} ${node.path || ''}`.toLowerCase().includes(query);
-      const group = make('g', {transform: `translate(${node.x},${node.y})`, opacity: matches ? '1' : '.18'});
-      group.appendChild(make('circle', {r: node.kind === 'mapping' ? 6 : 8, fill: fill(node.kind), stroke: '#fff', 'stroke-width': 2}));
-      group.appendChild(make('text', {x: 13, y: 4, 'font-size': 12, fill: '#1f2937'}, (node.label || node.id || '').slice(0, 42)));
-      group.appendChild(make('title', {}, `${node.kind}: ${node.label || node.id}`));
-      svg.appendChild(group);
+      if (!nodeMatches(node) || isCollapsed(node.id)) visible.delete(node.id);
     });
+    if (!visible.size && !query) nodes.forEach(node => { if (!isCollapsed(node.id)) visible.add(node.id); });
+    return visible;
   }
-  section.querySelector('[data-action="reset"]')?.addEventListener('click', () => { scale = 1; query = ''; showEdges = true; const search = section.querySelector('[data-action="search"]'); if (search) search.value = ''; const edges = section.querySelector('[data-action="edges"]'); if (edges) edges.checked = true; render(); });
-  section.querySelector('[data-action="depth-plus"]')?.addEventListener('click', () => { scale = Math.min(1.8, scale + .15); render(); });
-  section.querySelector('[data-action="depth-minus"]')?.addEventListener('click', () => { scale = Math.max(.7, scale - .15); render(); });
-  section.querySelector('[data-action="edges"]')?.addEventListener('change', event => { showEdges = event.target.checked; render(); });
-  section.querySelector('[data-action="search"]')?.addEventListener('input', event => { query = event.target.value.toLowerCase(); render(); });
-  render();
+
+  function isLinkVisible(link) {
+    return showEdges && visibleNodeIds.has(link.source) && visibleNodeIds.has(link.target);
+  }
+
+  layout(nodes);
+  const svgSelection = d3.select(svg).attr('viewBox', `0 0 ${width} ${height}`);
+  svgSelection.selectAll('*').remove();
+  const graphLayer = svgSelection.append('g').attr('class', 'focused-graph-layer');
+  const linkLayer = graphLayer.append('g').attr('class', 'focused-graph-links');
+  const nodeLayer = graphLayer.append('g').attr('class', 'focused-graph-nodes');
+  const zoom = d3.zoom()
+    .scaleExtent([0.35, 3.5])
+    .on('zoom', event => graphLayer.attr('transform', event.transform));
+  svgSelection.call(zoom).on('dblclick.zoom', null).on('click', event => {
+    if (event.target === svg) {
+      selectedId = null;
+      renderVisibility();
+    }
+  });
+
+  const linkSelection = linkLayer.selectAll('line')
+    .data(links, link => linkKey(link))
+    .join('line')
+    .attr('class', 'focused-graph-link')
+    .attr('data-link-id', link => linkKey(link))
+    .attr('stroke', link => link.kind === 'mapping' ? '#f59e0b' : '#94a3b8')
+    .attr('stroke-width', link => link.kind === 'mapping' ? 2 : 1.4)
+    .attr('opacity', .78);
+
+  const drag = d3.drag()
+    .container(() => graphLayer.node())
+    .on('start', function(event) {
+      event.sourceEvent?.stopPropagation();
+      d3.select(this).classed('dragging', true);
+    })
+    .on('drag', function(event, node) {
+      node.x = event.x;
+      node.y = event.y;
+      updatePositions();
+    })
+    .on('end', function() {
+      d3.select(this).classed('dragging', false);
+    });
+
+  const nodeSelection = nodeLayer.selectAll('g')
+    .data(nodes, node => node.id)
+    .join(enter => {
+      const group = enter.append('g')
+        .attr('class', 'focused-graph-node')
+        .attr('data-node-id', node => node.id)
+        .attr('tabindex', 0)
+        .attr('role', 'button');
+      group.append('circle')
+        .attr('r', node => node.kind === 'mapping' ? 6 : 8)
+        .attr('fill', node => fill(node.kind))
+        .attr('stroke', '#fff')
+        .attr('stroke-width', 2);
+      group.append('text')
+        .attr('x', 13)
+        .attr('y', 4)
+        .attr('font-size', 12)
+        .attr('fill', '#1f2937')
+        .text(node => text(node.label || node.id).slice(0, 42));
+      group.append('title').text(node => `${node.kind}: ${node.label || node.id}`);
+      return group;
+    })
+    .call(drag)
+    .on('click', (event, node) => {
+      event.stopPropagation();
+      selectedId = selectedId === node.id ? null : node.id;
+      renderVisibility();
+    })
+    .on('dblclick', (event, node) => {
+      event.stopPropagation();
+      const toggleId = nearestHierarchyToggle(node.id);
+      if (!toggleId) return;
+      if (collapsedHierarchyIds.has(toggleId)) collapsedHierarchyIds.delete(toggleId);
+      else collapsedHierarchyIds.add(toggleId);
+      if (selectedId && isCollapsed(selectedId)) selectedId = null;
+      renderVisibility();
+    });
+
+  function updatePositions() {
+    linkSelection
+      .attr('x1', link => nodeById.get(link.source)?.x || 0)
+      .attr('y1', link => nodeById.get(link.source)?.y || 0)
+      .attr('x2', link => nodeById.get(link.target)?.x || 0)
+      .attr('y2', link => nodeById.get(link.target)?.y || 0);
+    nodeSelection.attr('transform', node => `translate(${node.x},${node.y})`);
+  }
+
+  function renderVisibility() {
+    visibleNodeIds = computeVisibleNodeIds();
+    if (selectedId && !visibleNodeIds.has(selectedId)) selectedId = null;
+    const activeNodes = new Set();
+    const activeLinks = new Set();
+    if (selectedId) {
+      activeNodes.add(selectedId);
+      (adjacency.get(selectedId) || new Set()).forEach(id => activeNodes.add(id));
+      (linksByNode.get(selectedId) || new Set()).forEach(id => activeLinks.add(id));
+    }
+    nodeSelection
+      .classed('hidden', node => !visibleNodeIds.has(node.id))
+      .classed('selected', node => node.id === selectedId)
+      .classed('active', node => Boolean(selectedId && activeNodes.has(node.id)))
+      .classed('dimmed', node => Boolean(selectedId && visibleNodeIds.has(node.id) && !activeNodes.has(node.id)));
+    linkSelection
+      .classed('hidden', link => !isLinkVisible(link))
+      .classed('active', link => Boolean(selectedId && activeLinks.has(linkKey(link))))
+      .classed('dimmed', link => Boolean(selectedId && isLinkVisible(link) && !activeLinks.has(linkKey(link))));
+  }
+
+  function expandDepth() {
+    hierarchyDepth = Math.min(maxDepth, hierarchyDepth + 1);
+    renderVisibility();
+  }
+
+  function collapseDepth() {
+    hierarchyDepth = Math.max(0, hierarchyDepth - 1);
+    renderVisibility();
+  }
+
+  section.querySelector('[data-action="reset"]')?.addEventListener('click', () => {
+    hierarchyDepth = defaultHierarchyDepth;
+    showEdges = defaultShowEdges;
+    query = '';
+    selectedId = null;
+    collapsedHierarchyIds.clear();
+    const search = section.querySelector('[data-action="search"]');
+    if (search) search.value = '';
+    const edges = section.querySelector('[data-action="edges"]');
+    if (edges) edges.checked = showEdges;
+    svgSelection.transition().duration(150).call(zoom.transform, d3.zoomIdentity);
+    renderVisibility();
+  });
+  section.querySelector('[data-action="depth-plus"]')?.addEventListener('click', expandDepth);
+  section.querySelector('[data-action="depth-minus"]')?.addEventListener('click', collapseDepth);
+  section.querySelector('[data-action="edges"]')?.addEventListener('change', event => { showEdges = event.target.checked; renderVisibility(); });
+  section.querySelector('[data-action="search"]')?.addEventListener('input', event => { query = text(event.target.value).toLowerCase(); renderVisibility(); });
+  updatePositions();
+  renderVisibility();
 })();
 """
 
@@ -1140,8 +1371,8 @@ def _render_focused_graph(focused_view: dict[str, Any], file_anchors: Mapping[st
     controls = (
         '<div class="focused-graph-toolbar">'
         '<button type="button" data-action="reset">Reset</button>'
-        '<button type="button" data-action="depth-plus">+1</button>'
-        '<button type="button" data-action="depth-minus">-1</button>'
+        '<button type="button" data-action="depth-plus" aria-label="Expand hierarchy depth" title="Expand hierarchy depth">+1</button>'
+        '<button type="button" data-action="depth-minus" aria-label="Collapse hierarchy depth" title="Collapse hierarchy depth">-1</button>'
         '<label><input type="checkbox" data-action="edges" checked> Edges</label>'
         '<input type="search" data-action="search" placeholder="Search nodes" aria-label="Search focused graph nodes">'
         '</div>'

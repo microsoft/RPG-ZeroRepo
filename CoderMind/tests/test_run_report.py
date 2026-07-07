@@ -342,6 +342,25 @@ def test_write_command_report_renders_retrievals_code_deltas_and_focused_view(tm
     assert "-1" in html
     assert "Edges" in html
     assert "Search nodes" in html
+    assert "d3.zoom()" in html
+    assert "d3.drag()" in html
+    assert ".on('start', function(event) {" in html
+    assert "selectedId = node.id;\n      d3.select(this).classed('dragging', true)" not in html
+    assert "dblclick" in html
+    assert "focused-graph-layer" in html
+    assert "focused-graph-node.selected" in html
+    assert "focused-graph-node.hidden" in html
+    assert "focused-graph-link.active" in html
+    assert "focused-graph-link.dimmed" in html
+    assert "collapsedHierarchyIds" in html
+    assert "return nodeId !== rootHierarchyId && (hierarchyChildrenById.get(nodeId) || []).length ? nodeId : '';" in html
+    assert "return hierarchyNodeById.has(nodeId) ? nodeId : '';" not in html
+    assert "visibleNodeIds" in html
+    assert "expandDepth" in html
+    assert "collapseDepth" in html
+    assert "Expand hierarchy depth" in html
+    assert "Collapse hierarchy depth" in html
+    assert "d3.zoomIdentity" in html
     assert "Static focused graph fallback is available when D3 cannot run." in html
     assert "semantic_nodes" in html
     assert "code_nodes" in html
