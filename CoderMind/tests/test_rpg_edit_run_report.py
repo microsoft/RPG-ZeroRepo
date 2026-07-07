@@ -622,6 +622,8 @@ def test_review_report_scope_internal_writes_under_internal_report_dir(tmp_path:
     review = _load_script("rpg_edit_review_scope_internal_test", _SCRIPTS / "rpg_edit" / "review.py")
     plan_path, impact_path, review_path = _patch_minimal_review_report(review, tmp_path, monkeypatch)
     captured: dict[str, dict] = {}
+    report_timestamp = "20260707T123456Z"
+    monkeypatch.setattr(review, "_report_timestamp", lambda: report_timestamp)
 
     def fake_write_command_report(run):
         data = run.to_dict()
@@ -647,11 +649,15 @@ def test_review_report_scope_internal_writes_under_internal_report_dir(tmp_path:
     assert result["internal_report_paths"] == [result["report_path"]]
     assert result["report_scope"] == "internal"
     assert result["is_final"] is False
-    evidence = captured["data"]["evidence"]
+    data = captured["data"]
+    assert data["timestamp"] == report_timestamp
+    evidence = data["evidence"]
     assert evidence["report_scope"] == "internal"
     assert evidence["is_final"] is False
     assert evidence["parent_run_id"] == "parent-2"
-    assert evidence["published_to"].startswith(str(tmp_path / "reports" / "internal" / "cmind_run_rpg_edit_"))
+    expected_published_to = tmp_path / "reports" / "internal" / f"cmind_run_rpg_edit_{report_timestamp}.html"
+    assert evidence["published_to"] == str(expected_published_to)
+    assert result["run_id"] not in evidence["published_to"]
     persisted = json.loads(review_path.read_text(encoding="utf-8"))
     assert persisted["internal_report_paths"] == [result["report_path"]]
 

@@ -114,8 +114,12 @@ def _report_filename_slug(value: str) -> str:
     return slug or "command"
 
 
-def _expected_report_path(report_dir: Path, run_id: str) -> Path:
-    return report_dir / f"cmind_run_rpg_edit_{_report_filename_slug(run_id)}.html"
+def _report_timestamp() -> str:
+    return time.strftime("%Y%m%dT%H%M%SZ", time.gmtime())
+
+
+def _expected_report_path(report_dir: Path, report_timestamp: str) -> Path:
+    return report_dir / f"cmind_run_rpg_edit_{_report_filename_slug(report_timestamp)}.html"
 
 
 def _load_existing_review_result() -> Dict[str, Any]:
@@ -1688,7 +1692,8 @@ def _publish_review_report(
         return result
 
     target_report_dir = _report_target_dir(report_scope, report_dir)
-    result["published_to"] = str(_expected_report_path(target_report_dir, run_id))
+    report_timestamp = _report_timestamp()
+    result["published_to"] = str(_expected_report_path(target_report_dir, report_timestamp))
     _write_review_result(result)
 
     artifacts = _load_review_artifacts(plan_path, impact_path)
@@ -1702,7 +1707,7 @@ def _publish_review_report(
             command="rpg_edit",
             title="CoderMind rpg_edit Explain View",
             status=str(result.get("type", "review")),
-            timestamp=run_id,
+            timestamp=report_timestamp,
             summary=_review_summary_cards(result, artifacts, focused_view),
             steps=[
                 StepEvent(name=row.get("name", "stage"), status=row.get("status"), reason=row.get("reason", ""))
