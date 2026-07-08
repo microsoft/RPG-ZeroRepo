@@ -337,7 +337,7 @@ def _render_page(
 <style>
 :root {{ color-scheme: light; --bg:#f6f8fb; --card:#fff; --text:#1f2937; --muted:#6b7280; --line:#d9e0ea; --accent:#2563eb; }}
 body {{ margin:0; font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif; background:var(--bg); color:var(--text); }}
-main {{ max-width:1120px; margin:0 auto; padding:32px 20px 48px; }}
+main {{ max-width:1440px; margin:0 auto; padding:32px 20px 48px; }}
 header {{ margin-bottom:24px; }}
 h1 {{ margin:0 0 8px; font-size:30px; }}
 .meta {{ color:var(--muted); font-size:14px; display:flex; flex-wrap:wrap; gap:12px; }}
@@ -384,8 +384,8 @@ details summary {{ cursor:pointer; color:var(--accent); font-weight:600; }}
 .focused-graph-toolbar button, .focused-graph-toolbar input {{ border:1px solid #475569; border-radius:8px; background:#1e293b; color:#e5e7eb; padding:6px 10px; font:inherit; }}
 .focused-graph-toolbar input::placeholder {{ color:#94a3b8; }}
 .focused-graph-toolbar label {{ display:inline-flex; gap:6px; align-items:center; color:#cbd5e1; }}
-.focused-graph-stage {{ border:1px solid #334155; border-radius:12px; background:#0f172a; min-height:520px; position:relative; overflow:hidden; }}
-.focused-graph-svg {{ display:block; width:100%; height:520px; cursor:grab; touch-action:none; }}
+.focused-graph-stage {{ border:1px solid #334155; border-radius:12px; background:#0f172a; min-height:680px; position:relative; overflow:hidden; }}
+.focused-graph-svg {{ display:block; width:100%; height:680px; cursor:grab; touch-action:none; }}
 .focused-graph-svg:active {{ cursor:grabbing; }}
 .focused-graph-detail {{ position:absolute; top:14px; right:14px; z-index:2; width:min(320px,calc(100% - 28px)); max-height:calc(100% - 28px); overflow:auto; border:1px solid #334155; border-radius:12px; background:rgba(15,23,42,.94); color:#e5e7eb; padding:12px; box-shadow:0 18px 40px rgba(2,6,23,.35); }}
 .focused-graph-detail h3 {{ margin:0 0 8px; font-size:15px; color:#f8fafc; overflow-wrap:anywhere; }}
@@ -1097,7 +1097,7 @@ def _focused_graph_payload(focused_view: Mapping[str, Any], file_anchors: Mappin
                     "name": node.get("name") or node.get("symbol") or node.get("node_id") or "feature",
                     "kind": "feature",
                     "feature_name": node.get("name") or node.get("symbol") or node.get("node_id") or "feature",
-                    "feature_path": node.get("feature_path") or node.get("breadcrumb_path") or node.get("path"),
+                    "feature_path": node.get("breadcrumb_path") or node.get("feature_path"),
                     "mapped_code": node.get("mapped_code"),
                     "mapped_code_node_ids": node.get("mapped_code_node_ids"),
                     "mapped_code_link_ids": node.get("mapped_code_link_ids"),
@@ -1352,7 +1352,7 @@ def _focused_graph_runtime() -> str:
   if (fallback) fallback.hidden = true;
   const data = JSON.parse(dataEl.textContent || '{}');
   const width = Number(svg.getAttribute('width')) || 960;
-  const height = Number(svg.getAttribute('height')) || 520;
+  const height = Number(svg.getAttribute('height')) || 680;
   const defaultFocus = data.default_focus || {};
   const defaultShowEdges = defaultFocus.show_edges !== false;
   const text = value => value === undefined || value === null ? '' : String(value);
@@ -1525,24 +1525,40 @@ def _focused_graph_runtime() -> str:
     return '';
   }
 
-  function mappedCodeHtml(value, detail) {
+  function canonicalMappedCodeRefs(value, detail) {
     let refs = detailItems(value);
     if (!refs.length) {
       const paths = list(detail.mapped_code_paths);
       const symbols = list(detail.mapped_code_symbols);
-      if (paths.length || symbols.length || detail.mapped_code_path || detail.mapped_code_symbol) {
-        refs = [{path: detail.mapped_code_path || paths[0], symbol: detail.mapped_code_symbol || symbols[0]}];
-      }
+      const count = Math.max(paths.length, symbols.length, detail.mapped_code_path ? 1 : 0, detail.mapped_code_symbol ? 1 : 0);
+      refs = Array.from({length: count}, (_, index) => ({
+        path: index === 0 ? (detail.mapped_code_path || paths[index]) : paths[index],
+        symbol: index === 0 ? (detail.mapped_code_symbol || symbols[index]) : symbols[index],
+      }));
     }
-    return detailListHtml(refs, item => {
-      if (item && typeof item === 'object') {
-        const label = uniqueTexts([item.path, item.symbol, item.node_id || item.link_id]).join(' · ');
-        const meta = uniqueTexts([item.type || item.kind, lineRangeText(item.line_range), item.source]).join(' · ');
-        if (!label && !meta) return '';
-        return `${escapeHtml(label || meta)}${label && meta ? `<span>${escapeHtml(meta)}</span>` : ''}`;
-      }
-      return escapeHtml(item);
+    const seenRefs = new Set();
+    const canonical = [];
+    refs.forEach(item => {
+      const ref = item && typeof item === 'object'
+        ? {
+            path: text(item.path || item.file || item.module),
+            symbol: text(item.symbol || item.name),
+            node_id: text(item.node_id || item.dep_node_id || item.link_id),
+            type: text(item.type || item.kind),
+            line_range: lineRangeText(item.line_range),
+          }
+        : {path: '', symbol: '', node_id: text(item), type: '', line_range: ''};
+      const label = uniqueTexts([ref.path, ref.symbol]).join(' · ') || ref.node_id;
+      const key = uniqueTexts([ref.path, ref.symbol]).join('::') || ref.node_id || label;
+      if (!label || seenRefs.has(key)) return;
+      seenRefs.add(key);
+      canonical.push({label, meta: uniqueTexts([ref.type, ref.line_range]).join(' · ')});
     });
+    return canonical;
+  }
+
+  function mappedCodeHtml(value, detail) {
+    return detailListHtml(canonicalMappedCodeRefs(value, detail), ref => `${escapeHtml(ref.label)}${ref.meta ? `<span>${escapeHtml(ref.meta)}</span>` : ''}`);
   }
 
   function addValueRow(rows, label, value) {
@@ -1553,6 +1569,12 @@ def _focused_graph_runtime() -> str:
   function addHtmlRow(rows, label, value) {
     if (!value) return;
     rows.push(`<div class="focused-graph-detail-row"><dt>${escapeHtml(label)}</dt><dd>${value}</dd></div>`);
+  }
+
+  function isCodeContextDetail(detail) {
+    return uniqueTexts([detail.kind, detail.type, detail.node_type])
+      .map(item => item.toLowerCase())
+      .some(item => ['code', 'context', 'code_group', 'context_group'].includes(item));
   }
 
   function renderFocusedGraphDetail(d) {
@@ -1567,7 +1589,7 @@ def _focused_graph_runtime() -> str:
     const relationText = uniqueTexts([detail.relation, detail.direction]).join(' · ');
     const sourceText = uniqueTexts([detail.source, detail.source_graph, detail.edge_source, detail.relation_source]).join(' · ');
     addValueRow(rows, 'Node id', detail.node_id || detail.dep_node_id || detail.id);
-    addValueRow(rows, 'Feature path', detail.feature_path || detail.breadcrumb_path || detail.breadcrumb);
+    if (!isCodeContextDetail(detail)) addValueRow(rows, 'Feature path', detail.breadcrumb_path || detail.feature_path);
     addValueRow(rows, 'Path', detail.path || detail.module || detail.file);
     addValueRow(rows, 'Symbol', detail.symbol);
     addValueRow(rows, 'Type', typeText);
@@ -1839,7 +1861,7 @@ def _render_focused_graph(focused_view: dict[str, Any], file_anchors: Mapping[st
         f"{summary_html}{controls}{legend}"
         f"<script type=\"application/json\" data-focused-graph-json>{graph_json}</script>"
         '<div class="focused-graph-stage">'
-        '<svg class="focused-graph-svg" data-focused-graph-svg role="img" aria-label="Focused graph view" width="960" height="520"></svg>'
+        '<svg class="focused-graph-svg" data-focused-graph-svg role="img" aria-label="Focused graph view" width="960" height="680"></svg>'
         '<aside class="focused-graph-detail" data-focused-graph-detail aria-live="polite"><h3>Node details</h3><p class="empty">Select a node to inspect metadata.</p></aside>'
         f'<div class="focused-graph-fallback" data-focused-graph-fallback{fallback_hidden}>Static focused graph fallback is available when D3 cannot run.{d3_missing_note}</div>'
         '</div>'
