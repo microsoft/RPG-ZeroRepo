@@ -28,7 +28,7 @@ import time
 import uuid
 from pathlib import Path
 from string import Template
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Mapping, Optional, Tuple
 
 # This file lives in ``scripts/rpg_edit/``; go up two levels to land
 # on ``scripts/`` so ``common.*``, ``rpg.*`` etc. import cleanly.
@@ -474,7 +474,7 @@ def _add_hierarchy_path(root: Dict[str, Any], parts: List[str], leaf: Dict[str, 
 
 
 def _semantic_hierarchy_parts(node: Dict[str, Any]) -> List[str]:
-    for key in ("breadcrumb", "breadcrumb_path", "feature_path", "path"):
+    for key in ("breadcrumb_path", "feature_path"):
         parts = _hierarchy_segments(node.get(key))
         if parts:
             return parts[:-1] if len(parts) > 1 else []
@@ -597,7 +597,7 @@ def _focused_graph_hierarchy(
         row["mapped_code_count"] = len(merged)
 
     def feature_path_text(node: Dict[str, Any], group_parts: List[str], feature_name: str) -> str:
-        for key in ("feature_path", "breadcrumb_path", "breadcrumb", "path"):
+        for key in ("breadcrumb_path", "feature_path"):
             value = node.get(key)
             parts = _hierarchy_segments(value)
             if parts:
@@ -782,6 +782,18 @@ def _focused_graph_default_focus(
     warnings: List[Dict[str, Any]],
 ) -> Dict[str, Any]:
     semantic_links = [str(node.get("link_id") or _node_link_id("rpg", node.get("node_id"))) for node in semantic_nodes]
+    focused_semantic_links = [
+        str(node.get("link_id") or _node_link_id("rpg", node.get("node_id")))
+        for node in semantic_nodes
+        if node.get("selected")
+        or node.get("changed")
+        or node.get("changed_files")
+        or node.get("diff_anchor")
+        or node.get("warning_types")
+        or node.get("mapping_status")
+        or node.get("locate_status")
+        or node.get("apply_action")
+    ]
     code_links = [str(node.get("link_id") or _node_link_id("code", node.get("node_id") or node.get("dep_node_id"))) for node in code_nodes]
     semantic_link_set = set(semantic_links)
     code_to_feature_links: Dict[str, List[str]] = {}
@@ -914,9 +926,9 @@ def _focused_graph_default_focus(
     warning_links = []
     for warning in warnings:
         warning_links.extend(_listify(warning.get("node_link_id")) + _listify(warning.get("code_link_id")))
-    node_link_ids = _ordered_unique(semantic_links + changed_feature_links + changed_code_links + warning_links)
+    node_link_ids = _ordered_unique(focused_semantic_links + changed_feature_links + changed_code_links + warning_links)
     if not node_link_ids:
-        node_link_ids = _ordered_unique(semantic_links + code_links)
+        node_link_ids = _ordered_unique(focused_semantic_links or semantic_links + code_links)
 
     expanded_node_ids: List[Any] = ["focused-graph-root"]
     focused_path_node_ids: List[Any] = []
@@ -1006,8 +1018,22 @@ def _build_nodes_view(
     diff_anchors: Dict[str, str],
     *,
     graph_context: Optional[Dict[str, Any]] = None,
+    current_rpg_nodes: Optional[Mapping[str, Dict[str, Any]]] = None,
 ) -> Dict[str, Any]:
-    rpg_by_id = {str(row.get("node_id")): row for row in primary_rpg_nodes if row.get("node_id") not in (None, "")}
+    selected_rpg_ids = {str(row.get("node_id")) for row in primary_rpg_nodes if row.get("node_id") not in (None, "")}
+    all_rpg_by_id: Dict[str, Dict[str, Any]] = {}
+    for node_id, node in (current_rpg_nodes or {}).items():
+        node_id_text = str(node_id)
+        row = dict(node)
+        row["node_id"] = node_id_text
+        row.setdefault("link_id", _node_link_id("rpg", node_id_text))
+        all_rpg_by_id[node_id_text] = row
+    for node in primary_rpg_nodes:
+        node_id = str(node.get("node_id") or "")
+        if not node_id:
+            continue
+        all_rpg_by_id[node_id] = {**all_rpg_by_id.get(node_id, {}), **node, "node_id": node_id}
+    rpg_by_id = all_rpg_by_id or {str(row.get("node_id")): row for row in primary_rpg_nodes if row.get("node_id") not in (None, "")}
     code_by_id = {str(row.get("node_id") or row.get("dep_node_id")): row for row in primary_code_nodes if (row.get("node_id") or row.get("dep_node_id")) not in (None, "")}
     code_ids_by_rpg: Dict[str, List[str]] = {}
     warnings_by_rpg: Dict[str, List[Dict[str, Any]]] = {}
@@ -1028,14 +1054,18 @@ def _build_nodes_view(
             warnings_by_code.setdefault(str(code_id), []).append(warning)
 
     semantic_nodes: List[Dict[str, Any]] = []
-    for node in primary_rpg_nodes:
+    semantic_source_nodes = list(all_rpg_by_id.values()) if all_rpg_by_id else primary_rpg_nodes
+    for node in semantic_source_nodes:
         node_id = str(node.get("node_id") or "")
+        is_selected = node_id in selected_rpg_ids
         row: Dict[str, Any] = {
             "node_id": node_id,
             "link_id": node.get("link_id") or _node_link_id("rpg", node_id),
-            "state": _node_state(node),
+            "state": _node_state(node) if is_selected else _node_state(node, "context"),
             "mapping_status": node.get("mapping_status") or node.get("status"),
         }
+        if is_selected:
+            row["selected"] = True
         for key in ("name", "symbol", "type", "node_type", "path", "feature_path", "breadcrumb", "breadcrumb_path", "locate_status", "score", "reason", "apply_action"):
             _set_if_present(row, key, node.get(key))
         changed_refs = _changed_file_refs(_listify(node.get("changed_files")) or _listify(node.get("affected_files")), diff_anchors)
@@ -1765,6 +1795,7 @@ def _feature_evidence_groups(
         changed_files,
         diff_anchors,
         graph_context=graph_context,
+        current_rpg_nodes=current_rpg_nodes,
     )
     summary = {
         "selected_feature_groups": len(primary_rpg_nodes_all),

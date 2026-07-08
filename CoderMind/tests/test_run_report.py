@@ -156,6 +156,10 @@ def test_common_run_report_write_command_report_renders_retrievals_code_deltas_a
                             "state": "mapped",
                             "mapping_status": "mapped",
                             "reason": "selected <reason>",
+                            "mapped_code": [
+                                {"node_id": "a.py:f<script>", "link_id": "code-a.py-f-script", "path": "a.py<script>", "symbol": "func <unsafe>", "type": "function<script>", "line_range": {"start": 10, "end": 12}},
+                                {"node_id": "duplicate-node-id", "link_id": "duplicate-link-id", "path": "a.py<script>", "symbol": "func <unsafe>", "source": "duplicate-source"},
+                            ],
                             "mapped_code_node_ids": ["a.py:f<script>"],
                             "changed_files": [{"path": "a.py", "diff_anchor": "diff-a.py"}],
                             "hidden_counts": {"callers": 3},
@@ -177,6 +181,8 @@ def test_common_run_report_write_command_report_renders_retrievals_code_deltas_a
                             "link_id": "code-a.py-f-script",
                             "symbol": "func <unsafe>",
                             "path": "a.py",
+                            "feature_path": "SHOULD NOT RENDER FROM CODE",
+                            "breadcrumb_path": "SHOULD NOT RENDER FROM CODE BREADCRUMB",
                             "type": "function<script>",
                             "line_range": {"start": 10, "end": 12},
                             "state": "mapped",
@@ -249,6 +255,7 @@ def test_common_run_report_write_command_report_renders_retrievals_code_deltas_a
                         "kind": "root",
                         "children": [
                             {"id": "rpg-n1-script", "name": "Node <unsafe>", "kind": "semantic"},
+                            {"id": "rpg-background", "name": "Background feature", "kind": "feature", "feature_path": "Root / Background feature"},
                             {"id": "code-a.py-f-script", "name": "func <unsafe>", "kind": "code"},
                         ],
                     },
@@ -361,6 +368,8 @@ def test_common_run_report_write_command_report_renders_retrievals_code_deltas_a
 
     html = report.read_text(encoding="utf-8")
     assert "Focused graph" in html
+    assert "main { max-width:1440px;" in html
+    assert "height=\"680\"" in html
     assert "Focused nodes map" not in html
     assert "semantic-code impact chain" not in html
     assert html.count("<h2>Focused graph</h2>") == 1
@@ -397,7 +406,8 @@ def test_common_run_report_write_command_report_renders_retrievals_code_deltas_a
     assert "focused-graph-node.hidden" in html
     assert "focused-graph-link.active" in html
     assert "focused-graph-link.dimmed" in html
-    assert ".focused-graph-stage { border:1px solid #334155; border-radius:12px; background:#0f172a;" in html
+    assert ".focused-graph-stage { border:1px solid #334155; border-radius:12px; background:#0f172a; min-height:680px;" in html
+    assert ".focused-graph-svg { display:block; width:100%; height:680px;" in html
     assert ".focused-graph-toolbar { display:flex; flex-wrap:wrap; gap:8px; align-items:center; margin:10px 0 12px; padding:10px; border:1px solid #334155; border-radius:12px; background:#0f172a;" in html
     assert ".focused-graph-toolbar button, .focused-graph-toolbar input { border:1px solid #475569; border-radius:8px; background:#1e293b; color:#e5e7eb;" in html
     assert ".focused-graph-legend { display:flex; flex-wrap:wrap; gap:8px; margin:8px 0 12px; padding:10px; border:1px solid #334155; border-radius:12px; background:#0f172a;" in html
@@ -419,6 +429,10 @@ def test_common_run_report_write_command_report_renders_retrievals_code_deltas_a
     assert "return text(detail.feature_name || detail.name || detail.node_id || detail.dep_node_id || detail.id || d.id || 'node');" in html
     assert "function mappedCodeLabel" not in html
     assert "return mapped && !base.includes(mapped)" not in html
+    assert "function canonicalMappedCodeRefs" in html
+    assert "if (!isCodeContextDetail(detail)) addValueRow(rows, 'Feature path', detail.breadcrumb_path || detail.feature_path);" in html
+    assert "item.source" not in html
+    assert "SHOULD NOT RENDER FROM CODE" in html
     assert "expandDepth" in html
     assert "collapseDepth" in html
     assert "Expand hierarchy depth" in html
@@ -474,11 +488,18 @@ def test_common_run_report_write_command_report_renders_retrievals_code_deltas_a
     assert graph_payload["summary"]["edges"] == 3
     assert graph_payload["summary"]["relation_edges"] == 3
     assert graph_payload["summary"]["context_edges"] == 3
+    assert any(node.get("id") == "rpg-background" for node in graph_payload["hierarchy"]["children"])
     relation_links = [link for link in graph_payload["links"] if link.get("relation") != "contains"]
     assert len(relation_links) == 3
     nodes_by_id = {node["id"]: node for node in graph_payload["nodes"]}
     assert nodes_by_id["rpg-n1-script"]["symbol"] == "NodeSymbol <unsafe>"
     assert nodes_by_id["rpg-n1-script"]["reason"] == "selected <reason>"
+    assert len(nodes_by_id["rpg-n1-script"]["mapped_code"]) == 2
+    canonical_refs = {
+        (ref.get("path"), ref.get("symbol"))
+        for ref in nodes_by_id["rpg-n1-script"]["mapped_code"]
+    }
+    assert canonical_refs == {("a.py<script>", "func <unsafe>")}
     assert nodes_by_id["rpg-n1-script"]["changed_files"] == [{"path": "a.py", "diff_anchor": "diff-a.py"}]
     assert nodes_by_id["rpg-n1-script"]["diff"] == {"path": "a.py", "href": "#diff-a.py"}
     assert nodes_by_id["code-a.py-f-script"]["symbol"] == "func <unsafe>"
