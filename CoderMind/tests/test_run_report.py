@@ -25,7 +25,7 @@ import common.run_report as run_report
 from common.run_report import write_command_report
 
 
-def test_run_report_exposes_current_impact_renderers_only() -> None:
+def test_common_run_report_run_report_exposes_current_impact_renderers_only() -> None:
     assert hasattr(run_report, "_render_focused_graph")
     assert hasattr(run_report, "_inline_d3")
     assert not hasattr(run_report, "_render_semantic_code_impact_chain")
@@ -36,7 +36,7 @@ def test_run_report_exposes_current_impact_renderers_only() -> None:
     assert not hasattr(run_report, "_render_focused_impact_group")
 
 
-def test_write_command_report_escapes_content_and_writes_sections(tmp_path: Path) -> None:
+def test_common_run_report_write_command_report_escapes_content_and_writes_sections(tmp_path: Path) -> None:
     report = write_command_report(
         CommandRun(
             command="rpg/edit <script>alert(1)</script>",
@@ -108,7 +108,7 @@ def test_write_command_report_escapes_content_and_writes_sections(tmp_path: Path
     assert "backup/<script>" not in html
 
 
-def test_write_command_report_renders_retrievals_code_deltas_and_focused_view(tmp_path: Path) -> None:
+def test_common_run_report_write_command_report_renders_retrievals_code_deltas_and_focused_view(tmp_path: Path) -> None:
     long_diff = "diff --git a/a.py b/a.py\n" + "\n".join(
         f"+line {i} <script>alert({i})</script>" for i in range(40)
     )
@@ -380,6 +380,10 @@ def test_write_command_report_renders_retrievals_code_deltas_and_focused_view(tm
     assert "data-action=\"edges\"" in html
     assert "data-action=\"search\"" in html
     assert "data-focused-graph-status" in html
+    assert "data-focused-graph-detail" in html
+    assert '<aside class="focused-graph-detail" data-focused-graph-detail aria-live="polite">' in html
+    assert "Node details" in html
+    assert "Select a node to inspect metadata." in html
     assert "Visible relation edges: 0/3" in html
     assert "Reset" in html
     assert "+1" in html
@@ -393,6 +397,11 @@ def test_write_command_report_renders_retrievals_code_deltas_and_focused_view(tm
     assert "focused-graph-node.hidden" in html
     assert "focused-graph-link.active" in html
     assert "focused-graph-link.dimmed" in html
+    assert ".focused-graph-stage { border:1px solid #334155; border-radius:12px; background:#0f172a;" in html
+    assert ".focused-graph-toolbar { display:flex; flex-wrap:wrap; gap:8px; align-items:center; margin:10px 0 12px; padding:10px; border:1px solid #334155; border-radius:12px; background:#0f172a;" in html
+    assert ".focused-graph-toolbar button, .focused-graph-toolbar input { border:1px solid #475569; border-radius:8px; background:#1e293b; color:#e5e7eb;" in html
+    assert ".focused-graph-legend { display:flex; flex-wrap:wrap; gap:8px; margin:8px 0 12px; padding:10px; border:1px solid #334155; border-radius:12px; background:#0f172a;" in html
+    assert ".focused-graph-detail { position:absolute; top:14px; right:14px;" in html
     assert "rootHierarchyId" in html
     assert "defaultExpandedIds" in html
     assert "visibleEndpoint" in html
@@ -400,6 +409,16 @@ def test_write_command_report_renders_retrievals_code_deltas_and_focused_view(tm
     assert "const visible = showEdges ? currentRelationEdges.length : 0;" in html
     assert "const total = relationEdges.length;" in html
     assert "statusEl.textContent = `Visible relation edges: ${visible}/${total}`;" in html
+    assert "const detailEl = section.querySelector('[data-focused-graph-detail]');" in html
+    assert "function nodeDetailData(d)" in html
+    assert "function renderFocusedGraphDetail(d)" in html
+    assert "function searchText(value)" in html
+    assert "return `${nodeLabel(d)} ${searchText(nodeDetailData(d))}`.toLowerCase();" in html
+    assert "renderFocusedGraphDetail(null);" in html
+    assert "renderFocusedGraphDetail(selectedId ? d : null);" in html
+    assert "return text(detail.feature_name || detail.name || detail.node_id || detail.dep_node_id || detail.id || d.id || 'node');" in html
+    assert "function mappedCodeLabel" not in html
+    assert "return mapped && !base.includes(mapped)" not in html
     assert "expandDepth" in html
     assert "collapseDepth" in html
     assert "Expand hierarchy depth" in html
@@ -457,6 +476,20 @@ def test_write_command_report_renders_retrievals_code_deltas_and_focused_view(tm
     assert graph_payload["summary"]["context_edges"] == 3
     relation_links = [link for link in graph_payload["links"] if link.get("relation") != "contains"]
     assert len(relation_links) == 3
+    nodes_by_id = {node["id"]: node for node in graph_payload["nodes"]}
+    assert nodes_by_id["rpg-n1-script"]["symbol"] == "NodeSymbol <unsafe>"
+    assert nodes_by_id["rpg-n1-script"]["reason"] == "selected <reason>"
+    assert nodes_by_id["rpg-n1-script"]["changed_files"] == [{"path": "a.py", "diff_anchor": "diff-a.py"}]
+    assert nodes_by_id["rpg-n1-script"]["diff"] == {"path": "a.py", "href": "#diff-a.py"}
+    assert nodes_by_id["code-a.py-f-script"]["symbol"] == "func <unsafe>"
+    assert nodes_by_id["code-a.py-f-script"]["line_range"] == {"start": 10, "end": 12}
+    assert nodes_by_id["code-a.py-f-script"]["source"] == "locate<unsafe>"
+    assert nodes_by_id["context-caller-script"]["relation"] == "caller"
+    assert nodes_by_id["context-caller-script"]["direction"] == "upstream"
+    assert nodes_by_id["context-caller-script"]["source"] == "impact"
+    assert nodes_by_id["context-caller-script"]["reason"] == "calls <reason>"
+    assert nodes_by_id["context-imported-script"]["relation"] == "imports"
+    assert nodes_by_id["context-imported-script"]["source_graph"] == "dep_graph"
     assert any(node["id"] == "context-callee-script" for node in graph_payload["nodes"])
     assert any(node["id"] == "context-imported-script" for node in graph_payload["nodes"])
     assert any("context-callee-script" in edge["target_candidates"] for edge in graph_payload["relation_edges"])
@@ -490,7 +523,7 @@ def test_write_command_report_renders_retrievals_code_deltas_and_focused_view(tm
     assert "Inspector metadata" not in html
 
 
-def test_write_command_report_renders_static_fallback_without_d3(tmp_path: Path, monkeypatch) -> None:
+def test_common_run_report_write_command_report_renders_static_fallback_without_d3(tmp_path: Path, monkeypatch) -> None:
     monkeypatch.setattr(run_report, "_D3_ASSET", tmp_path / "missing-d3.v7.min.js")
 
     report = write_command_report(
@@ -519,7 +552,7 @@ def test_write_command_report_renders_static_fallback_without_d3(tmp_path: Path,
     assert "Static focused graph fallback is available when D3 cannot run." in html
 
 
-def test_write_command_report_limits_summary_cards(tmp_path: Path) -> None:
+def test_common_run_report_write_command_report_limits_summary_cards(tmp_path: Path) -> None:
     report = write_command_report(
         CommandRun(
             command="encode",
@@ -538,7 +571,7 @@ def test_write_command_report_limits_summary_cards(tmp_path: Path) -> None:
     assert "card-8" not in visible_cards
 
 
-def test_write_command_report_preserves_same_timestamp_runs(tmp_path: Path) -> None:
+def test_common_run_report_write_command_report_preserves_same_timestamp_runs(tmp_path: Path) -> None:
     first = write_command_report(CommandRun("update_rpg", timestamp="fixed"), report_dir=tmp_path)
     second = write_command_report(CommandRun("update_rpg", timestamp="fixed"), report_dir=tmp_path)
 
@@ -549,7 +582,7 @@ def test_write_command_report_preserves_same_timestamp_runs(tmp_path: Path) -> N
     assert second.exists()
 
 
-def test_write_command_report_does_not_invent_node_rows_from_counts(tmp_path: Path) -> None:
+def test_common_run_report_write_command_report_does_not_invent_node_rows_from_counts(tmp_path: Path) -> None:
     report = write_command_report(
         CommandRun(
             command="encode",
@@ -567,7 +600,7 @@ def test_write_command_report_does_not_invent_node_rows_from_counts(tmp_path: Pa
     assert '<td><code>4</code></td>' not in html
 
 
-def test_write_command_report_infers_artifact_status_and_preserves_verification_detail(tmp_path: Path) -> None:
+def test_common_run_report_write_command_report_infers_artifact_status_and_preserves_verification_detail(tmp_path: Path) -> None:
     available = tmp_path / "available.json"
     available.write_text("{}", encoding="utf-8")
     missing = tmp_path / "missing.json"
@@ -603,7 +636,7 @@ def test_write_command_report_infers_artifact_status_and_preserves_verification_
     assert "<td>from reason</td>" not in html
 
 
-def test_all_event_types_serialize_with_optional_fields(tmp_path: Path) -> None:
+def test_common_run_report_all_event_types_serialize_with_optional_fields(tmp_path: Path) -> None:
     available = tmp_path / "artifact.txt"
     available.write_text("ok", encoding="utf-8")
 
@@ -647,7 +680,7 @@ def test_all_event_types_serialize_with_optional_fields(tmp_path: Path) -> None:
     assert run["artifacts"][0]["status"] == "available"
 
 
-def test_write_command_report_accepts_command_run_mapping(tmp_path: Path) -> None:
+def test_common_run_report_write_command_report_accepts_command_run_mapping(tmp_path: Path) -> None:
     run = CommandRun(
         command="mapping",
         summary=[{"label": "safe", "value": "<ok>"}],
