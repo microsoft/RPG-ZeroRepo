@@ -511,6 +511,15 @@ def _focused_graph_hierarchy(
         for node in code_nodes
         if (node.get("node_id") or node.get("dep_node_id")) not in (None, "")
     }
+    semantic_link_by_id = {
+        str(node.get("node_id")): str(node.get("link_id") or _node_link_id("rpg", node.get("node_id")))
+        for node in semantic_nodes
+        if node.get("node_id") not in (None, "")
+    }
+    code_link_by_id = {
+        code_id: str(node.get("link_id") or _node_link_id("code", code_id))
+        for code_id, node in code_by_id.items()
+    }
     mapped_ids_by_rpg: Dict[str, List[str]] = {}
     for mapping in mappings:
         rpg_id = mapping.get("rpg_node_id") or mapping.get("node_id")
@@ -595,6 +604,91 @@ def _focused_graph_hierarchy(
                 return " / ".join(parts)
         return " / ".join(group_parts + ([feature_name] if feature_name else []))
 
+    attached_endpoint_ids: set[str] = set()
+
+    def make_code_leaf(ref: Dict[str, Any]) -> Dict[str, Any]:
+        code_id = str(ref.get("node_id") or ref.get("dep_node_id") or "")
+        code = code_by_id.get(code_id, {})
+        path = ref.get("path") or code.get("path") or code.get("file") or code.get("module") or _dep_node_path(code_id)
+        symbol = ref.get("symbol") or ref.get("name") or code.get("symbol") or code.get("name") or _symbol_from_dep(code_id, code)
+        leaf: Dict[str, Any] = {
+            "id": str(ref.get("link_id") or code.get("link_id") or _node_link_id("code", code_id)),
+            "node_id": code_id,
+            "dep_node_id": code_id,
+            "name": symbol or path or code_id,
+            "symbol": symbol,
+            "path": path,
+            "kind": "code",
+            "state": ref.get("state") or code.get("state") or _node_state(code, "mapped"),
+            "aliases": _ordered_unique([code_id, ref.get("link_id"), code.get("link_id")]),
+        }
+        for key in ("type", "line_range", "source", "changed", "changed_files", "diff_anchor"):
+            _set_if_present(leaf, key, ref.get(key) or code.get(key))
+        return leaf
+
+    def endpoint_leaf(edge: Dict[str, Any], side: str) -> Optional[Dict[str, Any]]:
+        node_id = edge.get(f"{side}_node_id")
+        node_text = str(node_id or "")
+        link_id = edge.get(f"{side}_link_id") or semantic_link_by_id.get(node_text) or code_link_by_id.get(node_text)
+        if link_id in (None, "") and node_text:
+            link_id = _node_link_id("context", node_text)
+        link_text = str(link_id or "")
+        if not link_text or link_text in set(semantic_link_by_id.values()):
+            return None
+        if node_text in code_by_id:
+            return make_code_leaf({"node_id": node_text, "link_id": link_text})
+        leaf: Dict[str, Any] = {
+            "id": link_text,
+            "node_id": node_text or link_text,
+            "name": edge.get("name") or edge.get("path") or node_text or "context",
+            "kind": "context",
+            "state": edge.get("state") or "context",
+            "relation": edge.get("relation"),
+            "direction": edge.get("direction"),
+            "source": edge.get("source") or edge.get("source_graph") or edge.get("edge_source"),
+            "aliases": _ordered_unique([node_text, link_text]),
+        }
+        for key in ("path", "reason", "source_graph", "edge_source", "relation_source"):
+            _set_if_present(leaf, key, edge.get(key))
+        return leaf
+
+    def append_endpoint(parent: Dict[str, Any], leaf: Dict[str, Any]) -> None:
+        leaf_id = str(leaf.get("id") or "")
+        if not leaf_id or leaf_id in attached_endpoint_ids:
+            return
+        attached_endpoint_ids.add(leaf_id)
+        _append_hierarchy_leaf(parent, leaf)
+
+    def relation_endpoint_refs(node_id: str, link_id: str, code_refs: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        feature_tokens = set(_ordered_unique([node_id, link_id]))
+        for ref in code_refs:
+            feature_tokens.update(_ordered_unique([ref.get("node_id"), ref.get("link_id")]))
+        refs: List[Dict[str, Any]] = []
+        seen: set[str] = set()
+        for edge in edges:
+            edge_tokens = _ordered_unique([
+                edge.get("rpg_node_id"),
+                edge.get("source_node_id"),
+                edge.get("target_node_id"),
+                edge.get("source_link_id"),
+                edge.get("target_link_id"),
+            ])
+            if not feature_tokens.intersection(edge_tokens):
+                continue
+            for side in ("source", "target"):
+                leaf = endpoint_leaf(edge, side)
+                if not leaf:
+                    continue
+                leaf_id = str(leaf.get("id") or "")
+                if not leaf_id or leaf_id in feature_tokens or leaf_id in seen:
+                    continue
+                seen.add(leaf_id)
+                refs.append(leaf)
+        return refs
+
+    def endpoint_group(parent: Dict[str, Any], owner_id: str, name: str, kind: str) -> Dict[str, Any]:
+        return _hierarchy_child(parent, _node_link_id(kind, owner_id), name, kind)
+
     for node in semantic_nodes:
         node_id = str(node.get("node_id") or "")
         link_id = str(node.get("link_id") or _node_link_id("rpg", node_id))
@@ -637,7 +731,46 @@ def _focused_graph_hierarchy(
         ):
             _set_if_present(leaf, key, node.get(key))
         merge_code_metadata(leaf, code_refs)
+        code_group: Optional[Dict[str, Any]] = None
+        for ref in code_refs:
+            if code_group is None:
+                code_group = endpoint_group(leaf, link_id, "Mapped code", "code_group")
+            append_endpoint(code_group, make_code_leaf(ref))
+        context_group: Optional[Dict[str, Any]] = None
+        for ref in relation_endpoint_refs(node_id, link_id, code_refs):
+            group_kind = "code_group" if ref.get("kind") == "code" else "context_group"
+            group_name = "Mapped code" if group_kind == "code_group" else "Relation endpoints"
+            if group_kind == "code_group":
+                if code_group is None:
+                    code_group = endpoint_group(leaf, link_id, group_name, group_kind)
+                append_endpoint(code_group, ref)
+            else:
+                if context_group is None:
+                    context_group = endpoint_group(leaf, link_id, group_name, group_kind)
+                append_endpoint(context_group, ref)
         _append_hierarchy_leaf(parent, leaf)
+
+    root_code_group: Optional[Dict[str, Any]] = None
+    for code in code_nodes:
+        code_id = str(code.get("node_id") or code.get("dep_node_id") or "")
+        if not code_id:
+            continue
+        leaf = make_code_leaf({"node_id": code_id, "link_id": code.get("link_id")})
+        if str(leaf.get("id") or "") in attached_endpoint_ids:
+            continue
+        if root_code_group is None:
+            root_code_group = endpoint_group(root, "unassigned", "Additional code context", "code_group")
+        append_endpoint(root_code_group, leaf)
+
+    root_context_group: Optional[Dict[str, Any]] = None
+    for edge in edges:
+        for side in ("source", "target"):
+            leaf = endpoint_leaf(edge, side)
+            if not leaf or str(leaf.get("id") or "") in attached_endpoint_ids:
+                continue
+            if root_context_group is None:
+                root_context_group = endpoint_group(root, "unassigned", "Additional relation endpoints", "context_group")
+            append_endpoint(root_context_group, leaf)
     return root
 
 
@@ -652,6 +785,7 @@ def _focused_graph_default_focus(
     code_links = [str(node.get("link_id") or _node_link_id("code", node.get("node_id") or node.get("dep_node_id"))) for node in code_nodes]
     semantic_link_set = set(semantic_links)
     code_to_feature_links: Dict[str, List[str]] = {}
+    hierarchy_paths_by_link: Dict[str, List[str]] = {}
 
     def remember_code_feature(code_link: Any, feature_link: Any) -> None:
         if code_link in (None, "") or feature_link in (None, ""):
@@ -662,21 +796,113 @@ def _focused_graph_default_focus(
         if feature_text not in values:
             values.append(feature_text)
 
+    def remember_path(alias: Any, path_ids: List[str]) -> None:
+        if alias in (None, "") or not path_ids:
+            return
+        alias_text = str(alias)
+        if alias_text not in hierarchy_paths_by_link:
+            hierarchy_paths_by_link[alias_text] = path_ids
+
     rpg_link_by_node_id = {
         str(node.get("node_id")): str(node.get("link_id") or _node_link_id("rpg", node.get("node_id")))
         for node in semantic_nodes
         if node.get("node_id") not in (None, "")
     }
+    semantic_path_ids_by_link: Dict[str, List[str]] = {}
+    for node in semantic_nodes:
+        link_id = str(node.get("link_id") or _node_link_id("rpg", node.get("node_id")))
+        trail: List[str] = []
+        path_ids: List[str] = ["focused-graph-root"]
+        for part in _semantic_hierarchy_parts(node):
+            trail.append(part)
+            path_ids.append(_node_link_id("feature-path", "/".join(trail)))
+        path_ids.append(link_id)
+        semantic_path_ids_by_link[link_id] = path_ids
+        remember_path(link_id, path_ids)
+        remember_path(node.get("node_id"), path_ids)
+
+    code_link_by_node_id = {
+        str(node.get("node_id") or node.get("dep_node_id")): str(node.get("link_id") or _node_link_id("code", node.get("node_id") or node.get("dep_node_id")))
+        for node in code_nodes
+        if (node.get("node_id") or node.get("dep_node_id")) not in (None, "")
+    }
+
     for mapping in mappings:
         source = mapping.get("source_link_id") or rpg_link_by_node_id.get(str(mapping.get("rpg_node_id") or mapping.get("node_id") or ""))
-        target = mapping.get("target_link_id") or _node_link_id("code", mapping.get("code_node_id") or mapping.get("dep_node_id"))
+        target_node_id = mapping.get("code_node_id") or mapping.get("dep_node_id")
+        target = mapping.get("target_link_id") or code_link_by_node_id.get(str(target_node_id or "")) or _node_link_id("code", target_node_id)
         remember_code_feature(target, source)
-        remember_code_feature(mapping.get("code_node_id") or mapping.get("dep_node_id"), source)
+        remember_code_feature(target_node_id, source)
     for node in code_nodes:
-        code_link = str(node.get("link_id") or _node_link_id("code", node.get("node_id") or node.get("dep_node_id")))
+        node_id = node.get("node_id") or node.get("dep_node_id")
+        code_link = str(node.get("link_id") or _node_link_id("code", node_id))
         for rpg_link in _listify(node.get("mapped_rpg_link_ids")):
             remember_code_feature(code_link, rpg_link)
-            remember_code_feature(node.get("node_id") or node.get("dep_node_id"), rpg_link)
+            remember_code_feature(node_id, rpg_link)
+
+    for code_id, code_link in code_link_by_node_id.items():
+        feature_links = code_to_feature_links.get(code_link) or code_to_feature_links.get(code_id) or []
+        if feature_links:
+            for feature_link in feature_links:
+                base_path = semantic_path_ids_by_link.get(str(feature_link))
+                if not base_path:
+                    continue
+                code_path = base_path + [_node_link_id("code_group", feature_link), code_link]
+                remember_path(code_link, code_path)
+                remember_path(code_id, code_path)
+        else:
+            code_path = ["focused-graph-root", _node_link_id("code_group", "unassigned"), code_link]
+            remember_path(code_link, code_path)
+            remember_path(code_id, code_path)
+
+    endpoint_link_ids: List[Any] = []
+    context_link_ids: List[Any] = []
+
+    def endpoint_link(edge: Dict[str, Any], side: str) -> str:
+        node_id = edge.get(f"{side}_node_id")
+        node_text = str(node_id or "")
+        return str(
+            edge.get(f"{side}_link_id")
+            or rpg_link_by_node_id.get(node_text)
+            or code_link_by_node_id.get(node_text)
+            or _node_link_id("context", node_text)
+        )
+
+    def owner_feature_links(edge: Dict[str, Any]) -> List[str]:
+        owners: List[Any] = []
+        owners.append(rpg_link_by_node_id.get(str(edge.get("rpg_node_id") or "")))
+        for side in ("source", "target"):
+            node_id = edge.get(f"{side}_node_id")
+            link_id = endpoint_link(edge, side)
+            if str(node_id or "") in rpg_link_by_node_id:
+                owners.append(rpg_link_by_node_id[str(node_id)])
+            owners.extend(code_to_feature_links.get(str(node_id or ""), []))
+            owners.extend(code_to_feature_links.get(link_id, []))
+        return _ordered_unique(owners)
+
+    for edge in edges:
+        owners = owner_feature_links(edge)
+        for side in ("source", "target"):
+            link_id = endpoint_link(edge, side)
+            node_id = edge.get(f"{side}_node_id")
+            endpoint_link_ids.append(link_id)
+            endpoint_link_ids.append(node_id)
+            if link_id in semantic_link_set:
+                continue
+            if link_id in code_links or str(node_id or "") in code_link_by_node_id:
+                continue
+            context_link_ids.append(link_id)
+            context_path_base = None
+            for feature_link in owners:
+                base_path = semantic_path_ids_by_link.get(str(feature_link))
+                if base_path:
+                    context_path_base = base_path + [_node_link_id("context_group", feature_link)]
+                    break
+            if context_path_base is None:
+                context_path_base = ["focused-graph-root", _node_link_id("context_group", "unassigned")]
+            context_path = context_path_base + [link_id]
+            remember_path(link_id, context_path)
+            remember_path(node_id, context_path)
 
     changed_feature_links: List[Any] = []
     changed_code_links: List[str] = []
@@ -695,29 +921,25 @@ def _focused_graph_default_focus(
     expanded_node_ids: List[Any] = ["focused-graph-root"]
     focused_path_node_ids: List[Any] = []
     focused_tree_node_ids: List[Any] = []
-    semantic_path_ids_by_link: Dict[str, List[str]] = {}
-    for node in semantic_nodes:
-        link_id = str(node.get("link_id") or _node_link_id("rpg", node.get("node_id")))
-        trail: List[str] = []
-        path_ids: List[str] = ["focused-graph-root"]
-        for part in _semantic_hierarchy_parts(node):
-            trail.append(part)
-            path_ids.append(_node_link_id("feature-path", "/".join(trail)))
-        path_ids.append(link_id)
-        semantic_path_ids_by_link[link_id] = path_ids
 
     def focus_tree_link(link_id: Any) -> None:
         link_text = str(link_id or "")
         if not link_text:
             return
+        path_ids = hierarchy_paths_by_link.get(link_text)
+        if path_ids:
+            expanded_node_ids.extend(path_ids[:-1])
+            focused_path_node_ids.extend(path_ids)
+            focused_tree_node_ids.append(path_ids[-1])
+            return
         feature_links = [link_text] if link_text in semantic_link_set else code_to_feature_links.get(link_text, [])
         if not feature_links:
             feature_links = [link_text] if link_text.startswith("feature-path-") or link_text == "focused-graph-root" else []
         for feature_link in feature_links:
-            path_ids = semantic_path_ids_by_link.get(feature_link, [feature_link])
-            expanded_node_ids.extend(path_ids[:-1])
-            focused_path_node_ids.extend(path_ids)
-            focused_tree_node_ids.append(path_ids[-1])
+            feature_path = semantic_path_ids_by_link.get(feature_link, [feature_link])
+            expanded_node_ids.extend(feature_path[:-1])
+            focused_path_node_ids.extend(feature_path)
+            focused_tree_node_ids.append(feature_path[-1])
 
     for link_id in node_link_ids:
         focus_tree_link(link_id)
@@ -741,6 +963,8 @@ def _focused_graph_default_focus(
         "code_node_ids": _ordered_unique([node.get("node_id") or node.get("dep_node_id") for node in code_nodes]),
         "mapping_link_ids": _ordered_unique([mapping.get("link_id") for mapping in mappings]),
         "edge_link_ids": _ordered_unique([edge.get("link_id") for edge in edges]),
+        "relation_endpoint_link_ids": _ordered_unique(endpoint_link_ids),
+        "context_node_ids": _ordered_unique(context_link_ids),
         "edge_depth": 1,
         "show_edges": True,
     }
@@ -753,7 +977,6 @@ def _focused_graph_metadata(
     edges: List[Dict[str, Any]],
     hidden_counts: Dict[str, Any],
     warnings: List[Dict[str, Any]],
-    caps: Optional[Dict[str, Any]],
     graph_context: Optional[Dict[str, Any]],
 ) -> Dict[str, Any]:
     hierarchy = _focused_graph_hierarchy(semantic_nodes, code_nodes, mappings, edges, hidden_counts, warnings)
@@ -763,8 +986,6 @@ def _focused_graph_metadata(
         "hierarchy": hierarchy,
         "default_focus": default_focus,
     }
-    if caps:
-        focused_graph["caps"] = caps
     if graph_context:
         focused_graph["graph_context"] = graph_context
     if hidden_counts:
@@ -784,7 +1005,6 @@ def _build_nodes_view(
     changed_files: List[str],
     diff_anchors: Dict[str, str],
     *,
-    caps: Optional[Dict[str, Any]] = None,
     graph_context: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
     rpg_by_id = {str(row.get("node_id")): row for row in primary_rpg_nodes if row.get("node_id") not in (None, "")}
@@ -932,7 +1152,6 @@ def _build_nodes_view(
         edge_rows,
         hidden_counts,
         warning_rows,
-        caps or {},
         graph_context or {},
     )
     return {
@@ -954,15 +1173,13 @@ def _build_nodes_view(
         "hierarchy": focused_graph["hierarchy"],
         "default_focus": focused_graph["default_focus"],
         "focused_graph": focused_graph,
-        "caps": caps or {},
+        "caps": dict(_LEGACY_FOCUSED_VIEW_CAPS),
         "graph_context": graph_context or {},
     }
 
 
-_FOCUSED_RPG_NODE_CAP = 20
-_FOCUSED_CODE_NODE_CAP = 50
-_FOCUSED_EDGE_CAP = 80
-_FOCUSED_WARNING_TYPES = {"missing_mapping", "missing_reason", "too_many_neighbors", "stale_graph"}
+_LEGACY_FOCUSED_VIEW_CAPS = {"primary_rpg_nodes": 20, "primary_code_nodes": 50, "edges": 80}
+_FOCUSED_WARNING_TYPES = {"missing_mapping", "missing_reason", "stale_graph"}
 
 
 def _set_if_present(row: Dict[str, Any], key: str, value: Any) -> None:
@@ -1516,55 +1733,21 @@ def _feature_evidence_groups(
         if edge.get("source_node_id") in selected_code_ids or edge.get("target_node_id") in selected_code_ids:
             add_edge(edge)
 
-    primary_rpg_nodes = primary_rpg_nodes_all[:_FOCUSED_RPG_NODE_CAP]
+    primary_rpg_nodes = primary_rpg_nodes_all
     primary_code_nodes_all = list(code_node_by_id.values())
-    primary_code_nodes = primary_code_nodes_all[:_FOCUSED_CODE_NODE_CAP]
-    visible_rpg_ids = {row.get("node_id") for row in primary_rpg_nodes}
-    visible_code_ids = {row.get("node_id") for row in primary_code_nodes}
-    mappings = [
-        row for row in mapping_rows_all
-        if row.get("rpg_node_id") in visible_rpg_ids and (not row.get("code_node_id") or row.get("code_node_id") in visible_code_ids)
-    ]
-    edges = all_edges[:_FOCUSED_EDGE_CAP]
-    hidden_counts: Dict[str, Any] = {
-        "primary_rpg_nodes": max(0, len(primary_rpg_nodes_all) - len(primary_rpg_nodes)),
-        "primary_code_nodes": max(0, len(primary_code_nodes_all) - len(primary_code_nodes)),
-        "edges": max(0, len(all_edges) - len(edges)),
-    }
+    primary_code_nodes = primary_code_nodes_all
+    mappings = mapping_rows_all
+    edges = all_edges
+    hidden_counts: Dict[str, Any] = {}
     for key, count in impact_hidden_counts.items():
-        hidden_counts[key] = hidden_counts.get(key, 0) + count
-    relation_totals: Dict[str, int] = {}
-    relation_visible: Dict[str, int] = {}
-    for edge in all_edges:
-        relation = str(edge.get("relation") or "dependency")
-        relation_totals[relation] = relation_totals.get(relation, 0) + 1
-    for edge in edges:
-        relation = str(edge.get("relation") or "dependency")
-        relation_visible[relation] = relation_visible.get(relation, 0) + 1
-    hidden_relations = {
-        relation: total - relation_visible.get(relation, 0)
-        for relation, total in relation_totals.items()
-        if total > relation_visible.get(relation, 0)
-    }
-    if hidden_relations:
-        hidden_counts["relations"] = hidden_relations
-    capped_hidden = {
-        key: value for key, value in hidden_counts.items()
-        if key in {"primary_rpg_nodes", "primary_code_nodes", "edges"} and value
-    }
-    if capped_hidden:
-        add_warning("too_many_neighbors", "Focused view omitted rows because caps were reached", hidden_counts=capped_hidden)
+        if count:
+            hidden_counts[key] = hidden_counts.get(key, 0) + count
 
     matched_files = {file_path for node in primary_rpg_nodes_all for file_path in node.get("changed_files") or []}
     unmatched_code_deltas = [delta for delta in code_deltas if _code_delta_file(delta) not in matched_files]
     mapped_code_relations = sum(1 for row in mapping_rows_all if row.get("code_node_id"))
     missing_mappings = sum(1 for row in mapping_rows_all if row.get("status") == "missing")
     diff_anchors = _diff_anchor_map(code_deltas)
-    focused_caps = {
-        "primary_rpg_nodes": _FOCUSED_RPG_NODE_CAP,
-        "primary_code_nodes": _FOCUSED_CODE_NODE_CAP,
-        "edges": _FOCUSED_EDGE_CAP,
-    }
     graph_context = {
         "current_graph_available": current_graph_available,
         "current_rpg_nodes": len(current_rpg_nodes),
@@ -1581,7 +1764,6 @@ def _feature_evidence_groups(
         warnings,
         changed_files,
         diff_anchors,
-        caps=focused_caps,
         graph_context=graph_context,
     )
     summary = {
@@ -1612,7 +1794,6 @@ def _feature_evidence_groups(
         "warnings": warnings,
         "changed_files": changed_files,
         "unmatched_code_deltas": unmatched_code_deltas,
-        "caps": focused_caps,
         "apply": {
             "status": _apply_status(apply_result),
             "dep_graph_refreshed": apply_result.get("dep_graph_refreshed"),

@@ -407,10 +407,16 @@ details summary {{ cursor:pointer; color:var(--accent); font-weight:600; }}
 .focused-graph-fallback {{ margin:12px; padding:12px; border:1px dashed var(--line); border-radius:10px; background:#fff; color:var(--muted); }}
 .focused-graph-legend {{ display:flex; flex-wrap:wrap; gap:8px; margin:8px 0 12px; }}
 .legend-item {{ display:inline-flex; gap:6px; align-items:center; color:var(--muted); font-size:13px; }}
-.legend-swatch {{ width:10px; height:10px; border-radius:999px; display:inline-block; border:1px solid var(--line); }}
+.legend-swatch {{ width:10px; height:10px; border-radius:999px; display:inline-block; border:1px solid var(--line); flex:0 0 auto; }}
+.legend-line {{ width:28px; height:0; border-radius:0; border:0; border-top:2px solid var(--line); background:transparent; }}
 .legend-node {{ background:#2563eb; }}
-.legend-semantic-edge {{ background:#7c3aed; }}
-.legend-dependency-edge {{ background:#ea580c; }}
+.legend-tree-link {{ border-top-color:#cbd5e1; border-top-width:1.4px; }}
+.legend-semantic-edge {{ border-top-color:#7c3aed; }}
+.legend-dependency-edge, .legend-imports-edge {{ border-top-color:#ea580c; }}
+.legend-invokes-edge, .legend-caller-edge, .legend-callee-edge {{ border-top-color:#16a34a; }}
+.legend-inherits-edge {{ border-top-color:#9333ea; }}
+.legend-references-edge {{ border-top-color:#2563eb; }}
+.legend-dep-graph-edge {{ border-top-style:dashed; }}
 @media (max-width:720px) {{ main {{ padding:22px 12px 36px; }} .focus-map {{ grid-template-columns:1fr; }} table {{ min-width:560px; }} }}
 </style>
 </head>
@@ -679,12 +685,9 @@ def _chain_edge_html(edges: Sequence[Mapping[str, Any]]) -> str:
 
 def _combined_hidden_counts(hidden_counts: Mapping[str, Any]) -> list[tuple[str, int]]:
     relation_keys = {"caller": "callers", "callee": "callees", "import": "imports", "inheritance": "inheritance"}
-    hidden_relations = hidden_counts.get("relations") if isinstance(hidden_counts.get("relations"), Mapping) else {}
     rows: list[tuple[str, int]] = []
     for relation, count_key in relation_keys.items():
         count = hidden_counts.get(count_key) or 0
-        if isinstance(hidden_relations, Mapping):
-            count += hidden_relations.get(relation, 0) or 0
         try:
             count_int = int(count)
         except (TypeError, ValueError):
@@ -698,13 +701,6 @@ def _hidden_context_html(hidden_counts: Mapping[str, Any]) -> str:
     parts = []
     for relation, count in _combined_hidden_counts(hidden_counts):
         parts.append(f"<p class=\"reason\">Hidden {_h(count)} additional {_h(relation)} neighbors.</p>")
-    cap_rows = []
-    for key in ("primary_rpg_nodes", "primary_code_nodes", "edges"):
-        value = hidden_counts.get(key)
-        if value:
-            cap_rows.append(f"<tr><th>{_h(key)}</th><td>{_h(value)}</td></tr>")
-    if cap_rows:
-        parts.append("<table><tbody>" + "".join(cap_rows) + "</tbody></table>")
     return "".join(parts)
 
 
@@ -969,6 +965,8 @@ def _append_hierarchy_nodes(
     links: list[dict[str, Any]],
     seen_nodes: set[str],
     hierarchy: Any,
+    file_anchors: Mapping[str, str],
+    node_metadata_by_id: Mapping[str, Mapping[str, Any]],
 ) -> None:
     if not isinstance(hierarchy, Mapping):
         return
@@ -983,6 +981,7 @@ def _append_hierarchy_nodes(
         row_id = node_id(row)
         if row_id and row_id not in seen_nodes:
             seen_nodes.add(row_id)
+            metadata = node_metadata_by_id.get(row_id) or node_metadata_by_id.get(str(row.get("node_id") or "")) or {}
             payload = {
                 "id": row_id,
                 "kind": row.get("kind") or "feature",
@@ -1003,9 +1002,15 @@ def _append_hierarchy_nodes(
                 "mapped_code_symbol",
                 "mapped_code_symbols",
                 "mapped_code_count",
+                "changed_files",
+                "diff_anchor",
             ):
-                if row.get(key) not in (None, ""):
-                    payload[key] = row.get(key)
+                value = row.get(key) if row.get(key) not in (None, "") else metadata.get(key)
+                if value not in (None, ""):
+                    payload[key] = value
+            diff_ref = _graph_diff_ref(payload, file_anchors)
+            if diff_ref:
+                payload["diff"] = diff_ref
             nodes.append(payload)
         for child in [child for child in _as_sequence(row.get("children")) if isinstance(child, Mapping)]:
             child_id = visit(child)
@@ -1021,7 +1026,8 @@ def _append_hierarchy_nodes(
 
 def _focused_graph_payload(focused_view: Mapping[str, Any], file_anchors: Mapping[str, str]) -> dict[str, Any]:
     nodes_view = focused_view.get("nodes_view") if isinstance(focused_view.get("nodes_view"), Mapping) else {}
-    summary = nodes_view.get("summary") if isinstance(nodes_view.get("summary"), Mapping) else focused_view.get("summary", {})
+    summary_source = nodes_view.get("summary") if isinstance(nodes_view.get("summary"), Mapping) else focused_view.get("summary", {})
+    summary = dict(summary_source) if isinstance(summary_source, Mapping) else {}
     semantic_nodes = [node for node in _as_sequence(nodes_view.get("semantic_nodes")) if isinstance(node, Mapping)]
     code_nodes = [node for node in _as_sequence(nodes_view.get("code_nodes")) if isinstance(node, Mapping)]
     mappings = [mapping for mapping in _as_sequence(nodes_view.get("mappings")) if isinstance(mapping, Mapping)]
@@ -1058,10 +1064,95 @@ def _focused_graph_payload(focused_view: Mapping[str, Any], file_anchors: Mappin
             ],
         }
 
+    semantic_link_by_node = {
+        str(node.get("node_id")): str(node.get("link_id") or _graph_node_id(node, "feature"))
+        for node in semantic_nodes
+        if node.get("node_id") not in (None, "")
+    }
+    code_link_by_node = {
+        str(node.get("node_id") or node.get("dep_node_id")): str(node.get("link_id") or _graph_node_id(node, "code"))
+        for node in code_nodes
+        if (node.get("node_id") or node.get("dep_node_id")) not in (None, "")
+    }
+    node_metadata_by_id: dict[str, Mapping[str, Any]] = {}
+
+    def remember_node_metadata(alias: Any, row: Mapping[str, Any]) -> None:
+        if alias in (None, ""):
+            return
+        node_metadata_by_id.setdefault(str(alias), row)
+
+    for node in semantic_nodes:
+        node_id = node.get("node_id")
+        remember_node_metadata(node.get("link_id") or _graph_node_id(node, "feature"), node)
+        remember_node_metadata(node_id, node)
+    for node in code_nodes:
+        node_id = node.get("node_id") or node.get("dep_node_id")
+        remember_node_metadata(node.get("link_id") or _graph_node_id(node, "code"), node)
+        remember_node_metadata(node_id, node)
+
+    def endpoint_link_id(edge: Mapping[str, Any], side: str) -> str:
+        node_id = edge.get(f"{side}_node_id")
+        node_text = str(node_id or "")
+        return str(
+            edge.get(f"{side}_link_id")
+            or semantic_link_by_node.get(node_text)
+            or code_link_by_node.get(node_text)
+            or _graph_node_id({"node_id": node_text}, "context")
+        )
+
+    def collect_hierarchy_ids(row: Any, ids: set[str]) -> None:
+        if not isinstance(row, Mapping):
+            return
+        row_id = row.get("id") or row.get("link_id") or row.get("node_id")
+        if row_id not in (None, ""):
+            ids.add(str(row_id))
+        for child in _as_sequence(row.get("children")):
+            collect_hierarchy_ids(child, ids)
+
+    def endpoint_group() -> dict[str, Any]:
+        children = hierarchy.setdefault("children", []) if isinstance(hierarchy, dict) else []
+        group_id = "focused-graph-relation-endpoints"
+        for child in children:
+            if isinstance(child, dict) and child.get("id") == group_id:
+                return child
+        group = {"id": group_id, "name": "Relation endpoints", "kind": "context_group", "children": []}
+        children.append(group)
+        return group
+
+    hierarchy_ids: set[str] = set()
+    collect_hierarchy_ids(hierarchy, hierarchy_ids)
+    for edge in context_edges:
+        for side in ("source", "target"):
+            link_id = endpoint_link_id(edge, side)
+            if not link_id or link_id in hierarchy_ids:
+                continue
+            node_id = edge.get(f"{side}_node_id")
+            node_text = str(node_id or link_id)
+            is_code = node_text in code_link_by_node or link_id in set(code_link_by_node.values())
+            leaf: dict[str, Any] = {
+                "id": link_id,
+                "node_id": node_text,
+                "name": edge.get("name") or edge.get("path") or node_text,
+                "kind": "code" if is_code else "context",
+                "state": "mapped" if is_code else "context",
+                "aliases": _ordered_texts([node_text, link_id]),
+            }
+            if is_code:
+                code = next((row for row in code_nodes if str(row.get("node_id") or row.get("dep_node_id") or "") == node_text), {})
+                for key in ("path", "symbol", "type", "line_range", "source", "changed_files", "diff_anchor"):
+                    if isinstance(code, Mapping) and code.get(key) not in (None, ""):
+                        leaf[key] = code.get(key)
+            else:
+                for key in ("relation", "direction", "path", "reason", "source", "source_graph", "edge_source", "relation_source"):
+                    if edge.get(key) not in (None, ""):
+                        leaf[key] = edge.get(key)
+            endpoint_group().setdefault("children", []).append(leaf)
+            hierarchy_ids.add(link_id)
+
     nodes: list[dict[str, Any]] = []
     links: list[dict[str, Any]] = []
     seen_nodes: set[str] = set()
-    _append_hierarchy_nodes(nodes, links, seen_nodes, hierarchy)
+    _append_hierarchy_nodes(nodes, links, seen_nodes, hierarchy, file_anchors, node_metadata_by_id)
 
     rpg_links: dict[str, str] = {}
     code_links: dict[str, str] = {}
@@ -1081,8 +1172,15 @@ def _focused_graph_payload(focused_view: Mapping[str, Any], file_anchors: Mappin
             return
         row_id = str(row.get("id") or row.get("link_id") or row.get("node_id") or "")
         node_id = row.get("node_id")
+        kind = str(row.get("kind") or "")
         if node_id not in (None, "") and row_id:
-            rpg_links.setdefault(str(node_id), row_id)
+            if kind in {"code", "context"}:
+                add_alias(node_id, row_id)
+                add_alias(row_id, row_id)
+            else:
+                rpg_links.setdefault(str(node_id), row_id)
+        for alias in _as_sequence(row.get("aliases")):
+            add_alias(alias, row_id)
         for code_id in _as_sequence(row.get("mapped_code_node_ids")):
             add_alias(_graph_node_id({"node_id": code_id}, "code"), row_id)
             add_alias(code_id, row_id)
@@ -1166,6 +1264,14 @@ def _focused_graph_payload(focused_view: Mapping[str, Any], file_anchors: Mappin
             "path": edge.get("path"),
         })
 
+    summary.update({
+        "semantic_nodes": len(semantic_nodes),
+        "code_nodes": len(code_nodes),
+        "mappings": len(mappings),
+        "edges": len(context_edges),
+        "relation_edges": len(relation_edges),
+        "context_edges": len(context_edges),
+    })
     links.extend(relation_edges)
     return {
         "schema": "cmind.focused_graph.render.v1",
@@ -1193,6 +1299,7 @@ def _focused_graph_runtime() -> str:
   const dataEl = section.querySelector('[data-focused-graph-json]');
   const svg = section.querySelector('[data-focused-graph-svg]');
   const fallback = section.querySelector('[data-focused-graph-fallback]');
+  const statusEl = section.querySelector('[data-focused-graph-status]');
   if (!window.d3 || !dataEl || !svg) return;
   if (fallback) fallback.hidden = true;
   const data = JSON.parse(dataEl.textContent || '{}');
@@ -1368,6 +1475,13 @@ def _focused_graph_runtime() -> str:
     return `M${sx},${sy} Q${midX},${(sy + dy) / 2} ${dx},${dy}`;
   }
 
+  function updateStatus() {
+    if (!statusEl) return;
+    const visible = showEdges ? currentRelationEdges.length : 0;
+    const total = relationEdges.length;
+    statusEl.textContent = `Visible relation edges: ${visible}/${total}`;
+  }
+
   function drawRelationEdges() {
     currentRelationEdges = [];
     if (showEdges) {
@@ -1389,13 +1503,16 @@ def _focused_graph_runtime() -> str:
       .attr('d', edge => relationPath(edge._source, edge._target));
     relUpdate.select('title').text(edge => `${edge.relation || 'dependency'}\n${edge.source_graph || edge.edge_source || edge.source_meta || edge.kind || ''}\n${edge.path || edge.reason || ''}`);
     rel.exit().remove();
+    updateStatus();
   }
 
   function update(source) {
     applySearchOpen();
     const layout = treemap(root);
     currentNodes = layout.descendants();
-    currentNodes.forEach(d => { d.y = d.depth * 250; });
+    const maxDepth = d3.max(currentNodes, d => d.depth) || 1;
+    const depthGap = Math.max(140, Math.min(250, (width - 260) / maxDepth));
+    currentNodes.forEach(d => { d.y = d.depth * depthGap; });
     const minX = d3.min(currentNodes, d => d.x) || 0;
     if (minX < 20) currentNodes.forEach(d => { d.x += 20 - minX; });
     nodeById = {};
@@ -1469,7 +1586,8 @@ def _render_focused_graph(focused_view: dict[str, Any], file_anchors: Mapping[st
     nodes_view = focused_view.get("nodes_view") if isinstance(focused_view.get("nodes_view"), Mapping) else {}
     if not focused_view and not nodes_view:
         return ""
-    summary = nodes_view.get("summary") if isinstance(nodes_view.get("summary"), Mapping) else focused_view.get("summary", {})
+    graph_payload = _focused_graph_payload(focused_view, file_anchors)
+    summary = graph_payload.get("summary") if isinstance(graph_payload.get("summary"), Mapping) else {}
     summary_html = _summary_badges(summary, [
         ("Semantic nodes", "semantic_nodes", len(_as_sequence(nodes_view.get("semantic_nodes")))),
         ("Code nodes", "code_nodes", len(_as_sequence(nodes_view.get("code_nodes")))),
@@ -1481,7 +1599,7 @@ def _render_focused_graph(focused_view: dict[str, Any], file_anchors: Mapping[st
     hidden_html = _hidden_context_html(hidden_counts if isinstance(hidden_counts, Mapping) else {})
     warnings = [warning for warning in _as_sequence(nodes_view.get("warnings") or focused_view.get("warnings")) if isinstance(warning, Mapping)]
     warnings_html = f"<h3>Warnings</h3>{_chain_warning_html(warnings)}" if warnings else ""
-    graph_payload = _focused_graph_payload(focused_view, file_anchors)
+    relation_edge_total = len(_as_sequence(graph_payload.get("relation_edges") or graph_payload.get("edges") or graph_payload.get("links")))
     graph_json = _json_for_script(graph_payload)
     d3_js = _inline_d3()
     fallback_hidden = " hidden" if d3_js else ""
@@ -1499,13 +1617,21 @@ def _render_focused_graph(focused_view: dict[str, Any], file_anchors: Mapping[st
         '<button type="button" data-action="depth-minus" title="Collapse hierarchy depth">-1</button>'
         '<label><input type="checkbox" data-action="edges" checked> Edges</label>'
         '<input type="search" data-action="search" placeholder="Search nodes" aria-label="Search focused graph nodes">'
+        f'<span class="badge" data-focused-graph-status>Visible relation edges: 0/{relation_edge_total}</span>'
         '</div>'
     )
     legend = (
         '<div class="focused-graph-legend" aria-label="Focused graph legend">'
         '<span class="legend-item"><span class="legend-swatch legend-node"></span>Feature tree node</span>'
-        '<span class="legend-item"><span class="legend-swatch legend-semantic-edge"></span>RPG semantic edge</span>'
-        '<span class="legend-item"><span class="legend-swatch legend-dependency-edge"></span>dep_graph dependency edge</span>'
+        '<span class="legend-item"><span class="legend-swatch legend-line legend-tree-link"></span>Tree link</span>'
+        '<span class="legend-item"><span class="legend-swatch legend-line legend-semantic-edge"></span>RPG semantic edge</span>'
+        '<span class="legend-item"><span class="legend-swatch legend-line legend-dependency-edge legend-dep-graph-edge"></span>dep_graph dependency edge</span>'
+        '<span class="legend-item"><span class="legend-swatch legend-line legend-invokes-edge"></span>invokes</span>'
+        '<span class="legend-item"><span class="legend-swatch legend-line legend-imports-edge legend-dep-graph-edge"></span>imports</span>'
+        '<span class="legend-item"><span class="legend-swatch legend-line legend-inherits-edge"></span>inherits</span>'
+        '<span class="legend-item"><span class="legend-swatch legend-line legend-references-edge"></span>references</span>'
+        '<span class="legend-item"><span class="legend-swatch legend-line legend-caller-edge"></span>caller</span>'
+        '<span class="legend-item"><span class="legend-swatch legend-line legend-callee-edge"></span>callee</span>'
         '</div>'
     )
     return (

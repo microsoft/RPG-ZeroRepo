@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import html as html_lib
+import json
 import sys
 from pathlib import Path
 
@@ -139,8 +141,8 @@ def test_write_command_report_renders_retrievals_code_deltas_and_focused_view(tm
                         "semantic_nodes": 2,
                         "code_nodes": 1,
                         "mappings": 2,
-                        "edges": 2,
-                        "warnings": 4,
+                        "edges": 3,
+                        "warnings": 3,
                     },
                     "semantic_nodes": [
                         {
@@ -221,12 +223,23 @@ def test_write_command_report_renders_retrievals_code_deltas_and_focused_view(tm
                             "source": "impact",
                             "reason": "reaches <reason>",
                         },
+                        {
+                            "source_node_id": "a.py:f<script>",
+                            "target_node_id": "imported<script>",
+                            "source_link_id": "code-a.py-f-script",
+                            "target_link_id": "context-imported-script",
+                            "relation": "imports",
+                            "direction": "downstream",
+                            "path": "imported.py<script>",
+                            "source": "dep_graph",
+                            "source_graph": "dep_graph",
+                            "reason": "imports <reason>",
+                        },
                     ],
-                    "hidden_counts": {"callers": 3, "edges": 1, "relations": {"caller": 1}},
+                    "hidden_counts": {"callers": 3},
                     "warnings": [
                         {"type": "missing_mapping", "message": "Missing <mapping>", "node_id": "n2", "node_link_id": "rpg-n2"},
                         {"type": "missing_reason", "message": "Missing <reason>", "node_id": "n3"},
-                        {"type": "too_many_neighbors", "message": "Too many <neighbors>", "hidden_counts": {"edges": 1}},
                         {"type": "stale_graph", "message": "Stale <graph>", "dep_node_id": "old.py:f"},
                     ],
                     "changed_files": [{"path": "a.py", "diff_anchor": "diff-a.py"}],
@@ -241,13 +254,33 @@ def test_write_command_report_renders_retrievals_code_deltas_and_focused_view(tm
                     },
                     "default_focus": {
                         "node_link_ids": ["rpg-n1-script", "code-a.py-f-script"],
+                        "focused_node_ids": ["rpg-n1-script", "code-a.py-f-script"],
+                        "focused_tree_node_ids": ["rpg-n1-script", "code-a.py-f-script"],
+                        "focused_code_link_ids": ["code-a.py-f-script"],
+                        "expanded_node_ids": ["focused-graph-root"],
+                        "default_expanded_node_ids": ["focused-graph-root"],
+                        "focused_path_node_ids": ["focused-graph-root", "rpg-n1-script", "code-a.py-f-script"],
+                        "relation_endpoint_link_ids": ["context-caller-script", "code-a.py-f-script", "context-callee-script", "context-imported-script"],
+                        "context_node_ids": ["context-caller-script", "context-callee-script", "context-imported-script"],
                         "edge_depth": 1,
                         "show_edges": True,
                     },
                     "focused_graph": {
                         "schema": "cmind.focused_graph.v1",
                         "hierarchy": {"id": "focused-graph-root"},
-                        "default_focus": {"node_link_ids": ["rpg-n1-script"]},
+                        "default_focus": {
+                            "node_link_ids": ["rpg-n1-script", "code-a.py-f-script"],
+                            "focused_node_ids": ["rpg-n1-script", "code-a.py-f-script"],
+                            "focused_tree_node_ids": ["rpg-n1-script", "code-a.py-f-script"],
+                            "focused_code_link_ids": ["code-a.py-f-script"],
+                            "expanded_node_ids": ["focused-graph-root"],
+                            "default_expanded_node_ids": ["focused-graph-root"],
+                            "focused_path_node_ids": ["focused-graph-root", "rpg-n1-script", "code-a.py-f-script"],
+                            "relation_endpoint_link_ids": ["context-caller-script", "code-a.py-f-script", "context-callee-script", "context-imported-script"],
+                            "context_node_ids": ["context-caller-script", "context-callee-script", "context-imported-script"],
+                            "edge_depth": 1,
+                            "show_edges": True,
+                        },
                     },
                 },
                 "primary_rpg_nodes": [
@@ -303,12 +336,21 @@ def test_write_command_report_renders_retrievals_code_deltas_and_focused_view(tm
                         "source": "impact",
                         "reason": "reaches <reason>",
                     },
+                    {
+                        "source_node_id": "n1<script>",
+                        "target_node_id": "imported<script>",
+                        "relation": "imports",
+                        "direction": "downstream",
+                        "path": "imported.py<script>",
+                        "source": "dep_graph",
+                        "source_graph": "dep_graph",
+                        "reason": "imports <reason>",
+                    },
                 ],
-                "hidden_counts": {"callers": 3, "edges": 1, "relations": {"caller": 1}},
+                "hidden_counts": {"callers": 3},
                 "warnings": [
                     {"type": "missing_mapping", "message": "Missing <mapping>", "node_id": "n2"},
                     {"type": "missing_reason", "message": "Missing <reason>", "node_id": "n3"},
-                    {"type": "too_many_neighbors", "message": "Too many <neighbors>", "hidden_counts": {"edges": 1}},
                     {"type": "stale_graph", "message": "Stale <graph>", "dep_node_id": "old.py:f"},
                 ],
             },
@@ -337,37 +379,37 @@ def test_write_command_report_renders_retrievals_code_deltas_and_focused_view(tm
     assert "data-action=\"depth-minus\"" in html
     assert "data-action=\"edges\"" in html
     assert "data-action=\"search\"" in html
+    assert "data-focused-graph-status" in html
+    assert "Visible relation edges: 0/3" in html
     assert "Reset" in html
     assert "+1" in html
     assert "-1" in html
     assert "Edges" in html
     assert "Search nodes" in html
     assert "d3.zoom()" in html
-    assert "d3.drag()" in html
-    assert ".on('start', function(event) {" in html
-    assert "selectedId = node.id;\n      d3.select(this).classed('dragging', true)" not in html
     assert "dblclick" in html
     assert "focused-graph-layer" in html
     assert "focused-graph-node.selected" in html
     assert "focused-graph-node.hidden" in html
     assert "focused-graph-link.active" in html
     assert "focused-graph-link.dimmed" in html
-    assert "Hierarchy" in html
-    assert '"kind": "hierarchy"' in html
-    assert "const groups = {hierarchy: [], semantic: [], mapping: [], code: [], context: []};" in html
-    assert "const availableY = Math.max(120, height - marginY * 2);" in html
-    assert "collapsedHierarchyIds" in html
-    assert "return list(hierarchyAncestorsById.get(nodeId)).some(id => collapsedHierarchyIds.has(id));" in html
-    assert "if (collapsedHierarchyIds.has(nodeId)) return true;" not in html
-    assert "return nodeId !== rootHierarchyId && (hierarchyChildrenById.get(nodeId) || []).length ? nodeId : '';" in html
-    assert "return hierarchyNodeById.has(nodeId) ? nodeId : '';" not in html
-    assert "visibleNodeIds" in html
+    assert "rootHierarchyId" in html
+    assert "defaultExpandedIds" in html
+    assert "visibleEndpoint" in html
+    assert "updateStatus" in html
+    assert "const visible = showEdges ? currentRelationEdges.length : 0;" in html
+    assert "const total = relationEdges.length;" in html
+    assert "statusEl.textContent = `Visible relation edges: ${visible}/${total}`;" in html
     assert "expandDepth" in html
     assert "collapseDepth" in html
     assert "Expand hierarchy depth" in html
     assert "Collapse hierarchy depth" in html
     assert "d3.zoomIdentity" in html
     assert "Static focused graph fallback is available when D3 cannot run." in html
+    for label in ("Tree link", "RPG semantic edge", "dep_graph dependency edge", "invokes", "imports", "inherits", "references", "caller", "callee"):
+        assert label in html
+    for klass in ("legend-tree-link", "legend-invokes-edge", "legend-imports-edge", "legend-inherits-edge", "legend-references-edge", "legend-caller-edge", "legend-callee-edge"):
+        assert klass in html
     assert "semantic_nodes" in html
     assert "code_nodes" in html
     assert "mappings" in html
@@ -395,10 +437,10 @@ def test_write_command_report_renders_retrievals_code_deltas_and_focused_view(tm
     assert "Missing &lt;mapping&gt;" in html
     assert "missing_mapping" in html
     assert "missing_reason" in html
-    assert "too_many_neighbors" in html
+    assert "too_many_neighbors" not in html
     assert "stale_graph" in html
-    assert "Hidden 4 additional caller neighbors." in html
-    assert '"caller": 1' in html
+    assert "Hidden 3 additional caller neighbors." in html
+    assert '"edges": 1' not in html
     assert html.count("+line 0 &lt;script&gt;alert(0)&lt;/script&gt;") == 1
     assert "+line 0 <script>alert(0)</script>" not in html
     assert "Node <unsafe>" not in html
@@ -406,6 +448,26 @@ def test_write_command_report_renders_retrievals_code_deltas_and_focused_view(tm
     assert "maps because <reason>" not in html
     assert "<details><summary>View diff</summary>" in html
     assert "<details open" not in html
+    graph_json = html.split("data-focused-graph-json>", 1)[1].split("</script>", 1)[0]
+    graph_payload = json.loads(html_lib.unescape(graph_json))
+    assert len(graph_payload["edges"]) == 3
+    assert len(graph_payload["relation_edges"]) == 3
+    assert graph_payload["summary"]["edges"] == 3
+    assert graph_payload["summary"]["relation_edges"] == 3
+    assert graph_payload["summary"]["context_edges"] == 3
+    relation_links = [link for link in graph_payload["links"] if link.get("relation") != "contains"]
+    assert len(relation_links) == 3
+    assert any(node["id"] == "context-callee-script" for node in graph_payload["nodes"])
+    assert any(node["id"] == "context-imported-script" for node in graph_payload["nodes"])
+    assert any("context-callee-script" in edge["target_candidates"] for edge in graph_payload["relation_edges"])
+    assert any(edge["relation"] == "imports" and "context-imported-script" in edge["target_candidates"] for edge in graph_payload["relation_edges"])
+    assert any("rpg-n1-script" in edge["source_candidates"] for edge in graph_payload["relation_edges"])
+    assert any("code-a.py-f-script" in edge["source_candidates"] for edge in graph_payload["relation_edges"])
+    default_focus = graph_payload["default_focus"]
+    assert "focused-graph-root" in default_focus["default_expanded_node_ids"]
+    assert "rpg-n1-script" in default_focus["focused_path_node_ids"]
+    assert "context-callee-script" not in default_focus["default_expanded_node_ids"]
+    assert graph_payload["hidden_counts"] == {"callers": 3}
     inspector_json = html.split("<summary>Inspector JSON</summary><pre>", 1)[1].split("</pre>", 1)[0]
     assert "focused_graph" in inspector_json
     assert "nodes_view" in inspector_json
@@ -414,6 +476,7 @@ def test_write_command_report_renders_retrievals_code_deltas_and_focused_view(tm
     assert "default_focus" in inspector_json
     assert "primary_rpg_nodes" not in inspector_json
     assert "primary_code_nodes" not in inspector_json
+    assert "caps" not in inspector_json
     assert long_diff not in inspector_json
     evidence_json = html.split("<summary>Evidence JSON</summary><pre>", 1)[1].split("</pre>", 1)[0]
     assert "code_deltas" not in evidence_json
