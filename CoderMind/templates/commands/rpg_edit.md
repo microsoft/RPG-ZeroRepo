@@ -243,7 +243,7 @@ replies above before proceeding. Treat any other free-form reply as
 All work in this step happens on a fresh `rpg-edit/<short-id>` branch
 in the project repo (workspace root), never directly on the user's
 working branch.  The branch is merged back into `<base-branch>` — the
-branch the user was on when the command started — only after Step 5e
+branch the user was on when the command started — only after Step 5d
 tests pass, so a failed run leaves `<base-branch>` clean and the branch
 preserved for inspection.
 
@@ -330,16 +330,20 @@ git add -A && git commit --amend --no-edit
 cmind script smoke_test.py --json
 ```
 
-1. **Impact review** — run targeted tests and verify affected functionality:
+1. **Impact review + final Explain View** — run targeted tests, verify affected functionality, and publish the final `rpg_edit` report:
 
 ```bash
 cmind script rpg_edit/review.py --report-scope final --json
 ```
 
-The outer `rpg_edit` flow owns the sole user-visible final report;
+Use `--report-scope final` exactly once for the outer `rpg_edit` flow.
+It publishes the sole user-visible `CoderMind rpg_edit Explain View`;
 intermediate or nested review runs should use `--report-scope internal`
 or `--no-report` so their artifacts can be linked without publishing a
-second final report.
+second final report. Record `report_path` from stdout for Step 6; if it
+is absent, use `published_to`. If `report_error` is present, keep
+reviewing the JSON result but mention the report generation failure in
+Step 6.
 
 The review script reads the plan and impact JSON from their default
 home-dir locations and automatically:
@@ -347,6 +351,19 @@ home-dir locations and automatically:
 - Derives test patterns from `code_changes` in the plan
 - Runs pytest on matching test files
 - Dispatches a sub-agent to verify affected callers (if impact is large enough)
+
+The final Explain View is the canonical audit surface for `rpg_edit` and
+the reference shape for other CoderMind command reports. When polishing
+reports for other commands, preserve the shared report surfaces from this
+stage — artifact links, summary cards, workflow timeline, verification,
+retrievals, and code/graph deltas — and only replace or extend the
+command-specific evidence sections. For `rpg_edit`, it links the
+`validate`, `locate`, `plan`, `impact`, `code_result`, `apply_result`,
+and `review_result` artifacts (plus any `internal_report_*` artifacts)
+and renders a **Focused graph** from `focused_view` showing selected RPG
+feature groups, mapped dep_graph/code nodes, missing mappings, warnings,
+hidden context, and the default focus. Do NOT create or link a separate
+`focused_graph` artifact — it is now embedded in the final Explain View.
 
 Check the output `type` field:
 
@@ -378,6 +395,7 @@ visible in `git log --graph`.  The user is returned to `<base-branch>`
 - **Success path** (Step 5e completed):
 
   > Merged `rpg-edit/<short-id>` into `<base-branch>` (commit `<merge-SHA>`).
+  > Report: `<report_path_or_published_to>`
   > To revert later:
   > - Code:  `git revert -m 1 <merge-SHA>`
   > - Graphs: `cmind script rpg_edit/apply.py --rollback <timestamp> --json`
@@ -401,6 +419,7 @@ visible in `git log --graph`.  The user is returned to `<base-branch>`
   Report to the user:
 
   > Tests failed.  Branch `rpg-edit/<short-id>` preserved for inspection.
+  > Report: `<report_path_or_published_to>` (if generated)
   > `<base-branch>` is clean.  Choose one of:
   > - Inspect:  `git diff <base-branch> rpg-edit/<short-id>`
   > - Discard code + graphs together:
