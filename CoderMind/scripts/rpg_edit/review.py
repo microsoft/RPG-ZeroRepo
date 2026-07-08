@@ -501,69 +501,143 @@ def _focused_graph_hierarchy(
         "id": "focused-graph-root",
         "name": "Focused graph",
         "kind": "root",
+        "feature_name": "Focused graph",
+        "feature_path": "Focused graph",
         "meta": {"hidden_counts": hidden_counts, "warnings": len(warnings), "edges": len(edges)},
         "children": [],
     }
-    semantic_root = _hierarchy_child(root, "focused-semantic-root", "Semantic scope", "semantic_group")
-    code_root = _hierarchy_child(root, "focused-code-root", "Code scope", "code_group")
-    mapping_root = _hierarchy_child(root, "focused-mapping-root", "Mappings", "mapping_group")
-    context_root = _hierarchy_child(root, "focused-context-root", "One-hop context", "context_group")
+    code_by_id = {
+        str(node.get("node_id") or node.get("dep_node_id")): node
+        for node in code_nodes
+        if (node.get("node_id") or node.get("dep_node_id")) not in (None, "")
+    }
+    mapped_ids_by_rpg: Dict[str, List[str]] = {}
+    for mapping in mappings:
+        rpg_id = mapping.get("rpg_node_id") or mapping.get("node_id")
+        code_id = mapping.get("code_node_id") or mapping.get("dep_node_id")
+        if rpg_id not in (None, "") and code_id not in (None, ""):
+            mapped_ids_by_rpg.setdefault(str(rpg_id), []).append(str(code_id))
 
-    known_link_ids: set[str] = set()
+    def code_refs_for(node: Dict[str, Any]) -> List[Dict[str, Any]]:
+        rpg_id = str(node.get("node_id") or "")
+        refs: List[Dict[str, Any]] = []
+        seen: set[str] = set()
+
+        def append_ref(ref: Dict[str, Any]) -> None:
+            key = str(ref.get("node_id") or ref.get("link_id") or ref.get("path") or ref.get("symbol") or "")
+            if not key or key in seen:
+                return
+            seen.add(key)
+            refs.append(ref)
+
+        for item in _listify(node.get("mapped_code")):
+            if not isinstance(item, dict):
+                continue
+            code_id = item.get("node_id") or item.get("dep_node_id")
+            code_id_text = str(code_id or "")
+            code = code_by_id.get(code_id_text, {})
+            path = item.get("path") or code.get("path") or item.get("file") or code.get("file") or code.get("module") or _dep_node_path(code_id_text)
+            symbol = item.get("symbol") or item.get("name") or code.get("symbol") or code.get("name") or _symbol_from_dep(code_id_text, code)
+            row: Dict[str, Any] = {
+                "node_id": code_id_text,
+                "link_id": item.get("link_id") or code.get("link_id") or _node_link_id("code", code_id_text),
+                "path": path,
+                "symbol": symbol,
+            }
+            for key in ("type", "kind", "line_range", "state", "source"):
+                _set_if_present(row, key, item.get(key) or code.get(key))
+            append_ref(row)
+
+        code_ids = _ordered_unique(_listify(node.get("mapped_code_node_ids")) + mapped_ids_by_rpg.get(rpg_id, []))
+        for code_id in code_ids:
+            code = code_by_id.get(code_id, {})
+            path = code.get("path") or code.get("file") or code.get("module") or _dep_node_path(code_id)
+            symbol = code.get("symbol") or code.get("name") or _symbol_from_dep(code_id, code)
+            row = {
+                "node_id": code_id,
+                "link_id": code.get("link_id") or _node_link_id("code", code_id),
+                "path": path,
+                "symbol": symbol,
+            }
+            for key in ("type", "kind", "line_range", "state", "source"):
+                _set_if_present(row, key, code.get(key))
+            append_ref(row)
+        return refs
+
+    def merge_code_metadata(row: Dict[str, Any], refs: List[Dict[str, Any]]) -> None:
+        if not refs:
+            return
+        existing = [item for item in _listify(row.get("mapped_code")) if isinstance(item, dict)]
+        merged: List[Dict[str, Any]] = []
+        seen: set[str] = set()
+        for ref in existing + refs:
+            key = str(ref.get("node_id") or ref.get("link_id") or ref.get("path") or ref.get("symbol") or "")
+            if not key or key in seen:
+                continue
+            seen.add(key)
+            merged.append(ref)
+        row["mapped_code"] = merged
+        row["mapped_code_node_ids"] = _ordered_unique([ref.get("node_id") for ref in merged])
+        row["mapped_code_link_ids"] = _ordered_unique([ref.get("link_id") for ref in merged])
+        row["mapped_code_paths"] = _ordered_unique([ref.get("path") for ref in merged])
+        row["mapped_code_symbols"] = _ordered_unique([ref.get("symbol") for ref in merged])
+        if row["mapped_code_paths"]:
+            row["mapped_code_path"] = row["mapped_code_paths"][0]
+        if row["mapped_code_symbols"]:
+            row["mapped_code_symbol"] = row["mapped_code_symbols"][0]
+        row["mapped_code_count"] = len(merged)
+
+    def feature_path_text(node: Dict[str, Any], group_parts: List[str], feature_name: str) -> str:
+        for key in ("feature_path", "breadcrumb_path", "breadcrumb", "path"):
+            value = node.get(key)
+            parts = _hierarchy_segments(value)
+            if parts:
+                return " / ".join(parts)
+        return " / ".join(group_parts + ([feature_name] if feature_name else []))
+
     for node in semantic_nodes:
-        link_id = str(node.get("link_id") or _node_link_id("rpg", node.get("node_id")))
-        known_link_ids.add(link_id)
-        leaf = {
+        node_id = str(node.get("node_id") or "")
+        link_id = str(node.get("link_id") or _node_link_id("rpg", node_id))
+        feature_name = str(node.get("name") or node.get("symbol") or node_id or "feature")
+        group_parts = _semantic_hierarchy_parts(node)
+        code_refs = code_refs_for(node)
+        parent = root
+        trail: List[str] = []
+        for part in group_parts:
+            trail.append(part)
+            group = _hierarchy_child(parent, _node_link_id("feature-path", "/".join(trail)), part, "feature_group")
+            group["feature_name"] = part
+            group["feature_path"] = " / ".join(trail)
+            merge_code_metadata(group, code_refs)
+            parent = group
+        leaf: Dict[str, Any] = {
             "id": link_id,
-            "node_id": node.get("node_id"),
-            "name": node.get("name") or node.get("symbol") or node.get("node_id") or "semantic node",
-            "kind": "semantic",
+            "node_id": node_id,
+            "name": feature_name,
+            "feature_name": feature_name,
+            "feature_path": feature_path_text(node, group_parts, feature_name),
+            "kind": "feature",
             "state": node.get("state"),
             "mapping_status": node.get("mapping_status"),
         }
-        _add_hierarchy_path(semantic_root, _semantic_hierarchy_parts(node), leaf, "semantic-path")
-
-    for node in code_nodes:
-        code_id = node.get("node_id") or node.get("dep_node_id")
-        link_id = str(node.get("link_id") or _node_link_id("code", code_id))
-        known_link_ids.add(link_id)
-        leaf = {
-            "id": link_id,
-            "node_id": code_id,
-            "name": node.get("symbol") or node.get("name") or code_id or "code node",
-            "kind": "code",
-            "state": node.get("state"),
-            "path": node.get("path"),
-        }
-        _add_hierarchy_path(code_root, _code_hierarchy_parts(node), leaf, "code-path")
-
-    for mapping in mappings:
-        link_id = str(mapping.get("link_id") or _node_link_id("map", f"{mapping.get('rpg_node_id')}-{mapping.get('code_node_id') or 'missing'}"))
-        known_link_ids.add(link_id)
-        target = mapping.get("code_node_id") or mapping.get("dep_node_id") or "missing mapping"
-        _append_hierarchy_leaf(mapping_root, {
-            "id": link_id,
-            "name": f"{mapping.get('rpg_node_id')} → {target}",
-            "kind": "mapping",
-            "state": mapping.get("state") or mapping.get("status"),
-            "rpg_node_id": mapping.get("rpg_node_id"),
-            "code_node_id": mapping.get("code_node_id") or mapping.get("dep_node_id"),
-        })
-
-    context_link_ids: set[str] = set()
-    for edge in edges:
-        for endpoint_key, link_key in (("source_node_id", "source_link_id"), ("target_node_id", "target_link_id")):
-            link_id = edge.get(link_key)
-            node_id = edge.get(endpoint_key)
-            if link_id in (None, "") or str(link_id) in known_link_ids or str(link_id) in context_link_ids:
-                continue
-            context_link_ids.add(str(link_id))
-            _append_hierarchy_leaf(context_root, {
-                "id": str(link_id),
-                "node_id": node_id,
-                "name": node_id or "context node",
-                "kind": "context",
-            })
+        for key in (
+            "type",
+            "node_type",
+            "path",
+            "breadcrumb",
+            "breadcrumb_path",
+            "locate_status",
+            "score",
+            "reason",
+            "apply_action",
+            "changed_files",
+            "hidden_counts",
+            "warning_types",
+            "source",
+        ):
+            _set_if_present(leaf, key, node.get(key))
+        merge_code_metadata(leaf, code_refs)
+        _append_hierarchy_leaf(parent, leaf)
     return root
 
 
@@ -576,19 +650,93 @@ def _focused_graph_default_focus(
 ) -> Dict[str, Any]:
     semantic_links = [str(node.get("link_id") or _node_link_id("rpg", node.get("node_id"))) for node in semantic_nodes]
     code_links = [str(node.get("link_id") or _node_link_id("code", node.get("node_id") or node.get("dep_node_id"))) for node in code_nodes]
-    changed_code_links = [
-        str(node.get("link_id") or _node_link_id("code", node.get("node_id") or node.get("dep_node_id")))
-        for node in code_nodes
-        if node.get("changed") or node.get("changed_files") or node.get("diff_anchor")
-    ]
+    semantic_link_set = set(semantic_links)
+    code_to_feature_links: Dict[str, List[str]] = {}
+
+    def remember_code_feature(code_link: Any, feature_link: Any) -> None:
+        if code_link in (None, "") or feature_link in (None, ""):
+            return
+        code_text = str(code_link)
+        feature_text = str(feature_link)
+        values = code_to_feature_links.setdefault(code_text, [])
+        if feature_text not in values:
+            values.append(feature_text)
+
+    rpg_link_by_node_id = {
+        str(node.get("node_id")): str(node.get("link_id") or _node_link_id("rpg", node.get("node_id")))
+        for node in semantic_nodes
+        if node.get("node_id") not in (None, "")
+    }
+    for mapping in mappings:
+        source = mapping.get("source_link_id") or rpg_link_by_node_id.get(str(mapping.get("rpg_node_id") or mapping.get("node_id") or ""))
+        target = mapping.get("target_link_id") or _node_link_id("code", mapping.get("code_node_id") or mapping.get("dep_node_id"))
+        remember_code_feature(target, source)
+        remember_code_feature(mapping.get("code_node_id") or mapping.get("dep_node_id"), source)
+    for node in code_nodes:
+        code_link = str(node.get("link_id") or _node_link_id("code", node.get("node_id") or node.get("dep_node_id")))
+        for rpg_link in _listify(node.get("mapped_rpg_link_ids")):
+            remember_code_feature(code_link, rpg_link)
+            remember_code_feature(node.get("node_id") or node.get("dep_node_id"), rpg_link)
+
+    changed_feature_links: List[Any] = []
+    changed_code_links: List[str] = []
+    for node in code_nodes:
+        link_id = str(node.get("link_id") or _node_link_id("code", node.get("node_id") or node.get("dep_node_id")))
+        if node.get("changed") or node.get("changed_files") or node.get("diff_anchor"):
+            changed_code_links.append(link_id)
+            changed_feature_links.extend(_listify(node.get("mapped_rpg_link_ids")) + code_to_feature_links.get(link_id, []))
     warning_links = []
     for warning in warnings:
         warning_links.extend(_listify(warning.get("node_link_id")) + _listify(warning.get("code_link_id")))
-    node_link_ids = _ordered_unique(semantic_links + changed_code_links + warning_links)
+    node_link_ids = _ordered_unique(semantic_links + changed_feature_links + changed_code_links + warning_links)
     if not node_link_ids:
         node_link_ids = _ordered_unique(semantic_links + code_links)
+
+    expanded_node_ids: List[Any] = ["focused-graph-root"]
+    focused_path_node_ids: List[Any] = []
+    focused_tree_node_ids: List[Any] = []
+    semantic_path_ids_by_link: Dict[str, List[str]] = {}
+    for node in semantic_nodes:
+        link_id = str(node.get("link_id") or _node_link_id("rpg", node.get("node_id")))
+        trail: List[str] = []
+        path_ids: List[str] = ["focused-graph-root"]
+        for part in _semantic_hierarchy_parts(node):
+            trail.append(part)
+            path_ids.append(_node_link_id("feature-path", "/".join(trail)))
+        path_ids.append(link_id)
+        semantic_path_ids_by_link[link_id] = path_ids
+
+    def focus_tree_link(link_id: Any) -> None:
+        link_text = str(link_id or "")
+        if not link_text:
+            return
+        feature_links = [link_text] if link_text in semantic_link_set else code_to_feature_links.get(link_text, [])
+        if not feature_links:
+            feature_links = [link_text] if link_text.startswith("feature-path-") or link_text == "focused-graph-root" else []
+        for feature_link in feature_links:
+            path_ids = semantic_path_ids_by_link.get(feature_link, [feature_link])
+            expanded_node_ids.extend(path_ids[:-1])
+            focused_path_node_ids.extend(path_ids)
+            focused_tree_node_ids.append(path_ids[-1])
+
+    for link_id in node_link_ids:
+        focus_tree_link(link_id)
+    if not focused_tree_node_ids:
+        for link_id in semantic_links:
+            focus_tree_link(link_id)
+
+    expanded_node_ids = _ordered_unique(expanded_node_ids)
+    focused_path_node_ids = _ordered_unique(focused_path_node_ids)
+    focused_tree_node_ids = _ordered_unique(focused_tree_node_ids)
+    focused_code_link_ids = _ordered_unique(changed_code_links + [link_id for link_id in node_link_ids if link_id in code_links])
     return {
         "node_link_ids": node_link_ids,
+        "focused_node_ids": node_link_ids,
+        "focused_tree_node_ids": focused_tree_node_ids,
+        "focused_code_link_ids": focused_code_link_ids,
+        "expanded_node_ids": expanded_node_ids,
+        "default_expanded_node_ids": expanded_node_ids,
+        "focused_path_node_ids": focused_path_node_ids,
         "semantic_node_ids": _ordered_unique([node.get("node_id") for node in semantic_nodes]),
         "code_node_ids": _ordered_unique([node.get("node_id") or node.get("dep_node_id") for node in code_nodes]),
         "mapping_link_ids": _ordered_unique([mapping.get("link_id") for mapping in mappings]),
@@ -677,8 +825,30 @@ def _build_nodes_view(
             row["hidden_counts"] = node.get("hidden_counts")
         mapped_code_ids = _ordered_unique(code_ids_by_rpg.get(node_id, []))
         if mapped_code_ids:
+            mapped_code_refs: List[Dict[str, Any]] = []
+            for code_id in mapped_code_ids:
+                code = code_by_id.get(code_id, {})
+                path = code.get("path") or code.get("file") or code.get("module") or _dep_node_path(code_id)
+                symbol = code.get("symbol") or code.get("name") or _symbol_from_dep(code_id, code)
+                ref: Dict[str, Any] = {
+                    "node_id": code_id,
+                    "link_id": _edge_endpoint_link_id(code_id, rpg_by_id, code_by_id),
+                    "path": path,
+                    "symbol": symbol,
+                }
+                for key in ("type", "kind", "line_range", "state", "source"):
+                    _set_if_present(ref, key, code.get(key))
+                mapped_code_refs.append(ref)
+            row["mapped_code"] = mapped_code_refs
             row["mapped_code_node_ids"] = mapped_code_ids
-            row["mapped_code_link_ids"] = [_edge_endpoint_link_id(code_id, rpg_by_id, code_by_id) for code_id in mapped_code_ids]
+            row["mapped_code_link_ids"] = [ref["link_id"] for ref in mapped_code_refs]
+            row["mapped_code_paths"] = _ordered_unique([ref.get("path") for ref in mapped_code_refs])
+            row["mapped_code_symbols"] = _ordered_unique([ref.get("symbol") for ref in mapped_code_refs])
+            if row["mapped_code_paths"]:
+                row["mapped_code_path"] = row["mapped_code_paths"][0]
+            if row["mapped_code_symbols"]:
+                row["mapped_code_symbol"] = row["mapped_code_symbols"][0]
+            row["mapped_code_count"] = len(mapped_code_refs)
         if warnings_by_rpg.get(node_id):
             row["warning_types"] = _ordered_unique([warning.get("type") for warning in warnings_by_rpg[node_id]])
         semantic_nodes.append(row)
@@ -750,7 +920,7 @@ def _build_nodes_view(
             "relation": relation,
             "state": edge.get("status") or "visible",
         }
-        for key in ("direction", "source", "path", "reason", "rpg_node_id", "neighbor_node_id", "name"):
+        for key in ("direction", "source", "source_graph", "edge_source", "relation_source", "path", "reason", "rpg_node_id", "neighbor_node_id", "name"):
             _set_if_present(row, key, edge.get(key))
         edge_rows.append(row)
 
@@ -881,19 +1051,75 @@ def _dep_node_entry(dep_id: str, raw: Dict[str, Any]) -> Dict[str, Any]:
     return row
 
 
+_CONTAINMENT_RELATIONS = {"contains", "CONTAINS", "composes", "COMPOSES"}
+
+
+def _edge_relation(edge: Dict[str, Any], default: str) -> str:
+    attrs = edge.get("attrs") if isinstance(edge.get("attrs"), dict) else {}
+    relation = (
+        edge.get("relation")
+        or edge.get("type")
+        or edge.get("edge_type")
+        or edge.get("kind")
+        or attrs.get("relation")
+        or attrs.get("type")
+        or attrs.get("edge_type")
+        or attrs.get("kind")
+        or default
+    )
+    return str(relation)
+
+
+def _coerce_rpg_edge(edge: Any) -> Optional[Dict[str, Any]]:
+    if isinstance(edge, dict):
+        source = edge.get("source_node_id") or edge.get("source") or edge.get("from") or edge.get("src")
+        target = edge.get("target_node_id") or edge.get("target") or edge.get("to") or edge.get("dst")
+        relation = _edge_relation(edge, "semantic")
+        if relation in _CONTAINMENT_RELATIONS or source in (None, "") or target in (None, ""):
+            return None
+        row = {
+            "source_node_id": str(source),
+            "target_node_id": str(target),
+            "relation": relation,
+            "source": "rpg_semantic",
+            "source_graph": "rpg",
+            "relation_source": "rpg_semantic",
+            "edge_source": "rpg",
+        }
+        for key in ("direction", "name", "path", "reason", "status"):
+            _set_if_present(row, key, edge.get(key))
+        return row
+    if isinstance(edge, (list, tuple)) and len(edge) >= 2:
+        relation = str(edge[2]) if len(edge) >= 3 else "semantic"
+        if relation in _CONTAINMENT_RELATIONS:
+            return None
+        return {"source_node_id": str(edge[0]), "target_node_id": str(edge[1]), "relation": relation, "source": "rpg_semantic", "source_graph": "rpg", "relation_source": "rpg_semantic", "edge_source": "rpg"}
+    return None
+
+
 def _coerce_dep_edge(edge: Any) -> Optional[Dict[str, Any]]:
     if isinstance(edge, dict):
-        source = edge.get("source") or edge.get("from") or edge.get("caller") or edge.get("src")
-        target = edge.get("target") or edge.get("to") or edge.get("callee") or edge.get("dst")
-        relation = edge.get("relation") or edge.get("type") or edge.get("edge_type") or edge.get("kind") or "dep_graph"
-        if source in (None, "") or target in (None, ""):
+        source = edge.get("source_node_id") or edge.get("source") or edge.get("from") or edge.get("caller") or edge.get("src")
+        target = edge.get("target_node_id") or edge.get("target") or edge.get("to") or edge.get("callee") or edge.get("dst")
+        relation = _edge_relation(edge, "dep_graph")
+        if relation in _CONTAINMENT_RELATIONS or source in (None, "") or target in (None, ""):
             return None
-        row = {"source_node_id": str(source), "target_node_id": str(target), "relation": str(relation), "source": "dep_graph"}
+        row = {
+            "source_node_id": str(source),
+            "target_node_id": str(target),
+            "relation": relation,
+            "source": "dep_graph",
+            "source_graph": "dep_graph",
+            "relation_source": "dep_graph",
+            "edge_source": "dep_graph",
+        }
         _set_if_present(row, "reason", edge.get("reason"))
         return row
     if isinstance(edge, (list, tuple)) and len(edge) >= 2:
-        relation = edge[2] if len(edge) >= 3 else "dep_graph"
-        return {"source_node_id": str(edge[0]), "target_node_id": str(edge[1]), "relation": str(relation), "source": "dep_graph"}
+        relation = str(edge[2]) if len(edge) >= 3 else "dep_graph"
+        if relation in _CONTAINMENT_RELATIONS:
+            return None
+        return {"source_node_id": str(edge[0]), "target_node_id": str(edge[1]), "relation": relation, "source": "dep_graph", "source_graph": "dep_graph", "relation_source": "dep_graph", "edge_source": "dep_graph"}
     return None
 
 
@@ -901,13 +1127,14 @@ def _current_rpg_context() -> Tuple[
     Dict[str, Dict[str, Any]],
     Dict[str, Dict[str, Any]],
     List[Dict[str, Any]],
+    List[Dict[str, Any]],
     Dict[str, List[str]],
     Dict[str, List[str]],
     List[Dict[str, Any]],
 ]:
     rpg_data = _load_json_artifact(REPO_RPG_FILE)
     if not isinstance(rpg_data, dict) or rpg_data.get("_error"):
-        return {}, {}, [], {}, {}, [{"type": "stale_graph", "message": f"RPG file not available: {REPO_RPG_FILE}"}]
+        return {}, {}, [], [], {}, {}, [{"type": "stale_graph", "message": f"RPG file not available: {REPO_RPG_FILE}"}]
 
     rpg_nodes: Dict[str, Dict[str, Any]] = {}
 
@@ -994,8 +1221,21 @@ def _current_rpg_context() -> Tuple[
     for dep_id, rpg_ids in list(dep_to_rpg.items()):
         dep_to_rpg[dep_id] = _ordered_unique(rpg_ids)
 
+    def edge_values(value: Any) -> List[Any]:
+        if isinstance(value, dict):
+            return list(value.values())
+        if isinstance(value, (list, tuple, set)):
+            return list(value)
+        return []
+
+    rpg_edges = []
+    for raw_edge in edge_values(rpg_data.get("edges")) + edge_values(rpg_data.get("semantic_edges")) + edge_values(rpg_data.get("feature_edges")):
+        edge = _coerce_rpg_edge(raw_edge)
+        if edge:
+            rpg_edges.append(edge)
+
     dep_edges = []
-    for raw_edge in dep_graph.get("edges") or []:
+    for raw_edge in edge_values(dep_graph.get("edges")) + edge_values(dep_graph.get("syntax_edges")):
         edge = _coerce_dep_edge(raw_edge)
         if edge:
             dep_edges.append(edge)
@@ -1003,7 +1243,7 @@ def _current_rpg_context() -> Tuple[
     warnings: List[Dict[str, Any]] = []
     if not rpg_nodes and not dep_nodes:
         warnings.append({"type": "stale_graph", "message": "Current RPG contains no indexed feature or dependency nodes"})
-    return rpg_nodes, dep_nodes, dep_edges, rpg_to_dep, dep_to_rpg, warnings
+    return rpg_nodes, dep_nodes, rpg_edges, dep_edges, rpg_to_dep, dep_to_rpg, warnings
 
 
 def _feature_evidence_groups(
@@ -1017,7 +1257,7 @@ def _feature_evidence_groups(
     code_result = artifacts.get("code_result") if isinstance(artifacts.get("code_result"), dict) else {}
     apply_result = artifacts.get("apply_result") if isinstance(artifacts.get("apply_result"), dict) else {}
     impact_results = _impact_results(artifacts)
-    current_rpg_nodes, current_dep_nodes, current_dep_edges, current_rpg_to_dep, _, graph_warnings = _current_rpg_context()
+    current_rpg_nodes, current_dep_nodes, current_rpg_edges, current_dep_edges, current_rpg_to_dep, _, graph_warnings = _current_rpg_context()
     current_graph_available = bool(current_rpg_nodes or current_dep_nodes)
     locate_ids = {str(row.get("node_id")) for row in locate.get("results") or [] if isinstance(row, dict) and row.get("node_id")}
     applied_by_id = {
@@ -1110,11 +1350,15 @@ def _feature_evidence_groups(
         if key in edge_keys:
             return
         edge_keys.add(key)
+        source_graph = edge.get("source_graph") or ("rpg" if source_text_label == "rpg_semantic" else "dep_graph" if source_text_label == "dep_graph" else source_text_label)
         row: Dict[str, Any] = {
             "source_node_id": source_text,
             "target_node_id": target_text,
             "relation": relation_text,
             "source": source_text_label,
+            "source_graph": source_graph,
+            "relation_source": edge.get("relation_source") or source_text_label,
+            "edge_source": edge.get("edge_source") or source_graph,
         }
         for key_name in ("rpg_node_id", "neighbor_node_id", "direction", "name", "path", "reason", "status"):
             _set_if_present(row, key_name, edge.get(key_name))
@@ -1262,6 +1506,11 @@ def _feature_evidence_groups(
         if dep_node.get("path") in changed_files:
             add_code_node(dep_id, source="changed_file", fallback_path=dep_node.get("path"))
 
+    selected_rpg_ids = {row.get("node_id") for row in primary_rpg_nodes_all}
+    for edge in current_rpg_edges:
+        if edge.get("source_node_id") in selected_rpg_ids or edge.get("target_node_id") in selected_rpg_ids:
+            add_edge(edge)
+
     selected_code_ids = set(code_node_by_id)
     for edge in current_dep_edges:
         if edge.get("source_node_id") in selected_code_ids or edge.get("target_node_id") in selected_code_ids:
@@ -1320,6 +1569,7 @@ def _feature_evidence_groups(
         "current_graph_available": current_graph_available,
         "current_rpg_nodes": len(current_rpg_nodes),
         "current_dep_nodes": len(current_dep_nodes),
+        "current_rpg_edges": len(current_rpg_edges),
         "current_dep_edges": len(current_dep_edges),
     }
     nodes_view = _build_nodes_view(

@@ -383,27 +383,34 @@ details summary {{ cursor:pointer; color:var(--accent); font-weight:600; }}
 .focused-graph-toolbar {{ display:flex; flex-wrap:wrap; gap:8px; align-items:center; margin:10px 0 12px; }}
 .focused-graph-toolbar button, .focused-graph-toolbar input {{ border:1px solid var(--line); border-radius:8px; background:#fff; color:var(--text); padding:6px 10px; font:inherit; }}
 .focused-graph-toolbar label {{ display:inline-flex; gap:6px; align-items:center; color:var(--muted); }}
-.focused-graph-stage {{ border:1px solid var(--line); border-radius:12px; background:#fbfdff; min-height:480px; position:relative; overflow:hidden; }}
-.focused-graph-svg {{ display:block; width:100%; height:480px; cursor:grab; touch-action:none; }}
+.focused-graph-stage {{ border:1px solid var(--line); border-radius:12px; background:#fbfdff; min-height:520px; position:relative; overflow:hidden; }}
+.focused-graph-svg {{ display:block; width:100%; height:520px; cursor:grab; touch-action:none; }}
 .focused-graph-svg:active {{ cursor:grabbing; }}
-.focused-graph-link {{ transition:opacity .15s ease, stroke-width .15s ease; }}
-.focused-graph-link.active {{ opacity:1; stroke:#0f172a; stroke-width:2.6; }}
+.focused-graph-tree-link {{ fill:none; stroke:#cbd5e1; stroke-width:1.4; }}
+.focused-graph-link {{ fill:none; opacity:.78; transition:opacity .15s ease, stroke-width .15s ease; }}
+.focused-graph-link.active {{ opacity:1; stroke-width:2.8; }}
 .focused-graph-link.dimmed {{ opacity:.14; }}
 .focused-graph-link.hidden {{ display:none; }}
+.focused-graph-link.edge-semantic {{ stroke:#7c3aed; }}
+.focused-graph-link.edge-dependency {{ stroke:#ea580c; }}
+.focused-graph-link.relation-invokes, .focused-graph-link.relation-caller, .focused-graph-link.relation-callee {{ stroke:#16a34a; }}
+.focused-graph-link.relation-imports, .focused-graph-link.relation-import {{ stroke:#ea580c; }}
+.focused-graph-link.relation-inherits, .focused-graph-link.relation-inheritance {{ stroke:#9333ea; }}
+.focused-graph-link.relation-references, .focused-graph-link.relation-reference {{ stroke:#2563eb; }}
+.focused-graph-link.source-dep-graph {{ stroke-dasharray:5 3; }}
 .focused-graph-node {{ cursor:pointer; transition:opacity .15s ease; }}
-.focused-graph-node circle {{ transition:stroke .15s ease, stroke-width .15s ease; }}
-.focused-graph-node.selected circle, .focused-graph-node.active circle {{ stroke:#0f172a; stroke-width:3; }}
-.focused-graph-node.dragging {{ cursor:grabbing; }}
+.focused-graph-node circle {{ fill:#2563eb; stroke:#fff; stroke-width:2; transition:stroke .15s ease, stroke-width .15s ease; }}
+.focused-graph-node.selected circle, .focused-graph-node.active circle, .focused-graph-node.focused circle {{ stroke:#0f172a; stroke-width:3; }}
+.focused-graph-node.search-match circle {{ stroke:#f59e0b; stroke-width:3; }}
 .focused-graph-node.dimmed {{ opacity:.18; }}
 .focused-graph-node.hidden {{ display:none; }}
 .focused-graph-fallback {{ margin:12px; padding:12px; border:1px dashed var(--line); border-radius:10px; background:#fff; color:var(--muted); }}
 .focused-graph-legend {{ display:flex; flex-wrap:wrap; gap:8px; margin:8px 0 12px; }}
 .legend-item {{ display:inline-flex; gap:6px; align-items:center; color:var(--muted); font-size:13px; }}
 .legend-swatch {{ width:10px; height:10px; border-radius:999px; display:inline-block; border:1px solid var(--line); }}
-.legend-semantic {{ background:#2563eb; }}
-.legend-code {{ background:#16a34a; }}
-.legend-mapping {{ background:#f59e0b; }}
-.legend-context {{ background:#64748b; }}
+.legend-node {{ background:#2563eb; }}
+.legend-semantic-edge {{ background:#7c3aed; }}
+.legend-dependency-edge {{ background:#ea580c; }}
 @media (max-width:720px) {{ main {{ padding:22px 12px 36px; }} .focus-map {{ grid-template-columns:1fr; }} table {{ min-width:560px; }} }}
 </style>
 </head>
@@ -845,12 +852,42 @@ def _json_for_script(value: Any) -> str:
     )
 
 
+def _mapped_code_label(row: Mapping[str, Any]) -> str:
+    path = row.get("mapped_code_path")
+    symbol = row.get("mapped_code_symbol")
+    first = next((item for item in _as_sequence(row.get("mapped_code")) if isinstance(item, Mapping)), None)
+    if first:
+        path = path or first.get("path")
+        symbol = symbol or first.get("symbol") or first.get("name")
+    if not path:
+        paths = _as_sequence(row.get("mapped_code_paths"))
+        path = paths[0] if paths else None
+    if not symbol:
+        symbols = _as_sequence(row.get("mapped_code_symbols"))
+        symbol = symbols[0] if symbols else None
+    detail = " · ".join(str(item) for item in (path, symbol) if item not in (None, ""))
+    if not detail:
+        return ""
+    count = row.get("mapped_code_count")
+    try:
+        count_int = int(count)
+    except (TypeError, ValueError):
+        count_int = 0
+    suffix = f" +{count_int - 1}" if count_int > 1 else ""
+    return f"{detail}{suffix}"
+
+
 def _graph_label(row: Mapping[str, Any], fallback: Any) -> str:
-    for key in ("name", "symbol", "label", "path", "node_id", "dep_node_id", "id"):
+    base = ""
+    for key in ("feature_name", "name", "symbol", "label", "path", "node_id", "dep_node_id", "id"):
         value = row.get(key)
         if value not in (None, ""):
-            return str(value)
-    return str(fallback or "node")
+            base = str(value)
+            break
+    if not base:
+        base = str(fallback or "node")
+    mapped_code = _mapped_code_label(row)
+    return f"{base} — {mapped_code}" if mapped_code else base
 
 
 def _graph_diff_ref(row: Mapping[str, Any], file_anchors: Mapping[str, str]) -> dict[str, str]:
@@ -893,7 +930,23 @@ def _append_graph_node(nodes: list[dict[str, Any]], seen: set[str], row: Mapping
         "node_id": row.get("node_id") or row.get("dep_node_id"),
         "state": row.get("state") or row.get("status") or row.get("mapping_status"),
     }
-    for key in ("path", "type", "node_type", "source", "mapping_status", "locate_status", "breadcrumb_path"):
+    for key in (
+        "path",
+        "feature_path",
+        "feature_name",
+        "type",
+        "node_type",
+        "source",
+        "mapping_status",
+        "locate_status",
+        "breadcrumb_path",
+        "mapped_code",
+        "mapped_code_path",
+        "mapped_code_paths",
+        "mapped_code_symbol",
+        "mapped_code_symbols",
+        "mapped_code_count",
+    ):
         if row.get(key) not in (None, ""):
             payload[key] = row.get(key)
     diff_ref = _graph_diff_ref(row, file_anchors)
@@ -928,18 +981,33 @@ def _append_hierarchy_nodes(
         if not isinstance(row, Mapping):
             return ""
         row_id = node_id(row)
-        children = [child for child in _as_sequence(row.get("children")) if isinstance(child, Mapping)]
-        if row_id and children and row_id not in seen_nodes:
+        if row_id and row_id not in seen_nodes:
             seen_nodes.add(row_id)
-            nodes.append({
+            payload = {
                 "id": row_id,
-                "kind": "hierarchy",
-                "label": str(row.get("name") or row.get("node_id") or row_id),
+                "kind": row.get("kind") or "feature",
+                "label": _graph_label(row, row.get("node_id") or row_id),
                 "node_id": row.get("node_id") or row_id,
                 "state": row.get("state") or row.get("kind") or "hierarchy",
                 "type": row.get("kind") or "hierarchy",
-            })
-        for child in children:
+            }
+            for key in (
+                "feature_name",
+                "feature_path",
+                "path",
+                "node_type",
+                "mapping_status",
+                "mapped_code",
+                "mapped_code_path",
+                "mapped_code_paths",
+                "mapped_code_symbol",
+                "mapped_code_symbols",
+                "mapped_code_count",
+            ):
+                if row.get(key) not in (None, ""):
+                    payload[key] = row.get(key)
+            nodes.append(payload)
+        for child in [child for child in _as_sequence(row.get("children")) if isinstance(child, Mapping)]:
             child_id = visit(child)
             if row_id in seen_nodes and child_id in seen_nodes:
                 link_id = f"hierarchy-{_slug(row_id)}-{_slug(child_id)}"
@@ -960,63 +1028,151 @@ def _focused_graph_payload(focused_view: Mapping[str, Any], file_anchors: Mappin
     context_edges = [edge for edge in _as_sequence(nodes_view.get("edges")) if isinstance(edge, Mapping)]
     hidden_counts = nodes_view.get("hidden_counts") if isinstance(nodes_view.get("hidden_counts"), Mapping) else focused_view.get("hidden_counts", {})
     warnings = [warning for warning in _as_sequence(nodes_view.get("warnings")) if isinstance(warning, Mapping)]
-    nodes: list[dict[str, Any]] = []
-    seen_nodes: set[str] = set()
-    rpg_links: dict[str, str] = {}
-    code_links: dict[str, str] = {}
-
-    for node in semantic_nodes:
-        link_id = _append_graph_node(nodes, seen_nodes, node, "semantic", file_anchors)
-        node_id = node.get("node_id")
-        if node_id not in (None, ""):
-            rpg_links[str(node_id)] = link_id
-    for node in code_nodes:
-        link_id = _append_graph_node(nodes, seen_nodes, node, "code", file_anchors)
-        node_id = node.get("node_id") or node.get("dep_node_id")
-        if node_id not in (None, ""):
-            code_links[str(node_id)] = link_id
-
-    links: list[dict[str, Any]] = []
-    for mapping in mappings:
-        mapping_id = _append_graph_node(nodes, seen_nodes, mapping, "mapping", file_anchors)
-        rpg_id = mapping.get("rpg_node_id") or mapping.get("node_id")
-        code_id = mapping.get("code_node_id") or mapping.get("dep_node_id")
-        source = mapping.get("source_link_id") or rpg_links.get(str(rpg_id or ""))
-        target = mapping.get("target_link_id") or code_links.get(str(code_id or ""))
-        if source:
-            links.append({"id": f"{mapping_id}-semantic", "source": source, "target": mapping_id, "kind": "mapping", "relation": mapping.get("status") or "mapped"})
-        if target:
-            links.append({"id": f"{mapping_id}-code", "source": mapping_id, "target": target, "kind": "mapping", "relation": mapping.get("source") or "code"})
-
-    for edge in context_edges:
-        source = edge.get("source_link_id")
-        target = edge.get("target_link_id")
-        if not source:
-            source = _append_context_node(nodes, seen_nodes, None, edge.get("source_node_id"))
-        elif str(source) not in seen_nodes:
-            _append_context_node(nodes, seen_nodes, source, edge.get("source_node_id"))
-        if not target:
-            target = _append_context_node(nodes, seen_nodes, None, edge.get("target_node_id"))
-        elif str(target) not in seen_nodes:
-            _append_context_node(nodes, seen_nodes, target, edge.get("target_node_id"))
-        links.append({
-            "id": edge.get("link_id") or f"edge-{len(links) + 1}",
-            "source": str(source),
-            "target": str(target),
-            "kind": "context",
-            "relation": edge.get("relation") or "dependency",
-            "direction": edge.get("direction"),
-        })
-
     focused_graph = nodes_view.get("focused_graph") if isinstance(nodes_view.get("focused_graph"), Mapping) else {}
     hierarchy = nodes_view.get("hierarchy") or focused_graph.get("hierarchy") or {}
     default_focus = nodes_view.get("default_focus") or focused_graph.get("default_focus") or {}
+
+    if not isinstance(hierarchy, Mapping) or not hierarchy or (semantic_nodes and not _as_sequence(hierarchy.get("children"))):
+        hierarchy = {
+            "id": "focused-graph-root",
+            "name": "Focused graph",
+            "kind": "root",
+            "children": [
+                {
+                    "id": _graph_node_id(node, "feature"),
+                    "node_id": node.get("node_id"),
+                    "name": node.get("name") or node.get("symbol") or node.get("node_id") or "feature",
+                    "kind": "feature",
+                    "feature_name": node.get("name") or node.get("symbol") or node.get("node_id") or "feature",
+                    "feature_path": node.get("feature_path") or node.get("breadcrumb_path") or node.get("path"),
+                    "mapped_code": node.get("mapped_code"),
+                    "mapped_code_node_ids": node.get("mapped_code_node_ids"),
+                    "mapped_code_link_ids": node.get("mapped_code_link_ids"),
+                    "mapped_code_path": node.get("mapped_code_path"),
+                    "mapped_code_paths": node.get("mapped_code_paths"),
+                    "mapped_code_symbol": node.get("mapped_code_symbol"),
+                    "mapped_code_symbols": node.get("mapped_code_symbols"),
+                    "mapped_code_count": node.get("mapped_code_count"),
+                }
+                for node in semantic_nodes
+            ],
+        }
+
+    nodes: list[dict[str, Any]] = []
+    links: list[dict[str, Any]] = []
+    seen_nodes: set[str] = set()
     _append_hierarchy_nodes(nodes, links, seen_nodes, hierarchy)
+
+    rpg_links: dict[str, str] = {}
+    code_links: dict[str, str] = {}
+    node_aliases: dict[str, list[str]] = {}
+
+    def add_alias(alias: Any, target: Any) -> None:
+        if alias in (None, "") or target in (None, ""):
+            return
+        alias_text = str(alias)
+        target_text = str(target)
+        values = node_aliases.setdefault(alias_text, [])
+        if target_text not in values:
+            values.append(target_text)
+
+    def visit_hierarchy(row: Any) -> None:
+        if not isinstance(row, Mapping):
+            return
+        row_id = str(row.get("id") or row.get("link_id") or row.get("node_id") or "")
+        node_id = row.get("node_id")
+        if node_id not in (None, "") and row_id:
+            rpg_links.setdefault(str(node_id), row_id)
+        for code_id in _as_sequence(row.get("mapped_code_node_ids")):
+            add_alias(_graph_node_id({"node_id": code_id}, "code"), row_id)
+            add_alias(code_id, row_id)
+        for code_link in _as_sequence(row.get("mapped_code_link_ids")):
+            add_alias(code_link, row_id)
+        for code_ref in _as_sequence(row.get("mapped_code")):
+            if isinstance(code_ref, Mapping):
+                add_alias(code_ref.get("link_id"), row_id)
+                add_alias(code_ref.get("node_id") or code_ref.get("dep_node_id"), row_id)
+        for child in _as_sequence(row.get("children")):
+            visit_hierarchy(child)
+
+    visit_hierarchy(hierarchy)
+
+    for node in semantic_nodes:
+        link_id = str(node.get("link_id") or _graph_node_id(node, "feature"))
+        node_id = node.get("node_id")
+        if node_id not in (None, ""):
+            rpg_links.setdefault(str(node_id), link_id)
+    for node in code_nodes:
+        link_id = str(node.get("link_id") or _graph_node_id(node, "code"))
+        node_id = node.get("node_id") or node.get("dep_node_id")
+        if node_id not in (None, ""):
+            code_links[str(node_id)] = link_id
+            for rpg_link in _as_sequence(node.get("mapped_rpg_link_ids")):
+                add_alias(link_id, rpg_link)
+                add_alias(node_id, rpg_link)
+
+    for mapping in mappings:
+        source = mapping.get("source_link_id") or rpg_links.get(str(mapping.get("rpg_node_id") or mapping.get("node_id") or ""))
+        target = mapping.get("target_link_id") or code_links.get(str(mapping.get("code_node_id") or mapping.get("dep_node_id") or ""))
+        add_alias(target, source)
+        add_alias(mapping.get("code_node_id") or mapping.get("dep_node_id"), source)
+
+    def edge_kind(edge: Mapping[str, Any]) -> str:
+        source_parts = " ".join(
+            str(edge.get(key) or "")
+            for key in ("source_graph", "edge_source", "relation_source", "source")
+        ).lower()
+        relation = str(edge.get("relation") or "").lower()
+        if "rpg" in source_parts or relation in {"semantic", "depends_on", "related", "relates_to"}:
+            return "semantic"
+        return "dependency"
+
+    def candidates(edge: Mapping[str, Any], side: str) -> list[str]:
+        values: list[Any] = []
+        values.extend(_as_sequence(edge.get(f"{side}_candidates")))
+        values.extend(_as_sequence(edge.get(f"{side}_rpg_link_ids")))
+        values.append(edge.get(f"{side}_link_id"))
+        node_id = edge.get(f"{side}_node_id")
+        values.append(rpg_links.get(str(node_id or "")))
+        values.append(code_links.get(str(node_id or "")))
+        values.append(node_id)
+        expanded: list[str] = []
+        for value in values:
+            if value in (None, ""):
+                continue
+            text = str(value)
+            expanded.append(text)
+            expanded.extend(node_aliases.get(text, []))
+        return _ordered_texts(expanded)
+
+    relation_edges: list[dict[str, Any]] = []
+    for index, edge in enumerate(context_edges, start=1):
+        source_candidates = candidates(edge, "source")
+        target_candidates = candidates(edge, "target")
+        relation_edges.append({
+            "id": str(edge.get("link_id") or f"edge-{index}"),
+            "source": source_candidates[0] if source_candidates else "",
+            "target": target_candidates[0] if target_candidates else "",
+            "source_candidates": source_candidates,
+            "target_candidates": target_candidates,
+            "kind": edge_kind(edge),
+            "relation": edge.get("relation") or "dependency",
+            "source_meta": edge.get("source"),
+            "source_graph": edge.get("source_graph"),
+            "edge_source": edge.get("edge_source"),
+            "relation_source": edge.get("relation_source"),
+            "direction": edge.get("direction"),
+            "reason": edge.get("reason"),
+            "path": edge.get("path"),
+        })
+
+    links.extend(relation_edges)
     return {
         "schema": "cmind.focused_graph.render.v1",
         "summary": summary,
         "nodes": nodes,
         "links": links,
+        "relation_edges": relation_edges,
         "semantic_nodes": semantic_nodes,
         "code_nodes": code_nodes,
         "mappings": mappings,
@@ -1025,6 +1181,7 @@ def _focused_graph_payload(focused_view: Mapping[str, Any], file_anchors: Mappin
         "warnings": warnings,
         "hierarchy": hierarchy,
         "default_focus": default_focus,
+        "node_aliases": node_aliases,
     }
 
 
@@ -1040,279 +1197,270 @@ def _focused_graph_runtime() -> str:
   if (fallback) fallback.hidden = true;
   const data = JSON.parse(dataEl.textContent || '{}');
   const width = Number(svg.getAttribute('width')) || 960;
-  const height = Number(svg.getAttribute('height')) || 480;
+  const height = Number(svg.getAttribute('height')) || 520;
   const defaultFocus = data.default_focus || {};
   const defaultShowEdges = defaultFocus.show_edges !== false;
   const text = value => value === undefined || value === null ? '' : String(value);
   const list = value => Array.isArray(value) ? value : [];
-  let hierarchyDepth = Math.max(0, Number(defaultFocus.hierarchy_depth ?? defaultFocus.edge_depth ?? 1) || 0);
-  const defaultHierarchyDepth = hierarchyDepth;
+  const root = d3.hierarchy(data.hierarchy || {id:'focused-graph-root', name:'Focused graph', children:[]}, d => d.children);
+  const rootHierarchyId = text(root.data.id || 'focused-graph-root');
+  const focusedNodeIds = new Set(list(defaultFocus.focused_tree_node_ids || defaultFocus.focused_node_ids || defaultFocus.node_link_ids).map(text).filter(Boolean));
+  const focusedCodeLinkIds = new Set(list(defaultFocus.focused_code_link_ids).map(text).filter(Boolean));
+  const expandedNodeIds = new Set(list(defaultFocus.default_expanded_node_ids || defaultFocus.expanded_node_ids).map(text).filter(Boolean));
+  const focusedPathNodeIds = new Set(list(defaultFocus.focused_path_node_ids).map(text).filter(Boolean));
+  const defaultExpandedIds = new Set([rootHierarchyId, ...expandedNodeIds]);
   let showEdges = defaultShowEdges;
   let query = '';
   let selectedId = null;
-  let visibleNodeIds = new Set();
-  const collapsedHierarchyIds = new Set();
-  const nodes = list(data.nodes).map((node, index) => ({
-    ...node,
-    id: text(node.id || node.node_id || `node-${index + 1}`),
-    kind: text(node.kind || 'context'),
-    label: text(node.label || node.name || node.node_id || node.id || `node-${index + 1}`),
-  }));
-  const nodeById = new Map(nodes.map(node => [node.id, node]));
-  const links = list(data.links).map((link, index) => {
-    const source = text(link.source && link.source.id ? link.source.id : link.source);
-    const target = text(link.target && link.target.id ? link.target.id : link.target);
-    return {...link, id: text(link.id || `link-${index + 1}`), source, target};
-  }).filter(link => nodeById.has(link.source) && nodeById.has(link.target));
-  const hierarchyNodeById = new Map();
-  const hierarchyParentById = new Map();
-  const hierarchyChildrenById = new Map();
-  const hierarchyDepthById = new Map();
-  const hierarchyAncestorsById = new Map();
-  const rootHierarchyId = text(data.hierarchy && data.hierarchy.id);
-  const adjacency = new Map(nodes.map(node => [node.id, new Set()]));
-  const linksByNode = new Map(nodes.map(node => [node.id, new Set()]));
+  const allNodeById = {};
+  let nodeById = {};
+  let currentNodes = [];
+  let currentRelationEdges = [];
 
-  function fill(kind) {
-    return kind === 'semantic' ? '#2563eb' : kind === 'code' ? '#16a34a' : kind === 'mapping' ? '#f59e0b' : kind === 'hierarchy' ? '#8b5cf6' : '#64748b';
-  }
-  function linkKey(link) {
-    return text(link.id || `${link.source}-${link.target}`);
-  }
-  function collectHierarchy(row, parentId, depth, ancestors) {
-    if (!row || typeof row !== 'object') return;
-    const id = text(row.id || row.link_id || row.node_id);
-    if (!id) return;
-    const children = list(row.children).map(child => text(child && (child.id || child.link_id || child.node_id))).filter(Boolean);
-    hierarchyNodeById.set(id, row);
-    hierarchyChildrenById.set(id, children);
-    hierarchyDepthById.set(id, depth);
-    hierarchyAncestorsById.set(id, ancestors);
-    if (parentId) hierarchyParentById.set(id, parentId);
-    list(row.children).forEach(child => collectHierarchy(child, id, depth + 1, ancestors.concat(id)));
-  }
-  collectHierarchy(data.hierarchy, '', 0, []);
-  let maxHierarchyDepth = Math.max(1, defaultHierarchyDepth);
-  hierarchyDepthById.forEach(depth => { maxHierarchyDepth = Math.max(maxHierarchyDepth, depth); });
-  const maxDepth = Math.max(maxHierarchyDepth, Math.min(Math.max(nodes.length - 1, 1), 8));
-
-  links.forEach(link => {
-    adjacency.get(link.source)?.add(link.target);
-    adjacency.get(link.target)?.add(link.source);
-    linksByNode.get(link.source)?.add(linkKey(link));
-    linksByNode.get(link.target)?.add(linkKey(link));
+  root.x0 = height / 2;
+  root.y0 = 0;
+  root.descendants().forEach(d => {
+    d.id = text(d.data.id || d.data.link_id || d.data.node_id || d.data.name);
+    if (!d.id) d.id = `node-${Math.random().toString(36).slice(2)}`;
+    d._allChildren = d.children || null;
+    allNodeById[d.id] = d;
   });
 
-  const defaultFocusIds = new Set(list(defaultFocus.node_link_ids).map(text).filter(id => nodeById.has(id)));
-  const semanticFocusIds = new Set(list(defaultFocus.semantic_node_ids).map(text));
-  const codeFocusIds = new Set(list(defaultFocus.code_node_ids).map(text));
-  const mappingFocusIds = new Set(list(defaultFocus.mapping_link_ids).map(text));
-  nodes.forEach(node => {
-    if (semanticFocusIds.has(text(node.node_id)) || codeFocusIds.has(text(node.node_id)) || mappingFocusIds.has(node.id)) {
-      defaultFocusIds.add(node.id);
-    }
-  });
+  function walkAll(d, visit) {
+    visit(d);
+    list(d._allChildren).forEach(child => walkAll(child, visit));
+  }
 
-  function layout(rows) {
-    const groups = {hierarchy: [], semantic: [], mapping: [], code: [], context: []};
-    rows.forEach(node => (groups[node.kind] || groups.context).push(node));
-    const x = {hierarchy: 90, semantic: 240, mapping: 455, code: 690, context: 850};
-    const marginY = 36;
-    const availableY = Math.max(120, height - marginY * 2);
-    Object.entries(groups).forEach(([kind, groupRows]) => {
-      const gap = groupRows.length > 1 ? Math.min(78, availableY / (groupRows.length - 1)) : 0;
-      const start = height / 2 - ((groupRows.length - 1) * gap) / 2;
-      groupRows.forEach((node, index) => { node.x = x[kind] || width / 2; node.y = start + index * gap; });
+  function initializeDefaultState() {
+    walkAll(root, d => {
+      if (!d._allChildren) return;
+      const keepOpen = d.depth === 0 || defaultExpandedIds.has(d.id) || focusedPathNodeIds.has(d.id);
+      if (keepOpen) {
+        d.children = d._allChildren;
+        d._children = null;
+      } else {
+        d._children = d._allChildren;
+        d.children = null;
+      }
     });
   }
+  initializeDefaultState();
 
-  function expandFromFocus(seedIds, depthLimit) {
-    const visible = new Set([...seedIds].filter(id => nodeById.has(id)));
-    let frontier = new Set(visible);
-    for (let depth = 0; depth < depthLimit && frontier.size; depth += 1) {
-      const next = new Set();
-      frontier.forEach(id => (adjacency.get(id) || new Set()).forEach(neighbor => {
-        if (!visible.has(neighbor)) {
-          visible.add(neighbor);
-          next.add(neighbor);
-        }
-      }));
-      frontier = next;
-    }
-    return visible;
-  }
-
-  function nodeMatches(node) {
-    if (!query) return true;
-    return `${node.label} ${node.node_id || ''} ${node.path || ''} ${node.kind || ''}`.toLowerCase().includes(query);
-  }
-
-  function isCollapsed(nodeId) {
-    return list(hierarchyAncestorsById.get(nodeId)).some(id => collapsedHierarchyIds.has(id));
-  }
-
-  function nearestHierarchyToggle(nodeId) {
-    return nodeId !== rootHierarchyId && (hierarchyChildrenById.get(nodeId) || []).length ? nodeId : '';
-  }
-
-  function computeVisibleNodeIds() {
-    const seeds = defaultFocusIds.size ? defaultFocusIds : new Set(nodes.map(node => node.id));
-    const visible = expandFromFocus(seeds, hierarchyDepth);
-    if (hierarchyNodeById.size) {
-      nodes.forEach(node => {
-        const depth = hierarchyDepthById.get(node.id);
-        if (depth !== undefined && depth <= hierarchyDepth) visible.add(node.id);
-      });
-    }
-    if (query) nodes.forEach(node => { if (nodeMatches(node)) visible.add(node.id); });
-    nodes.forEach(node => {
-      if (!nodeMatches(node) || isCollapsed(node.id)) visible.delete(node.id);
-    });
-    if (!visible.size && !query) nodes.forEach(node => { if (!isCollapsed(node.id)) visible.add(node.id); });
-    return visible;
-  }
-
-  function isLinkVisible(link) {
-    return showEdges && visibleNodeIds.has(link.source) && visibleNodeIds.has(link.target);
-  }
-
-  layout(nodes);
+  const relationEdges = list(data.relation_edges || data.links).filter(edge => text(edge.relation) !== 'contains');
+  const treemap = d3.tree().nodeSize([28, 250]);
   const svgSelection = d3.select(svg).attr('viewBox', `0 0 ${width} ${height}`);
   svgSelection.selectAll('*').remove();
-  const graphLayer = svgSelection.append('g').attr('class', 'focused-graph-layer');
-  const linkLayer = graphLayer.append('g').attr('class', 'focused-graph-links');
+  const graphLayer = svgSelection.append('g').attr('class', 'focused-graph-layer').attr('transform', 'translate(80,40)');
+  const relationLayer = graphLayer.append('g').attr('class', 'focused-graph-relation-links');
+  const treeLinkLayer = graphLayer.append('g').attr('class', 'focused-graph-tree-links');
   const nodeLayer = graphLayer.append('g').attr('class', 'focused-graph-nodes');
-  const zoom = d3.zoom()
-    .scaleExtent([0.35, 3.5])
-    .on('zoom', event => graphLayer.attr('transform', event.transform));
+  const zoom = d3.zoom().scaleExtent([0.25, 3.5]).on('zoom', event => graphLayer.attr('transform', event.transform));
   svgSelection.call(zoom).on('dblclick.zoom', null).on('click', event => {
     if (event.target === svg) {
       selectedId = null;
-      renderVisibility();
+      update(root);
     }
   });
 
-  const linkSelection = linkLayer.selectAll('line')
-    .data(links, link => linkKey(link))
-    .join('line')
-    .attr('class', 'focused-graph-link')
-    .attr('data-link-id', link => linkKey(link))
-    .attr('stroke', link => link.kind === 'mapping' ? '#f59e0b' : '#94a3b8')
-    .attr('stroke-width', link => link.kind === 'mapping' ? 2 : 1.4)
-    .attr('opacity', .78);
-
-  const drag = d3.drag()
-    .container(() => graphLayer.node())
-    .on('start', function(event) {
-      event.sourceEvent?.stopPropagation();
-      d3.select(this).classed('dragging', true);
-    })
-    .on('drag', function(event, node) {
-      node.x = event.x;
-      node.y = event.y;
-      updatePositions();
-    })
-    .on('end', function() {
-      d3.select(this).classed('dragging', false);
-    });
-
-  const nodeSelection = nodeLayer.selectAll('g')
-    .data(nodes, node => node.id)
-    .join(enter => {
-      const group = enter.append('g')
-        .attr('class', 'focused-graph-node')
-        .attr('data-node-id', node => node.id)
-        .attr('tabindex', 0)
-        .attr('role', 'button');
-      group.append('circle')
-        .attr('r', node => node.kind === 'mapping' ? 6 : 8)
-        .attr('fill', node => fill(node.kind))
-        .attr('stroke', '#fff')
-        .attr('stroke-width', 2);
-      group.append('text')
-        .attr('x', 13)
-        .attr('y', 4)
-        .attr('font-size', 12)
-        .attr('fill', '#1f2937')
-        .text(node => text(node.label || node.id).slice(0, 42));
-      group.append('title').text(node => `${node.kind}: ${node.label || node.id}`);
-      return group;
-    })
-    .call(drag)
-    .on('click', (event, node) => {
-      event.stopPropagation();
-      selectedId = selectedId === node.id ? null : node.id;
-      renderVisibility();
-    })
-    .on('dblclick', (event, node) => {
-      event.stopPropagation();
-      const toggleId = nearestHierarchyToggle(node.id);
-      if (!toggleId) return;
-      if (collapsedHierarchyIds.has(toggleId)) collapsedHierarchyIds.delete(toggleId);
-      else collapsedHierarchyIds.add(toggleId);
-      if (selectedId && isCollapsed(selectedId)) selectedId = null;
-      renderVisibility();
-    });
-
-  function updatePositions() {
-    linkSelection
-      .attr('x1', link => nodeById.get(link.source)?.x || 0)
-      .attr('y1', link => nodeById.get(link.source)?.y || 0)
-      .attr('x2', link => nodeById.get(link.target)?.x || 0)
-      .attr('y2', link => nodeById.get(link.target)?.y || 0);
-    nodeSelection.attr('transform', node => `translate(${node.x},${node.y})`);
+  function mappedCodeLabel(d) {
+    const path = d.data.mapped_code_path || list(d.data.mapped_code_paths)[0] || '';
+    const symbol = d.data.mapped_code_symbol || list(d.data.mapped_code_symbols)[0] || '';
+    return [path, symbol].filter(Boolean).join(' · ');
   }
 
-  function renderVisibility() {
-    visibleNodeIds = computeVisibleNodeIds();
-    if (selectedId && !visibleNodeIds.has(selectedId)) selectedId = null;
-    const activeNodes = new Set();
-    const activeLinks = new Set();
-    if (selectedId) {
-      activeNodes.add(selectedId);
-      (adjacency.get(selectedId) || new Set()).forEach(id => activeNodes.add(id));
-      (linksByNode.get(selectedId) || new Set()).forEach(id => activeLinks.add(id));
+  function nodeLabel(d) {
+    const base = text(d.data.label || d.data.feature_name || d.data.name || d.data.node_id || d.id);
+    const mapped = mappedCodeLabel(d);
+    return mapped && !base.includes(mapped) ? `${base} — ${mapped}` : base;
+  }
+
+  function nodeSearchText(d) {
+    return `${nodeLabel(d)} ${d.data.node_id || ''} ${d.data.feature_path || ''} ${d.data.path || ''} ${d.data.mapped_code_path || ''} ${list(d.data.mapped_code_paths).join(' ')} ${d.data.mapped_code_symbol || ''} ${list(d.data.mapped_code_symbols).join(' ')}`.toLowerCase();
+  }
+
+  function nodeMatches(d) {
+    return query && nodeSearchText(d).includes(query);
+  }
+
+  function diagonal(s, d) {
+    return `M${s.y},${s.x} C${(s.y + d.y) / 2},${s.x} ${(s.y + d.y) / 2},${d.x} ${d.y},${d.x}`;
+  }
+
+  function openAncestors(d) {
+    let p = d.parent;
+    while (p) {
+      if (p._children) { p.children = p._children; p._children = null; }
+      p = p.parent;
     }
-    nodeSelection
-      .classed('hidden', node => !visibleNodeIds.has(node.id))
-      .classed('selected', node => node.id === selectedId)
-      .classed('active', node => Boolean(selectedId && activeNodes.has(node.id)))
-      .classed('dimmed', node => Boolean(selectedId && visibleNodeIds.has(node.id) && !activeNodes.has(node.id)));
-    linkSelection
-      .classed('hidden', link => !isLinkVisible(link))
-      .classed('active', link => Boolean(selectedId && activeLinks.has(linkKey(link))))
-      .classed('dimmed', link => Boolean(selectedId && isLinkVisible(link) && !activeLinks.has(linkKey(link))));
+  }
+
+  function applySearchOpen() {
+    if (!query) return;
+    walkAll(root, d => { if (nodeMatches(d)) openAncestors(d); });
+  }
+
+  function expandAll() {
+    walkAll(root, d => { if (d._children) { d.children = d._children; d._children = null; } });
+    update(root);
   }
 
   function expandDepth() {
-    hierarchyDepth = Math.min(maxDepth, hierarchyDepth + 1);
-    renderVisibility();
+    let minDepth = Infinity;
+    walkAll(root, d => { if (d._children && d.depth < minDepth) minDepth = d.depth; });
+    if (minDepth === Infinity) return;
+    walkAll(root, d => { if (d._children && d.depth === minDepth) { d.children = d._children; d._children = null; } });
+    update(root);
   }
 
   function collapseDepth() {
-    hierarchyDepth = Math.max(0, hierarchyDepth - 1);
-    renderVisibility();
+    let maxDepth = -1;
+    walkAll(root, d => { if (d.children && d.children.length && d.depth > maxDepth) maxDepth = d.depth; });
+    if (maxDepth <= 0) return;
+    walkAll(root, d => { if (d.children && d.children.length && d.depth === maxDepth) { d._children = d.children; d.children = null; } });
+    update(root);
   }
 
-  section.querySelector('[data-action="reset"]')?.addEventListener('click', () => {
-    hierarchyDepth = defaultHierarchyDepth;
-    showEdges = defaultShowEdges;
+  function resetDefault() {
     query = '';
     selectedId = null;
-    collapsedHierarchyIds.clear();
+    showEdges = defaultShowEdges;
+    initializeDefaultState();
     const search = section.querySelector('[data-action="search"]');
     if (search) search.value = '';
     const edges = section.querySelector('[data-action="edges"]');
     if (edges) edges.checked = showEdges;
-    svgSelection.transition().duration(150).call(zoom.transform, d3.zoomIdentity);
-    renderVisibility();
-  });
+    svgSelection.transition().duration(150).call(zoom.transform, d3.zoomIdentity.translate(80, 40));
+    update(root);
+  }
+
+  function cssToken(value) {
+    const token = text(value).toLowerCase().replace(/[^a-z0-9_-]+/g, '-').replace(/^-+|-+$/g, '');
+    return token || 'unknown';
+  }
+
+  function edgeClass(edge) {
+    const kind = text(edge.kind || edge.source_graph).toLowerCase().includes('rpg') || text(edge.kind).toLowerCase() === 'semantic' ? 'edge-semantic' : 'edge-dependency';
+    const relation = `relation-${cssToken(edge.relation || 'dependency')}`;
+    const source = `source-${cssToken(edge.source_graph || edge.edge_source || edge.source_meta || kind)}`;
+    return `${kind} ${relation} ${source}`;
+  }
+
+  function visibleEndpoint(edge, side) {
+    for (const candidate of list(edge[`${side}_candidates`]).map(text)) {
+      let node = allNodeById[candidate] || nodeById[candidate];
+      while (node) {
+        if (nodeById[node.id]) return nodeById[node.id];
+        node = node.parent;
+      }
+    }
+    let node = allNodeById[text(edge[side])] || nodeById[text(edge[side])];
+    while (node) {
+      if (nodeById[node.id]) return nodeById[node.id];
+      node = node.parent;
+    }
+    return null;
+  }
+
+  function relationPath(source, target) {
+    const sx = source.y + 8, sy = source.x;
+    const dx = target.y - 8, dy = target.x;
+    const midX = Math.max(sx, dx) + 56 + Math.abs(sy - dy) * 0.18;
+    return `M${sx},${sy} Q${midX},${(sy + dy) / 2} ${dx},${dy}`;
+  }
+
+  function drawRelationEdges() {
+    currentRelationEdges = [];
+    if (showEdges) {
+      relationEdges.forEach(edge => {
+        const source = visibleEndpoint(edge, 'source');
+        const target = visibleEndpoint(edge, 'target');
+        if (!source || !target || source === target) return;
+        currentRelationEdges.push({...edge, _source: source, _target: target, _key: `${edge.id || edge.relation}-${source.id}-${target.id}`});
+      });
+    }
+    const rel = relationLayer.selectAll('path.focused-graph-link').data(currentRelationEdges, edge => edge._key);
+    const relEnter = rel.enter().append('path')
+      .attr('class', edge => `focused-graph-link ${edgeClass(edge)}`)
+      .attr('data-link-id', edge => text(edge.id || edge._key))
+      .attr('d', edge => relationPath(edge._source, edge._target));
+    relEnter.append('title');
+    const relUpdate = relEnter.merge(rel)
+      .attr('class', edge => `focused-graph-link ${edgeClass(edge)}${selectedId && (edge._source.id === selectedId || edge._target.id === selectedId) ? ' active' : ''}${selectedId && edge._source.id !== selectedId && edge._target.id !== selectedId ? ' dimmed' : ''}`)
+      .attr('d', edge => relationPath(edge._source, edge._target));
+    relUpdate.select('title').text(edge => `${edge.relation || 'dependency'}\n${edge.source_graph || edge.edge_source || edge.source_meta || edge.kind || ''}\n${edge.path || edge.reason || ''}`);
+    rel.exit().remove();
+  }
+
+  function update(source) {
+    applySearchOpen();
+    const layout = treemap(root);
+    currentNodes = layout.descendants();
+    currentNodes.forEach(d => { d.y = d.depth * 250; });
+    const minX = d3.min(currentNodes, d => d.x) || 0;
+    if (minX < 20) currentNodes.forEach(d => { d.x += 20 - minX; });
+    nodeById = {};
+    currentNodes.forEach(d => { nodeById[d.id] = d; });
+
+    const node = nodeLayer.selectAll('g.focused-graph-node').data(currentNodes, d => d.id);
+    const nodeEnter = node.enter().append('g')
+      .attr('class', 'focused-graph-node')
+      .attr('data-node-id', d => d.id)
+      .attr('tabindex', 0)
+      .attr('role', 'button')
+      .attr('transform', `translate(${source.y0 || 0},${source.x0 || 0})`)
+      .on('click', (event, d) => {
+        event.stopPropagation();
+        selectedId = selectedId === d.id ? null : d.id;
+        update(d);
+      })
+      .on('dblclick', (event, d) => {
+        event.stopPropagation();
+        if (d.children) { d._children = d.children; d.children = null; }
+        else if (d._children) { d.children = d._children; d._children = null; }
+        update(d);
+      });
+    nodeEnter.append('circle').attr('r', d => d._children ? 6 : (d.children ? 5 : 4));
+    nodeEnter.append('text')
+      .attr('dy', 4)
+      .attr('x', d => d.children || d._children ? -10 : 10)
+      .attr('text-anchor', d => d.children || d._children ? 'end' : 'start')
+      .attr('font-size', 12)
+      .attr('fill', '#1f2937')
+      .text(d => nodeLabel(d).length > 46 ? nodeLabel(d).slice(0, 44) + '…' : nodeLabel(d));
+    nodeEnter.append('title').text(d => `${nodeLabel(d)}\n${d.data.feature_path || ''}\n${d.data.mapped_code_path || ''} ${d.data.mapped_code_symbol || ''}`);
+
+    const nodeUpdate = nodeEnter.merge(node);
+    nodeUpdate.transition().duration(250).attr('transform', d => `translate(${d.y},${d.x})`);
+    nodeUpdate
+      .attr('class', d => `focused-graph-node${d.id === selectedId ? ' selected' : ''}${focusedNodeIds.has(d.id) || focusedCodeLinkIds.has(d.id) ? ' focused' : ''}${nodeMatches(d) ? ' search-match' : ''}${selectedId && d.id !== selectedId && !currentRelationEdges.some(edge => edge._source.id === d.id || edge._target.id === d.id) ? ' dimmed' : ''}`);
+    nodeUpdate.select('circle').attr('r', d => d._children ? 6 : (d.children ? 5 : 4));
+    nodeUpdate.select('text')
+      .attr('x', d => d.children || d._children ? -10 : 10)
+      .attr('text-anchor', d => d.children || d._children ? 'end' : 'start');
+    node.exit().transition().duration(180).attr('transform', `translate(${source.y || 0},${source.x || 0})`).remove();
+
+    const treeLinks = layout.links();
+    const link = treeLinkLayer.selectAll('path.focused-graph-tree-link').data(treeLinks, d => d.target.id);
+    link.enter().insert('path', 'g')
+      .attr('class', 'focused-graph-tree-link')
+      .attr('d', () => diagonal({x: source.x0 || 0, y: source.y0 || 0}, {x: source.x0 || 0, y: source.y0 || 0}))
+      .merge(link).transition().duration(250)
+      .attr('d', d => diagonal(d.source, d.target));
+    link.exit().transition().duration(180)
+      .attr('d', () => diagonal({x: source.x || 0, y: source.y || 0}, {x: source.x || 0, y: source.y || 0}))
+      .remove();
+
+    drawRelationEdges();
+    currentNodes.forEach(d => { d.x0 = d.x; d.y0 = d.y; });
+  }
+
+  section.querySelector('[data-action="reset"]')?.addEventListener('click', resetDefault);
+  section.querySelector('[data-action="expand-all"]')?.addEventListener('click', expandAll);
   section.querySelector('[data-action="depth-plus"]')?.addEventListener('click', expandDepth);
   section.querySelector('[data-action="depth-minus"]')?.addEventListener('click', collapseDepth);
-  section.querySelector('[data-action="edges"]')?.addEventListener('change', event => { showEdges = event.target.checked; renderVisibility(); });
-  section.querySelector('[data-action="search"]')?.addEventListener('input', event => { query = text(event.target.value).toLowerCase(); renderVisibility(); });
-  updatePositions();
-  renderVisibility();
+  section.querySelector('[data-action="edges"]')?.addEventListener('change', event => { showEdges = event.target.checked; update(root); });
+  section.querySelector('[data-action="search"]')?.addEventListener('input', event => { query = text(event.target.value).toLowerCase(); update(root); });
+  update(root);
 })();
 """
 
@@ -1345,30 +1493,30 @@ def _render_focused_graph(focused_view: dict[str, Any], file_anchors: Mapping[st
     inspector = json.dumps(inspector_payload, indent=2, ensure_ascii=False, default=_json_default)
     controls = (
         '<div class="focused-graph-toolbar">'
-        '<button type="button" data-action="reset">Reset</button>'
-        '<button type="button" data-action="depth-plus" aria-label="Expand hierarchy depth" title="Expand hierarchy depth">+1</button>'
-        '<button type="button" data-action="depth-minus" aria-label="Collapse hierarchy depth" title="Collapse hierarchy depth">-1</button>'
+        '<button type="button" data-action="reset">Reset default</button>'
+        '<button type="button" data-action="expand-all">Expand all</button>'
+        '<button type="button" data-action="depth-plus" title="Expand hierarchy depth">+1</button>'
+        '<button type="button" data-action="depth-minus" title="Collapse hierarchy depth">-1</button>'
         '<label><input type="checkbox" data-action="edges" checked> Edges</label>'
         '<input type="search" data-action="search" placeholder="Search nodes" aria-label="Search focused graph nodes">'
         '</div>'
     )
     legend = (
         '<div class="focused-graph-legend" aria-label="Focused graph legend">'
-        '<span class="legend-item"><span class="legend-swatch legend-semantic"></span>Semantic</span>'
-        '<span class="legend-item"><span class="legend-swatch legend-code"></span>Code</span>'
-        '<span class="legend-item"><span class="legend-swatch legend-mapping"></span>Mapping</span>'
-        '<span class="legend-item"><span class="legend-swatch" style="background:#8b5cf6"></span>Hierarchy</span>'
-        '<span class="legend-item"><span class="legend-swatch legend-context"></span>Context edge</span>'
+        '<span class="legend-item"><span class="legend-swatch legend-node"></span>Feature tree node</span>'
+        '<span class="legend-item"><span class="legend-swatch legend-semantic-edge"></span>RPG semantic edge</span>'
+        '<span class="legend-item"><span class="legend-swatch legend-dependency-edge"></span>dep_graph dependency edge</span>'
         '</div>'
     )
     return (
         '<section class="focused-graph-section" data-focused-graph><h2>Focused graph</h2>'
-        f"{summary_html}{controls}{legend}{warnings_html}{hidden_html}"
+        f"{summary_html}{controls}{legend}"
         f"<script type=\"application/json\" data-focused-graph-json>{graph_json}</script>"
         '<div class="focused-graph-stage">'
-        '<svg class="focused-graph-svg" data-focused-graph-svg role="img" aria-label="Focused graph view" width="960" height="480"></svg>'
+        '<svg class="focused-graph-svg" data-focused-graph-svg role="img" aria-label="Focused graph view" width="960" height="520"></svg>'
         f'<div class="focused-graph-fallback" data-focused-graph-fallback{fallback_hidden}>Static focused graph fallback is available when D3 cannot run.{d3_missing_note}</div>'
         '</div>'
+        f"{warnings_html}{hidden_html}"
         f"<details><summary>Inspector JSON</summary><pre>{_h(inspector)}</pre></details>"
         f"{scripts}"
         '</section>'
