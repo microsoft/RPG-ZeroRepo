@@ -26,7 +26,7 @@ import os
 import sys
 import time
 from pathlib import Path
-from typing import Optional
+from typing import Any, Optional
 
 SCRIPTS_DIR = Path(__file__).resolve().parent
 if str(SCRIPTS_DIR) not in sys.path:
@@ -34,7 +34,15 @@ if str(SCRIPTS_DIR) not in sys.path:
 
 from common.paths import REPO_RPG_FILE, DEP_GRAPH_FILE, RPG_HTML_FILE, HOOK_CALLS_LOG  # noqa: E402
 from common.rpg_io import atomic_write_rpg, safe_load_rpg  # noqa: E402
-from common.run_events import ArtifactEvent, CommandRun, StepEvent, VerificationEvent  # noqa: E402
+from common.run_events import (  # noqa: E402
+    ArtifactEvent,
+    CodeDeltaEvent,
+    CommandRun,
+    DepGraphDeltaEvent,
+    RPGDeltaEvent,
+    StepEvent,
+    VerificationEvent,
+)
 from common.run_report import write_command_report  # noqa: E402
 
 
@@ -122,12 +130,54 @@ def _format_diff_summary(summary: dict) -> str:
     return ", ".join(parts)
 
 
+def _git_change_type(status: object) -> str:
+    code = str(status or "").upper()
+    if code.startswith("A"):
+        return "added"
+    if code.startswith("D"):
+        return "deleted"
+    if code.startswith("R"):
+        return "renamed"
+    if code.startswith("C"):
+        return "copied"
+    if code.startswith("T"):
+        return "typechanged"
+    if code.startswith("U"):
+        return "unmerged"
+    return "modified" if code.startswith("M") else (code.lower() or "changed")
+
+
+def _git_diff_text(prev_ref: str, workspace_root: str, paths: list[str]) -> str:
+    import subprocess
+
+    if not paths:
+        return ""
+    try:
+        return subprocess.check_output(
+            ["git", "diff", "--relative", f"{prev_ref}..HEAD", "--", *paths],
+            cwd=workspace_root,
+            stderr=subprocess.DEVNULL,
+            text=True,
+        )
+    except (subprocess.CalledProcessError, FileNotFoundError):
+        return ""
+
+
 def _git_delta_files(prev_ref: str, workspace_root: str) -> list[dict[str, str]]:
     import subprocess
 
     try:
         output = subprocess.check_output(
-            ["git", "diff", "--relative", "--name-status", f"{prev_ref}..HEAD", "--", "."],
+            [
+                "git",
+                "diff",
+                "--relative",
+                "--name-status",
+                "--find-renames",
+                f"{prev_ref}..HEAD",
+                "--",
+                ".",
+            ],
             cwd=workspace_root,
             stderr=subprocess.DEVNULL,
             text=True,
@@ -137,17 +187,367 @@ def _git_delta_files(prev_ref: str, workspace_root: str) -> list[dict[str, str]]
     files: list[dict[str, str]] = []
     for line in output.splitlines():
         parts = line.split("\t")
-        if len(parts) >= 2:
-            files.append({"status": parts[0], "path": parts[-1]})
+        if len(parts) < 2:
+            continue
+        status = parts[0]
+        path = parts[-1]
+        before = parts[1] if status.upper().startswith(("R", "C")) and len(parts) >= 3 else path
+        diff_paths = [before, path] if before != path else [path]
+        row = {
+            "status": status,
+            "change_type": _git_change_type(status),
+            "path": path,
+            "file": path,
+            "diff": _git_diff_text(prev_ref, workspace_root, diff_paths),
+        }
+        if before != path:
+            row["before"] = before
+            row["after"] = path
+        elif row["change_type"] == "added":
+            row["after"] = path
+        elif row["change_type"] == "deleted":
+            row["before"] = path
+        files.append(row)
     return files
+
+
+def _listify(value: Any) -> list[Any]:
+    if value in (None, ""):
+        return []
+    if isinstance(value, dict):
+        return list(value.keys())
+    if isinstance(value, (list, tuple, set)):
+        return list(value)
+    return [value]
+
+
+def _ordered_unique_text(values: list[Any]) -> list[str]:
+    seen: set[str] = set()
+    ordered: list[str] = []
+    for value in values:
+        if value in (None, ""):
+            continue
+        text = str(value)
+        if text in seen:
+            continue
+        seen.add(text)
+        ordered.append(text)
+    return ordered
+
+
+def _code_delta_rows(result: dict) -> list[dict[str, Any]]:
+    rows = result.get("code_deltas") or result.get("git_delta") or []
+    normalized: list[dict[str, Any]] = []
+    for row in _listify(rows):
+        if isinstance(row, dict):
+            path = row.get("file") or row.get("path") or row.get("after") or row.get("before")
+            if path in (None, ""):
+                continue
+            item = dict(row)
+            item["file"] = path
+            item["path"] = path
+            item["change_type"] = item.get("change_type") or _git_change_type(item.get("status"))
+            item.setdefault("diff", "")
+            normalized.append(item)
+        elif row not in (None, ""):
+            normalized.append({"file": str(row), "path": str(row), "change_type": "changed", "diff": ""})
+    return normalized
+
+
+def _diff_files(result: dict) -> list[str]:
+    diff_files = result.get("diff_files")
+    files: list[Any] = []
+    if isinstance(diff_files, dict):
+        for value in diff_files.values():
+            if isinstance(value, dict):
+                files.extend(value.keys())
+            else:
+                files.extend(_listify(value))
+    return _ordered_unique_text(files)
+
+
+def _changed_report_files(result: dict, code_deltas: list[dict[str, Any]]) -> list[str]:
+    files: list[Any] = _diff_files(result)
+    for row in code_deltas:
+        files.append(row.get("file") or row.get("path") or row.get("after") or row.get("before"))
+    return _ordered_unique_text(files)
+
+
+def _load_report_rpg(result: dict) -> dict[str, Any]:
+    rpg_path = result.get("output_path") or result.get("rpg_path")
+    if not rpg_path:
+        return {}
+    try:
+        return safe_load_rpg(Path(str(rpg_path)))
+    except Exception:
+        return {}
+
+
+def _flatten_rpg_tree(root: Any) -> tuple[dict[str, dict[str, Any]], dict[str, str]]:
+    nodes: dict[str, dict[str, Any]] = {}
+    paths: dict[str, str] = {}
+
+    def visit(node: Any, ancestors: list[str]) -> None:
+        if not isinstance(node, dict):
+            return
+        node_id = node.get("id") or node.get("node_id")
+        name = node.get("name") or node_id
+        next_ancestors = ancestors + ([str(name)] if name not in (None, "") else [])
+        if node_id not in (None, ""):
+            node_id_text = str(node_id)
+            nodes[node_id_text] = node
+            paths[node_id_text] = " / ".join(next_ancestors)
+        for child in node.get("children") or []:
+            visit(child, next_ancestors)
+
+    visit(root, [])
+    return nodes, paths
+
+
+def _dep_node_items(dep_nodes: Any) -> list[tuple[str, dict[str, Any]]]:
+    if isinstance(dep_nodes, dict):
+        return [(str(node_id), attrs if isinstance(attrs, dict) else {}) for node_id, attrs in dep_nodes.items()]
+    if isinstance(dep_nodes, list):
+        rows = []
+        for index, attrs in enumerate(dep_nodes):
+            if not isinstance(attrs, dict):
+                continue
+            node_id = attrs.get("id") or attrs.get("node_id") or attrs.get("dep_node_id") or index
+            rows.append((str(node_id), attrs))
+        return rows
+    return []
+
+
+def _dep_node_path(dep_id: str, attrs: dict[str, Any]) -> str:
+    for key in ("path", "file", "module", "code_path"):
+        value = attrs.get(key)
+        if value not in (None, ""):
+            text = str(value)
+            if key == "code_path" and os.path.isabs(text):
+                try:
+                    return os.path.relpath(text, os.getcwd())
+                except ValueError:
+                    return text
+            return text
+    return dep_id.split(":", 1)[0]
+
+
+def _dep_node_matches_file(dep_id: str, attrs: dict[str, Any], file_path: str) -> bool:
+    candidates = {dep_id, dep_id.split(":", 1)[0], _dep_node_path(dep_id, attrs)}
+    for key in ("path", "file", "module", "code_path"):
+        value = attrs.get(key)
+        if value not in (None, ""):
+            candidates.add(str(value))
+    for candidate in candidates:
+        if candidate == file_path or candidate.endswith("/" + file_path):
+            return True
+        if candidate.startswith(file_path + ":"):
+            return True
+    return False
+
+
+def _rpg_node_row(node_id: str, node: dict[str, Any], paths: dict[str, str], changed_files: list[str]) -> dict[str, Any]:
+    meta = node.get("meta") if isinstance(node.get("meta"), dict) else {}
+    return {
+        "node_id": node_id,
+        "name": node.get("name") or node_id,
+        "type": node.get("node_type") or node.get("type") or meta.get("type_name"),
+        "node_type": node.get("node_type") or node.get("type") or meta.get("type_name"),
+        "path": meta.get("path") or node.get("path"),
+        "feature_path": paths.get(node_id, ""),
+        "breadcrumb_path": paths.get(node_id, ""),
+        "change": "semantic",
+        "changed_files": changed_files,
+        "mapping_status": "mapped",
+    }
+
+
+def _dep_node_row(dep_id: str, attrs: dict[str, Any], changed_files: list[str], mapped_rpg_ids: list[str]) -> dict[str, Any]:
+    row: dict[str, Any] = {
+        "node_id": dep_id,
+        "dep_node_id": dep_id,
+        "path": _dep_node_path(dep_id, attrs),
+        "symbol": attrs.get("name") or dep_id.rsplit(":", 1)[-1],
+        "type": attrs.get("type") or attrs.get("kind"),
+        "change": "code",
+        "changed_files": changed_files,
+        "source": "dep_graph",
+    }
+    if attrs.get("signature") not in (None, ""):
+        row["signature"] = attrs.get("signature")
+    start = attrs.get("start_line") or attrs.get("lineno") or attrs.get("line")
+    end = attrs.get("end_line") or start
+    if start not in (None, ""):
+        row["line_range"] = {"start": start, "end": end}
+    if mapped_rpg_ids:
+        row["mapped_rpg_node_ids"] = mapped_rpg_ids
+    return row
+
+
+def _edge_rows(dep_edges: Any, code_ids: set[str]) -> list[dict[str, Any]]:
+    rows: list[dict[str, Any]] = []
+    if not isinstance(dep_edges, list):
+        return rows
+    for edge in dep_edges:
+        if not isinstance(edge, dict):
+            continue
+        source = edge.get("src") or edge.get("source") or edge.get("from")
+        target = edge.get("dst") or edge.get("target") or edge.get("to")
+        if source not in code_ids and target not in code_ids:
+            continue
+        attrs = edge.get("attrs") if isinstance(edge.get("attrs"), dict) else {}
+        rows.append({
+            "source_node_id": source,
+            "target_node_id": target,
+            "relation": edge.get("relation") or edge.get("type") or attrs.get("type") or "dependency",
+            "source_graph": "dep_graph",
+            "edge_source": "dep_graph",
+            "reason": "adjacent to changed code",
+        })
+    return rows[:50]
+
+
+def _build_update_focus(result: dict, code_deltas: list[dict[str, Any]], semantic_total: int) -> tuple[dict[str, Any], list[dict[str, Any]], list[dict[str, Any]]]:
+    changed_files = _changed_report_files(result, code_deltas)
+    rpg_data = _load_report_rpg(result)
+    dep_graph = rpg_data.get("dep_graph") if isinstance(rpg_data.get("dep_graph"), dict) else {}
+    dep_to_rpg = rpg_data.get("_dep_to_rpg_map") if isinstance(rpg_data.get("_dep_to_rpg_map"), dict) else {}
+    rpg_nodes, rpg_paths = _flatten_rpg_tree(rpg_data.get("root"))
+    matched_dep_ids: set[str] = set()
+    code_nodes: list[dict[str, Any]] = []
+    semantic_by_id: dict[str, dict[str, Any]] = {}
+    mappings: list[dict[str, Any]] = []
+    warnings: list[dict[str, Any]] = []
+
+    if semantic_total == 0:
+        warnings.append({
+            "type": "zero_semantic_delta",
+            "message": "RPG semantic delta 为 0",
+            "reason": "diff_summary contains no added, deleted, modified, or renamed semantic files",
+        })
+
+    dep_items = _dep_node_items(dep_graph.get("nodes") if isinstance(dep_graph, dict) else {})
+    for changed_file in changed_files:
+        file_matched = False
+        for dep_id, attrs in dep_items:
+            if not _dep_node_matches_file(dep_id, attrs, changed_file):
+                continue
+            file_matched = True
+            if dep_id in matched_dep_ids:
+                continue
+            mapped_rpg_ids = _ordered_unique_text(_listify(attrs.get("rpg_nodes")) + _listify(dep_to_rpg.get(dep_id)))
+            code_nodes.append(_dep_node_row(dep_id, attrs, [changed_file], mapped_rpg_ids))
+            matched_dep_ids.add(dep_id)
+            for rpg_id in mapped_rpg_ids:
+                node = rpg_nodes.get(rpg_id)
+                if not isinstance(node, dict):
+                    continue
+                semantic_by_id.setdefault(rpg_id, _rpg_node_row(rpg_id, node, rpg_paths, [changed_file]))
+                mappings.append({
+                    "rpg_node_id": rpg_id,
+                    "code_node_id": dep_id,
+                    "dep_node_id": dep_id,
+                    "status": "mapped",
+                    "state": "mapped",
+                    "source": "rpg_json",
+                    "path": _dep_node_path(dep_id, attrs),
+                    "changed_files": [changed_file],
+                })
+        if not file_matched:
+            warnings.append({
+                "type": "unmapped_changed_file",
+                "message": "changed file has no dep_graph node in updated RPG JSON",
+                "path": changed_file,
+            })
+
+    semantic_nodes = list(semantic_by_id.values())
+    dep_edges = _edge_rows(dep_graph.get("edges") if isinstance(dep_graph, dict) else [], matched_dep_ids)
+    unmatched_files = set(changed_files)
+    for node in code_nodes:
+        unmatched_files.difference_update(str(path) for path in _listify(node.get("changed_files")))
+    unmatched_code_deltas = [row for row in code_deltas if (row.get("file") or row.get("path")) in unmatched_files]
+    summary = {
+        "selected_feature_groups": len(semantic_nodes),
+        "primary_rpg_nodes": len(semantic_nodes),
+        "primary_code_nodes": len(code_nodes),
+        "mapped_code_relations": len(mappings),
+        "missing_mappings": len([node for node in code_nodes if not node.get("mapped_rpg_node_ids")]),
+        "edges": len(dep_edges),
+        "warnings": len(warnings),
+        "changed_files": len(changed_files),
+        "semantic_delta": semantic_total,
+    }
+    nodes_view = {
+        "summary": {
+            "semantic_nodes": len(semantic_nodes),
+            "code_nodes": len(code_nodes),
+            "mappings": len(mappings),
+            "edges": len(dep_edges),
+            "warnings": len(warnings),
+            "changed_files": len(changed_files),
+        },
+        "semantic_nodes": semantic_nodes,
+        "code_nodes": code_nodes,
+        "mappings": mappings,
+        "edges": dep_edges,
+        "warnings": warnings,
+        "changed_files": [{"path": file_path} for file_path in changed_files],
+        "hidden_counts": {},
+    }
+    focused_view = {
+        "summary": summary,
+        "nodes_view": nodes_view,
+        "primary_rpg_nodes": semantic_nodes,
+        "primary_code_nodes": code_nodes,
+        "mappings": mappings,
+        "edges": dep_edges,
+        "hidden_counts": {},
+        "warnings": warnings,
+        "changed_files": changed_files,
+        "unmatched_code_deltas": unmatched_code_deltas,
+    }
+    return focused_view, semantic_nodes, code_nodes
+
+
+def _hook_context(result: dict) -> dict[str, Any]:
+    return {
+        "CMIND_HOOK": result.get("CMIND_HOOK", os.environ.get("CMIND_HOOK", "")),
+        "hook_calls_log": result.get("hook_calls_log") or str(HOOK_CALLS_LOG),
+        "update_rpg_log": result.get("update_rpg_log") or str(HOOK_CALLS_LOG.parent / "update_rpg.log"),
+    }
+
+
+def _commit_range(result: dict) -> dict[str, Any]:
+    return {
+        "prev_ref": result.get("prev_ref"),
+        "previous_commit": result.get("previous_commit"),
+        "new_commit": result.get("new_commit"),
+    }
+
+
+def _commit_range_reason(commit_range: dict[str, Any]) -> str:
+    parts = [f"{key}={value}" for key, value in commit_range.items() if value not in (None, "")]
+    return ", ".join(parts) if parts else "not recorded"
+
+
+def _dep_delta_detail(result: dict) -> str:
+    parts = []
+    if result.get("dep_nodes_delta") not in (None, ""):
+        parts.append(f"nodes_delta={result.get('dep_nodes_delta'):+d}" if isinstance(result.get("dep_nodes_delta"), int) else f"nodes_delta={result.get('dep_nodes_delta')}")
+    if result.get("dep_edges_delta") not in (None, ""):
+        parts.append(f"edges_delta={result.get('dep_edges_delta'):+d}" if isinstance(result.get("dep_edges_delta"), int) else f"edges_delta={result.get('dep_edges_delta')}")
+    if result.get("dep_to_rpg_map_size") not in (None, ""):
+        parts.append(f"dep_to_rpg_map_size={result.get('dep_to_rpg_map_size')}")
+    return ", ".join(parts)
 
 
 def _attach_update_report(result: dict) -> dict:
     try:
         semantic_summary = _diff_summary(result)
         semantic_total = sum(semantic_summary.values())
+        code_deltas = _code_delta_rows(result)
         git_delta = result.get("git_delta")
-        git_total = _change_count(git_delta) if git_delta is not None else ""
+        git_total = _change_count(git_delta) if git_delta is not None else _change_count(code_deltas)
         node_count = result.get("node_count", result.get("rpg_nodes", ""))
         rpg_path = result.get("output_path") or result.get("rpg_path")
         dep_summary = ""
@@ -165,13 +565,35 @@ def _attach_update_report(result: dict) -> dict:
                         result.get("dep_edges_delta"),
                     )
                 )
+        semantic_detail = "RPG semantic delta 为 0" if semantic_total == 0 else _format_diff_summary(semantic_summary)
+        dep_detail = _dep_delta_detail(result)
+        focused_view, rpg_delta_rows, dep_delta_rows = _build_update_focus(result, code_deltas, semantic_total)
+        hook_context = _hook_context(result)
+        commit_range = _commit_range(result)
         viz_status = result.get("viz_error") or (
             "ok" if result.get("viz_path") else "not recorded"
         )
-        report_path = write_command_report(CommandRun(
+        status = result.get("status") or ("error" if result.get("error") else result.get("mode"))
+        evidence = dict(result)
+        evidence.update({
+            "code_deltas": code_deltas,
+            "semantic_summary": semantic_summary,
+            "semantic_total": semantic_total,
+            "focused_view_summary": focused_view.get("summary", {}),
+            "commit_range": commit_range,
+            "commit_range_reason": _commit_range_reason(commit_range),
+            "hook_context": hook_context,
+            "artifact_paths": [
+                {"label": "rpg_json", "path": rpg_path},
+                {"label": "rpg_html", "path": result.get("viz_path")},
+                {"label": "hook_calls_log", "path": hook_context["hook_calls_log"]},
+                {"label": "update_rpg_log", "path": hook_context["update_rpg_log"]},
+            ],
+        })
+        report_run = CommandRun(
             command="update_rpg",
             title="CoderMind update_rpg Explain View",
-            status=result.get("status") or ("error" if result.get("error") else result.get("mode")),
+            status=status,
             summary=[
                 {"label": "mode", "value": result.get("mode", "")},
                 {
@@ -179,15 +601,16 @@ def _attach_update_report(result: dict) -> dict:
                     "value": result.get("reason") or result.get("error", ""),
                 },
                 {"label": "git files", "value": git_total},
-                {"label": "semantic files", "value": semantic_total},
+                {"label": "semantic files", "value": semantic_total, "detail": semantic_detail},
                 {
                     "label": "RPG nodes",
                     "value": _format_count_delta(
                         node_count,
                         result.get("nodes_delta"),
                     ),
+                    "detail": f"edges={_format_count_delta(result.get('edge_count'), result.get('edges_delta'))}" if result.get("edge_count") not in (None, "") else "",
                 },
-                {"label": "dep graph", "value": dep_summary},
+                {"label": "dep graph", "value": dep_summary, "detail": dep_detail},
                 {
                     "label": "visualization",
                     "value": result.get("viz_path") or result.get("viz_error", ""),
@@ -205,12 +628,26 @@ def _attach_update_report(result: dict) -> dict:
                 ),
                 StepEvent(
                     name="semantic delta",
-                    status=result.get("mode", ""),
-                    reason=_format_diff_summary(semantic_summary),
+                    status="warning" if semantic_total == 0 else result.get("mode", ""),
+                    reason=semantic_detail,
+                ),
+                StepEvent(
+                    name="commit range",
+                    status=status,
+                    reason=_commit_range_reason(commit_range),
+                ),
+                StepEvent(
+                    name="hook context",
+                    status="recorded",
+                    reason=(
+                        f"CMIND_HOOK={hook_context['CMIND_HOOK'] or 'not set'}, "
+                        f"hook_calls_log={hook_context['hook_calls_log']}, "
+                        f"update_rpg_log={hook_context['update_rpg_log']}"
+                    ),
                 ),
                 StepEvent(
                     name="sync graph",
-                    status=result.get("status") or ("error" if result.get("error") else result.get("mode", "")),
+                    status=status,
                     reason=result.get("reason", ""),
                 ),
                 StepEvent(
@@ -228,13 +665,48 @@ def _attach_update_report(result: dict) -> dict:
             artifacts=[
                 ArtifactEvent(label="rpg_json", path=rpg_path),
                 ArtifactEvent(label="rpg_html", path=result.get("viz_path")),
+                ArtifactEvent(label="hook_calls_log", path=hook_context["hook_calls_log"]),
+                ArtifactEvent(label="update_rpg_log", path=hook_context["update_rpg_log"]),
+            ],
+            rpg_deltas=[
+                RPGDeltaEvent(
+                    node_id=row.get("node_id"),
+                    name=row.get("name"),
+                    type=row.get("node_type") or row.get("type"),
+                    path=row.get("path") or row.get("feature_path"),
+                    change=row.get("change"),
+                )
+                for row in rpg_delta_rows
+            ],
+            dep_graph_deltas=[
+                DepGraphDeltaEvent(
+                    dep_node_id=row.get("dep_node_id") or row.get("node_id"),
+                    path=row.get("path"),
+                    source_feature=", ".join(_ordered_unique_text(_listify(row.get("mapped_rpg_node_ids")))),
+                    change=row.get("change"),
+                )
+                for row in dep_delta_rows
+            ],
+            code_deltas=[
+                CodeDeltaEvent(
+                    file=row.get("file") or row.get("path"),
+                    change_type=row.get("change_type"),
+                    before=row.get("before"),
+                    after=row.get("after"),
+                    diff=row.get("diff"),
+                )
+                for row in code_deltas
             ],
             verification=[
-                VerificationEvent(name="update_rpg", status=result.get("status") or ("error" if result.get("error") else result.get("mode"))),
-                VerificationEvent(name="viz", status=viz_status),
+                VerificationEvent(name="update_rpg", status=status, detail=result.get("reason") or result.get("error")),
+                VerificationEvent(name="viz", status=viz_status, detail=result.get("viz_path") or result.get("viz_error")),
+                VerificationEvent(name="semantic_delta", status="warning" if semantic_total == 0 else "recorded", detail=semantic_detail),
+                VerificationEvent(name="commit_range", status="recorded", detail=_commit_range_reason(commit_range)),
             ],
-            evidence=result,
-        ))
+            evidence=evidence,
+        ).to_dict()
+        report_run["focused_view"] = focused_view
+        report_path = write_command_report(report_run)
         result["report_path"] = str(report_path)
     except Exception as exc:
         result["report_error"] = str(exc)
@@ -687,6 +1159,10 @@ def cmd_update_rpg(
         result["mode"] = "update-rpg"
         result["prev_ref"] = prev_ref
         result["git_delta"] = git_delta
+        result["code_deltas"] = git_delta
+        result["CMIND_HOOK"] = os.environ.get("CMIND_HOOK", "")
+        result["hook_calls_log"] = str(HOOK_CALLS_LOG)
+        result["update_rpg_log"] = str(HOOK_CALLS_LOG.parent / "update_rpg.log")
 
         # Refresh ``rpg.html`` whenever the JSON was actually rewritten.
         # ``run_update_rpg`` returns ``status="success"`` on a normal
