@@ -380,34 +380,48 @@ details summary {{ cursor:pointer; color:var(--accent); font-weight:600; }}
 .focus-links {{ display:flex; flex-wrap:wrap; gap:6px; }}
 .focus-link {{ border:1px solid var(--line); border-radius:999px; padding:2px 8px; background:#fff; font-size:12px; }}
 .focused-graph-section {{ overflow-x:hidden; }}
-.focused-graph-toolbar {{ display:flex; flex-wrap:wrap; gap:8px; align-items:center; margin:10px 0 12px; }}
-.focused-graph-toolbar button, .focused-graph-toolbar input {{ border:1px solid var(--line); border-radius:8px; background:#fff; color:var(--text); padding:6px 10px; font:inherit; }}
-.focused-graph-toolbar label {{ display:inline-flex; gap:6px; align-items:center; color:var(--muted); }}
-.focused-graph-stage {{ border:1px solid var(--line); border-radius:12px; background:#fbfdff; min-height:520px; position:relative; overflow:hidden; }}
+.focused-graph-toolbar {{ display:flex; flex-wrap:wrap; gap:8px; align-items:center; margin:10px 0 12px; padding:10px; border:1px solid #334155; border-radius:12px; background:#0f172a; color:#e5e7eb; }}
+.focused-graph-toolbar button, .focused-graph-toolbar input {{ border:1px solid #475569; border-radius:8px; background:#1e293b; color:#e5e7eb; padding:6px 10px; font:inherit; }}
+.focused-graph-toolbar input::placeholder {{ color:#94a3b8; }}
+.focused-graph-toolbar label {{ display:inline-flex; gap:6px; align-items:center; color:#cbd5e1; }}
+.focused-graph-stage {{ border:1px solid #334155; border-radius:12px; background:#0f172a; min-height:520px; position:relative; overflow:hidden; }}
 .focused-graph-svg {{ display:block; width:100%; height:520px; cursor:grab; touch-action:none; }}
 .focused-graph-svg:active {{ cursor:grabbing; }}
-.focused-graph-tree-link {{ fill:none; stroke:#cbd5e1; stroke-width:1.4; }}
-.focused-graph-link {{ fill:none; opacity:.78; transition:opacity .15s ease, stroke-width .15s ease; }}
+.focused-graph-detail {{ position:absolute; top:14px; right:14px; z-index:2; width:min(320px,calc(100% - 28px)); max-height:calc(100% - 28px); overflow:auto; border:1px solid #334155; border-radius:12px; background:rgba(15,23,42,.94); color:#e5e7eb; padding:12px; box-shadow:0 18px 40px rgba(2,6,23,.35); }}
+.focused-graph-detail h3 {{ margin:0 0 8px; font-size:15px; color:#f8fafc; overflow-wrap:anywhere; }}
+.focused-graph-detail dl {{ margin:0; display:grid; gap:8px; }}
+.focused-graph-detail-row {{ display:grid; gap:3px; }}
+.focused-graph-detail dt {{ color:#94a3b8; font-size:11px; text-transform:uppercase; letter-spacing:.04em; }}
+.focused-graph-detail dd {{ margin:0; font-size:13px; overflow-wrap:anywhere; }}
+.focused-graph-detail a {{ color:#93c5fd; }}
+.focused-graph-detail code {{ color:#bfdbfe; }}
+.focused-graph-detail .empty {{ color:#94a3b8; }}
+.focused-graph-detail-badges {{ display:flex; flex-wrap:wrap; gap:6px; margin-bottom:10px; }}
+.focused-graph-detail-badges .badge {{ background:#1e293b; color:#cbd5e1; }}
+.focused-graph-detail-list {{ margin:0; padding-left:18px; }}
+.focused-graph-detail-list span {{ display:block; color:#94a3b8; font-size:12px; }}
+.focused-graph-tree-link {{ fill:none; stroke:#64748b; stroke-width:1.4; }}
+.focused-graph-link {{ fill:none; opacity:.86; transition:opacity .15s ease, stroke-width .15s ease; }}
 .focused-graph-link.active {{ opacity:1; stroke-width:2.8; }}
 .focused-graph-link.dimmed {{ opacity:.14; }}
 .focused-graph-link.hidden {{ display:none; }}
-.focused-graph-link.edge-semantic {{ stroke:#7c3aed; }}
-.focused-graph-link.edge-dependency {{ stroke:#ea580c; }}
-.focused-graph-link.relation-invokes, .focused-graph-link.relation-caller, .focused-graph-link.relation-callee {{ stroke:#16a34a; }}
-.focused-graph-link.relation-imports, .focused-graph-link.relation-import {{ stroke:#ea580c; }}
-.focused-graph-link.relation-inherits, .focused-graph-link.relation-inheritance {{ stroke:#9333ea; }}
-.focused-graph-link.relation-references, .focused-graph-link.relation-reference {{ stroke:#2563eb; }}
+.focused-graph-link.edge-semantic {{ stroke:#a78bfa; }}
+.focused-graph-link.edge-dependency {{ stroke:#fb923c; }}
+.focused-graph-link.relation-invokes, .focused-graph-link.relation-caller, .focused-graph-link.relation-callee {{ stroke:#4ade80; }}
+.focused-graph-link.relation-imports, .focused-graph-link.relation-import {{ stroke:#fb923c; }}
+.focused-graph-link.relation-inherits, .focused-graph-link.relation-inheritance {{ stroke:#c084fc; }}
+.focused-graph-link.relation-references, .focused-graph-link.relation-reference {{ stroke:#60a5fa; }}
 .focused-graph-link.source-dep-graph {{ stroke-dasharray:5 3; }}
 .focused-graph-node {{ cursor:pointer; transition:opacity .15s ease; }}
-.focused-graph-node circle {{ fill:#2563eb; stroke:#fff; stroke-width:2; transition:stroke .15s ease, stroke-width .15s ease; }}
-.focused-graph-node.selected circle, .focused-graph-node.active circle, .focused-graph-node.focused circle {{ stroke:#0f172a; stroke-width:3; }}
+.focused-graph-node circle {{ fill:#3b82f6; stroke:#e2e8f0; stroke-width:2; transition:stroke .15s ease, stroke-width .15s ease; }}
+.focused-graph-node.selected circle, .focused-graph-node.active circle, .focused-graph-node.focused circle {{ stroke:#f8fafc; stroke-width:3; }}
 .focused-graph-node.search-match circle {{ stroke:#f59e0b; stroke-width:3; }}
 .focused-graph-node.dimmed {{ opacity:.18; }}
 .focused-graph-node.hidden {{ display:none; }}
-.focused-graph-fallback {{ margin:12px; padding:12px; border:1px dashed var(--line); border-radius:10px; background:#fff; color:var(--muted); }}
-.focused-graph-legend {{ display:flex; flex-wrap:wrap; gap:8px; margin:8px 0 12px; }}
-.legend-item {{ display:inline-flex; gap:6px; align-items:center; color:var(--muted); font-size:13px; }}
-.legend-swatch {{ width:10px; height:10px; border-radius:999px; display:inline-block; border:1px solid var(--line); flex:0 0 auto; }}
+.focused-graph-fallback {{ margin:12px; padding:12px; border:1px dashed #475569; border-radius:10px; background:#1e293b; color:#cbd5e1; }}
+.focused-graph-legend {{ display:flex; flex-wrap:wrap; gap:8px; margin:8px 0 12px; padding:10px; border:1px solid #334155; border-radius:12px; background:#0f172a; }}
+.legend-item {{ display:inline-flex; gap:6px; align-items:center; color:#cbd5e1; font-size:13px; }}
+.legend-swatch {{ width:10px; height:10px; border-radius:999px; display:inline-block; border:1px solid #475569; flex:0 0 auto; }}
 .legend-line {{ width:28px; height:0; border-radius:0; border:0; border-top:2px solid var(--line); background:transparent; }}
 .legend-node {{ background:#2563eb; }}
 .legend-tree-link {{ border-top-color:#cbd5e1; border-top-width:1.4px; }}
@@ -991,19 +1005,52 @@ def _append_hierarchy_nodes(
                 "type": row.get("kind") or "hierarchy",
             }
             for key in (
+                "name",
                 "feature_name",
                 "feature_path",
                 "path",
+                "module",
+                "file",
+                "symbol",
+                "dep_node_id",
+                "type",
                 "node_type",
+                "signature",
                 "mapping_status",
+                "locate_status",
+                "breadcrumb",
+                "breadcrumb_path",
+                "score",
+                "source",
+                "source_graph",
+                "edge_source",
+                "relation_source",
+                "source_feature",
+                "source_features",
+                "relation",
+                "direction",
+                "reason",
+                "line_range",
+                "apply_action",
                 "mapped_code",
+                "mapped_code_node_ids",
+                "mapped_code_link_ids",
                 "mapped_code_path",
                 "mapped_code_paths",
                 "mapped_code_symbol",
                 "mapped_code_symbols",
                 "mapped_code_count",
+                "mapped_rpg_node_ids",
+                "mapped_rpg_link_ids",
+                "changed",
                 "changed_files",
+                "affected_files",
                 "diff_anchor",
+                "diff",
+                "hidden_counts",
+                "warning_types",
+                "rpg_node_id",
+                "neighbor_node_id",
             ):
                 value = row.get(key) if row.get(key) not in (None, "") else metadata.get(key)
                 if value not in (None, ""):
@@ -1300,6 +1347,7 @@ def _focused_graph_runtime() -> str:
   const svg = section.querySelector('[data-focused-graph-svg]');
   const fallback = section.querySelector('[data-focused-graph-fallback]');
   const statusEl = section.querySelector('[data-focused-graph-status]');
+  const detailEl = section.querySelector('[data-focused-graph-detail]');
   if (!window.d3 || !dataEl || !svg) return;
   if (fallback) fallback.hidden = true;
   const data = JSON.parse(dataEl.textContent || '{}');
@@ -1309,6 +1357,14 @@ def _focused_graph_runtime() -> str:
   const defaultShowEdges = defaultFocus.show_edges !== false;
   const text = value => value === undefined || value === null ? '' : String(value);
   const list = value => Array.isArray(value) ? value : [];
+  const nodePayloadById = {};
+  list(data.nodes).forEach(node => {
+    if (!node || typeof node !== 'object') return;
+    const id = text(node.id);
+    const nodeId = text(node.node_id || node.dep_node_id);
+    if (id) nodePayloadById[id] = node;
+    if (nodeId && !nodePayloadById[nodeId]) nodePayloadById[nodeId] = node;
+  });
   const root = d3.hierarchy(data.hierarchy || {id:'focused-graph-root', name:'Focused graph', children:[]}, d => d.children);
   const rootHierarchyId = text(root.data.id || 'focused-graph-root');
   const focusedNodeIds = new Set(list(defaultFocus.focused_tree_node_ids || defaultFocus.focused_node_ids || defaultFocus.node_link_ids).map(text).filter(Boolean));
@@ -1365,28 +1421,166 @@ def _focused_graph_runtime() -> str:
   svgSelection.call(zoom).on('dblclick.zoom', null).on('click', event => {
     if (event.target === svg) {
       selectedId = null;
+      renderFocusedGraphDetail(null);
       update(root);
     }
   });
 
-  function mappedCodeLabel(d) {
-    const path = d.data.mapped_code_path || list(d.data.mapped_code_paths)[0] || '';
-    const symbol = d.data.mapped_code_symbol || list(d.data.mapped_code_symbols)[0] || '';
-    return [path, symbol].filter(Boolean).join(' · ');
+  function nodeDetailData(d) {
+    if (!d) return {};
+    const data = d.data || {};
+    const payload = nodePayloadById[text(d.id)] || nodePayloadById[text(data.node_id || data.dep_node_id)] || {};
+    return {...payload, ...data};
   }
 
   function nodeLabel(d) {
-    const base = text(d.data.label || d.data.feature_name || d.data.name || d.data.node_id || d.id);
-    const mapped = mappedCodeLabel(d);
-    return mapped && !base.includes(mapped) ? `${base} — ${mapped}` : base;
+    const detail = nodeDetailData(d);
+    return text(detail.feature_name || detail.name || detail.node_id || detail.dep_node_id || detail.id || d.id || 'node');
+  }
+
+  function searchText(value) {
+    if (Array.isArray(value)) return value.map(searchText).join(' ');
+    if (value && typeof value === 'object') return Object.values(value).map(searchText).join(' ');
+    return text(value);
   }
 
   function nodeSearchText(d) {
-    return `${nodeLabel(d)} ${d.data.node_id || ''} ${d.data.feature_path || ''} ${d.data.path || ''} ${d.data.mapped_code_path || ''} ${list(d.data.mapped_code_paths).join(' ')} ${d.data.mapped_code_symbol || ''} ${list(d.data.mapped_code_symbols).join(' ')}`.toLowerCase();
+    return `${nodeLabel(d)} ${searchText(nodeDetailData(d))}`.toLowerCase();
   }
 
   function nodeMatches(d) {
     return query && nodeSearchText(d).includes(query);
+  }
+
+  function isPresent(value) {
+    if (value === undefined || value === null || value === '') return false;
+    if (Array.isArray(value)) return value.length > 0;
+    return true;
+  }
+
+  function escapeHtml(value) {
+    return text(value).replace(/[&<>"']/g, char => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;', "'":'&#39;'}[char]));
+  }
+
+  function uniqueTexts(values) {
+    const seen = new Set();
+    const result = [];
+    values.forEach(value => {
+      const item = text(value).trim();
+      if (!item || seen.has(item)) return;
+      seen.add(item);
+      result.push(item);
+    });
+    return result;
+  }
+
+  function detailItems(value) {
+    if (!isPresent(value)) return [];
+    return Array.isArray(value) ? value : [value];
+  }
+
+  function lineRangeText(value) {
+    if (!isPresent(value)) return '';
+    if (Array.isArray(value)) return value.map(text).filter(Boolean).join('-');
+    if (value && typeof value === 'object') {
+      const start = value.start ?? value.start_line ?? value.line_start;
+      const end = value.end ?? value.end_line ?? value.line_end;
+      if (isPresent(start) && isPresent(end)) return `${start}-${end}`;
+      return searchText(value).trim();
+    }
+    return text(value);
+  }
+
+  function simpleValueHtml(value) {
+    if (!isPresent(value)) return '';
+    if (Array.isArray(value)) return detailListHtml(value, simpleValueHtml);
+    if (value && typeof value === 'object') return `<code>${escapeHtml(searchText(value).trim() || JSON.stringify(value))}</code>`;
+    return escapeHtml(value);
+  }
+
+  function detailListHtml(value, render) {
+    const rows = detailItems(value).map(render).filter(Boolean);
+    return rows.length ? `<ul class="focused-graph-detail-list">${rows.map(row => `<li>${row}</li>`).join('')}</ul>` : '';
+  }
+
+  function changedFilesHtml(value) {
+    return detailListHtml(value, item => {
+      if (item && typeof item === 'object') {
+        const label = text(item.path || item.file || item.diff_anchor || item.href);
+        const href = text(item.href || (item.diff_anchor ? `#${item.diff_anchor}` : ''));
+        if (!label) return '';
+        return href ? `<a href="${escapeHtml(href)}">${escapeHtml(label)}</a>` : escapeHtml(label);
+      }
+      return escapeHtml(item);
+    });
+  }
+
+  function diffHtml(value, detail) {
+    if (value && typeof value === 'object') {
+      const label = text(value.path || value.href || 'View diff');
+      const href = text(value.href || (value.diff_anchor ? `#${value.diff_anchor}` : ''));
+      return href ? `<a href="${escapeHtml(href)}">${escapeHtml(label)}</a>` : escapeHtml(label);
+    }
+    if (detail.diff_anchor) return `<a href="#${escapeHtml(detail.diff_anchor)}">${escapeHtml(detail.path || detail.diff_anchor)}</a>`;
+    return '';
+  }
+
+  function mappedCodeHtml(value, detail) {
+    let refs = detailItems(value);
+    if (!refs.length) {
+      const paths = list(detail.mapped_code_paths);
+      const symbols = list(detail.mapped_code_symbols);
+      if (paths.length || symbols.length || detail.mapped_code_path || detail.mapped_code_symbol) {
+        refs = [{path: detail.mapped_code_path || paths[0], symbol: detail.mapped_code_symbol || symbols[0]}];
+      }
+    }
+    return detailListHtml(refs, item => {
+      if (item && typeof item === 'object') {
+        const label = uniqueTexts([item.path, item.symbol, item.node_id || item.link_id]).join(' · ');
+        const meta = uniqueTexts([item.type || item.kind, lineRangeText(item.line_range), item.source]).join(' · ');
+        if (!label && !meta) return '';
+        return `${escapeHtml(label || meta)}${label && meta ? `<span>${escapeHtml(meta)}</span>` : ''}`;
+      }
+      return escapeHtml(item);
+    });
+  }
+
+  function addValueRow(rows, label, value) {
+    if (!isPresent(value)) return;
+    rows.push(`<div class="focused-graph-detail-row"><dt>${escapeHtml(label)}</dt><dd>${simpleValueHtml(value)}</dd></div>`);
+  }
+
+  function addHtmlRow(rows, label, value) {
+    if (!value) return;
+    rows.push(`<div class="focused-graph-detail-row"><dt>${escapeHtml(label)}</dt><dd>${value}</dd></div>`);
+  }
+
+  function renderFocusedGraphDetail(d) {
+    if (!detailEl) return;
+    if (!d) {
+      detailEl.innerHTML = '<h3>Node details</h3><p class="empty">Select a node to inspect metadata.</p>';
+      return;
+    }
+    const detail = nodeDetailData(d);
+    const rows = [];
+    const typeText = uniqueTexts([detail.node_type || detail.type || detail.kind, detail.state, detail.mapping_status, detail.locate_status]).join(' · ');
+    const relationText = uniqueTexts([detail.relation, detail.direction]).join(' · ');
+    const sourceText = uniqueTexts([detail.source, detail.source_graph, detail.edge_source, detail.relation_source]).join(' · ');
+    addValueRow(rows, 'Node id', detail.node_id || detail.dep_node_id || detail.id);
+    addValueRow(rows, 'Feature path', detail.feature_path || detail.breadcrumb_path || detail.breadcrumb);
+    addValueRow(rows, 'Path', detail.path || detail.module || detail.file);
+    addValueRow(rows, 'Symbol', detail.symbol);
+    addValueRow(rows, 'Type', typeText);
+    addValueRow(rows, 'Relation', relationText);
+    addValueRow(rows, 'Source', sourceText);
+    addValueRow(rows, 'Reason', detail.reason);
+    addValueRow(rows, 'Lines', lineRangeText(detail.line_range));
+    addHtmlRow(rows, 'Mapped code', mappedCodeHtml(detail.mapped_code, detail));
+    addHtmlRow(rows, 'Changed files', changedFilesHtml(detail.changed_files || detail.affected_files));
+    addHtmlRow(rows, 'Diff', diffHtml(detail.diff, detail));
+    const chips = uniqueTexts([detail.kind, detail.state, detail.mapping_status, detail.source]).map(item => `<span class="badge">${escapeHtml(item)}</span>`).join('');
+    const body = rows.length ? `<dl>${rows.join('')}</dl>` : '<p class="empty">No additional metadata for this node.</p>';
+    detailEl.innerHTML = `<h3>${escapeHtml(nodeLabel(d))}</h3>${chips ? `<div class="focused-graph-detail-badges">${chips}</div>` : ''}${body}`;
   }
 
   function diagonal(s, d) {
@@ -1436,6 +1630,7 @@ def _focused_graph_runtime() -> str:
     if (search) search.value = '';
     const edges = section.querySelector('[data-action="edges"]');
     if (edges) edges.checked = showEdges;
+    renderFocusedGraphDetail(null);
     svgSelection.transition().duration(150).call(zoom.transform, d3.zoomIdentity.translate(80, 40));
     update(root);
   }
@@ -1528,6 +1723,7 @@ def _focused_graph_runtime() -> str:
       .on('click', (event, d) => {
         event.stopPropagation();
         selectedId = selectedId === d.id ? null : d.id;
+        renderFocusedGraphDetail(selectedId ? d : null);
         update(d);
       })
       .on('dblclick', (event, d) => {
@@ -1542,9 +1738,12 @@ def _focused_graph_runtime() -> str:
       .attr('x', d => d.children || d._children ? -10 : 10)
       .attr('text-anchor', d => d.children || d._children ? 'end' : 'start')
       .attr('font-size', 12)
-      .attr('fill', '#1f2937')
+      .attr('fill', '#e5e7eb')
       .text(d => nodeLabel(d).length > 46 ? nodeLabel(d).slice(0, 44) + '…' : nodeLabel(d));
-    nodeEnter.append('title').text(d => `${nodeLabel(d)}\n${d.data.feature_path || ''}\n${d.data.mapped_code_path || ''} ${d.data.mapped_code_symbol || ''}`);
+    nodeEnter.append('title').text(d => {
+      const detail = nodeDetailData(d);
+      return `${nodeLabel(d)}\n${detail.feature_path || ''}\n${detail.path || ''} ${detail.symbol || ''}`;
+    });
 
     const nodeUpdate = nodeEnter.merge(node);
     nodeUpdate.transition().duration(250).attr('transform', d => `translate(${d.y},${d.x})`);
@@ -1568,6 +1767,7 @@ def _focused_graph_runtime() -> str:
       .remove();
 
     drawRelationEdges();
+    renderFocusedGraphDetail(selectedId ? (nodeById[selectedId] || allNodeById[selectedId]) : null);
     currentNodes.forEach(d => { d.x0 = d.x; d.y0 = d.y; });
   }
 
@@ -1640,6 +1840,7 @@ def _render_focused_graph(focused_view: dict[str, Any], file_anchors: Mapping[st
         f"<script type=\"application/json\" data-focused-graph-json>{graph_json}</script>"
         '<div class="focused-graph-stage">'
         '<svg class="focused-graph-svg" data-focused-graph-svg role="img" aria-label="Focused graph view" width="960" height="520"></svg>'
+        '<aside class="focused-graph-detail" data-focused-graph-detail aria-live="polite"><h3>Node details</h3><p class="empty">Select a node to inspect metadata.</p></aside>'
         f'<div class="focused-graph-fallback" data-focused-graph-fallback{fallback_hidden}>Static focused graph fallback is available when D3 cannot run.{d3_missing_note}</div>'
         '</div>'
         f"{warnings_html}{hidden_html}"
