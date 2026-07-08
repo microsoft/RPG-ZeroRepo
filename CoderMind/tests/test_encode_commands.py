@@ -539,8 +539,49 @@ def test_attach_update_report_uses_update_rpg_result_fields(tmp_path, monkeypatc
     assert nodes_view["summary"]["semantic_nodes"] == 1
     assert nodes_view["summary"]["code_nodes"] == 3
     assert nodes_view["summary"]["mappings"] == 2
-    assert nodes_view["semantic_nodes"][0]["node_id"] == "feature_a"
-    assert nodes_view["code_nodes"][1]["line_range"] == {"start": 10, "end": 12}
+    assert nodes_view["summary"]["edges"] == 1
+    assert nodes_view["summary"]["changed_files"] == 2
+    semantic_node = nodes_view["semantic_nodes"][0]
+    code_nodes = {row["node_id"]: row for row in nodes_view["code_nodes"]}
+    mappings = {(row["rpg_node_id"], row["code_node_id"]): row for row in nodes_view["mappings"]}
+    edge = nodes_view["edges"][0]
+    assert semantic_node["node_id"] == "feature_a"
+    assert semantic_node["link_id"] == "rpg-feature_a"
+    assert semantic_node["mapped_code_node_ids"] == ["scripts/a.py", "scripts/a.py:f"]
+    assert semantic_node["mapped_code_link_ids"] == ["code-scripts-a.py", "code-scripts-a.py-f"]
+    assert semantic_node["mapped_code"][1]["line_range"] == {"start": 10, "end": 12}
+    assert semantic_node["changed_files"] == [{"path": "scripts/a.py", "diff_anchor": "diff-scripts_a.py"}]
+    assert code_nodes["scripts/a.py:f"]["line_range"] == {"start": 10, "end": 12}
+    assert code_nodes["scripts/a.py:f"]["link_id"] == "code-scripts-a.py-f"
+    assert code_nodes["scripts/a.py:f"]["diff_anchor"] == "diff-scripts_a.py"
+    assert code_nodes["scripts/a.py:f"]["mapped_rpg_node_ids"] == ["feature_a"]
+    assert code_nodes["scripts/a.py:f"]["mapped_rpg_link_ids"] == ["rpg-feature_a"]
+    assert code_nodes["scripts/a.py:f"]["mapped_rpg"][0]["feature_path"] == "test_repo / Refresh graph visualization"
+    assert code_nodes["tests/test_a.py"]["link_id"] == "code-tests-test_a.py"
+    assert "mapped_rpg" not in code_nodes["tests/test_a.py"]
+    assert mappings[("feature_a", "scripts/a.py")]["link_id"] == "map-feature_a-scripts-a.py"
+    assert mappings[("feature_a", "scripts/a.py:f")]["source_link_id"] == "rpg-feature_a"
+    assert mappings[("feature_a", "scripts/a.py:f")]["target_link_id"] == "code-scripts-a.py-f"
+    assert mappings[("feature_a", "scripts/a.py:f")]["changed_files"] == [{"path": "scripts/a.py", "diff_anchor": "diff-scripts_a.py"}]
+    assert edge["link_id"] == "edge-scripts-a.py-f-imports-tests-test_a.py"
+    assert edge["source_link_id"] == "code-scripts-a.py-f"
+    assert edge["target_link_id"] == "code-tests-test_a.py"
+    assert nodes_view["changed_files"] == [
+        {"path": "scripts/a.py", "diff_anchor": "diff-scripts_a.py"},
+        {"path": "tests/test_a.py", "diff_anchor": "diff-tests_test_a.py"},
+    ]
+    assert nodes_view["hierarchy"]["id"] == "focused-graph-root"
+    assert nodes_view["hierarchy"]["children"][0]["id"] == "feature-path-test_repo"
+    assert nodes_view["focused_graph"]["schema"] == "cmind.focused_graph.v1"
+    assert nodes_view["focused_graph"]["hierarchy"] == nodes_view["hierarchy"]
+    assert nodes_view["focused_graph"]["default_focus"] == nodes_view["default_focus"]
+    assert nodes_view["graph_context"]["rpg_nodes"] == 4504
+    assert nodes_view["graph_context"]["dep_edges"] == 5498
+    assert nodes_view["graph_context"]["semantic_delta"] == 3
+    assert "rpg-feature_a" in nodes_view["default_focus"]["node_link_ids"]
+    assert "code-scripts-a.py-f" in nodes_view["default_focus"]["focused_code_link_ids"]
+    assert "edge-scripts-a.py-f-imports-tests-test_a.py" in nodes_view["default_focus"]["edge_link_ids"]
+    assert "code-tests-test_a.py" in nodes_view["default_focus"]["relation_endpoint_link_ids"]
     assert evidence["code_deltas"][1]["file"] == "tests/test_a.py"
     assert evidence["semantic_summary"] == {"added": 0, "deleted": 0, "modified": 3, "renamed": 0}
     assert evidence["commit_range"] == {
@@ -601,9 +642,31 @@ def test_attach_update_report_warns_on_zero_semantic_delta_without_inventing_nod
     assert captured["verification"][2]["detail"] == "RPG semantic delta 为 0"
     assert focused["summary"]["primary_rpg_nodes"] == 0
     assert focused["summary"]["primary_code_nodes"] == 0
+    assert nodes_view["summary"]["semantic_nodes"] == 0
+    assert nodes_view["summary"]["code_nodes"] == 0
+    assert nodes_view["summary"]["warnings"] == 2
     assert nodes_view["semantic_nodes"] == []
     assert nodes_view["code_nodes"] == []
     assert nodes_view["mappings"] == []
+    assert nodes_view["edges"] == []
+    assert nodes_view["changed_files"] == [{"path": "docs/readme.md", "diff_anchor": "diff-docs_readme.md"}]
+    assert nodes_view["hierarchy"] == {
+        "id": "focused-graph-root",
+        "name": "Focused graph",
+        "kind": "root",
+        "feature_name": "Focused graph",
+        "feature_path": "Focused graph",
+        "meta": {"hidden_counts": {}, "warnings": 2, "edges": 0},
+        "children": [],
+    }
+    assert nodes_view["default_focus"]["node_link_ids"] == []
+    assert nodes_view["default_focus"]["semantic_node_ids"] == []
+    assert nodes_view["default_focus"]["code_node_ids"] == []
+    assert nodes_view["focused_graph"]["schema"] == "cmind.focused_graph.v1"
+    assert nodes_view["focused_graph"]["warning_count"] == 2
+    assert nodes_view["graph_context"]["semantic_delta"] == 0
+    assert nodes_view["graph_context"]["changed_files"] == 1
+    assert focused["changed_files"] == [{"path": "docs/readme.md", "diff_anchor": "diff-docs_readme.md"}]
     assert captured.get("rpg_deltas", []) == []
     assert captured.get("dep_graph_deltas", []) == []
     assert any(warning["message"] == "RPG semantic delta 为 0" for warning in focused["warnings"])
