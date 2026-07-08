@@ -400,48 +400,215 @@ class TestRunUpdateRpg:
 def test_attach_update_report_uses_update_rpg_result_fields(tmp_path, monkeypatch):
     import update_graphs
 
+    rpg_path = tmp_path / "rpg.json"
+    rpg_path.write_text(json.dumps({
+        "repo_name": "test_repo",
+        "root": {
+            "id": "root",
+            "name": "test_repo",
+            "node_type": "root",
+            "meta": {"path": "."},
+            "children": [
+                {
+                    "id": "feature_a",
+                    "name": "Refresh graph visualization",
+                    "node_type": "feature",
+                    "meta": {"path": "scripts/a.py:f"},
+                    "children": [],
+                }
+            ],
+        },
+        "_dep_to_rpg_map": {
+            "scripts/a.py": ["feature_a"],
+            "scripts/a.py:f": ["feature_a"],
+        },
+        "dep_graph": {
+            "nodes": {
+                "scripts/a.py": {
+                    "type": "file",
+                    "name": "a.py",
+                    "path": "scripts/a.py",
+                    "rpg_nodes": ["feature_a"],
+                },
+                "scripts/a.py:f": {
+                    "type": "function",
+                    "name": "f",
+                    "path": "scripts/a.py",
+                    "start_line": 10,
+                    "end_line": 12,
+                    "rpg_nodes": ["feature_a"],
+                },
+                "tests/test_a.py": {
+                    "type": "file",
+                    "name": "test_a.py",
+                    "path": "tests/test_a.py",
+                },
+            },
+            "edges": [
+                {
+                    "src": "scripts/a.py:f",
+                    "dst": "tests/test_a.py",
+                    "attrs": {"type": "imports"},
+                }
+            ],
+        },
+    }), encoding="utf-8")
+    viz_path = tmp_path / "rpg.html"
+    viz_path.write_text("<html></html>", encoding="utf-8")
     captured = {}
 
     def fake_write_command_report(run):
-        captured.update(run.to_dict())
+        captured.update(run.to_dict() if hasattr(run, "to_dict") else dict(run))
         return tmp_path / "report.html"
 
+    monkeypatch.setenv("CMIND_HOOK", "PostCommit")
     monkeypatch.setattr(update_graphs, "write_command_report", fake_write_command_report)
 
     result = update_graphs._attach_update_report({
         "mode": "update-rpg",
         "status": "success",
-        "output_path": "/tmp/rpg.json",
+        "output_path": str(rpg_path),
         "node_count": 4504,
+        "edge_count": 15000,
         "nodes_delta": 2,
+        "edges_delta": 7,
         "dep_nodes": 2708,
         "dep_nodes_delta": 46,
         "dep_edges": 5498,
         "dep_edges_delta": 103,
+        "dep_to_rpg_map_size": 2,
         "diff_summary": {
             "added": 0,
             "deleted": 0,
             "modified": 3,
             "renamed": 0,
         },
+        "diff_files": {
+            "added": [],
+            "deleted": [],
+            "modified": ["scripts/a.py", "tests/test_a.py"],
+            "renamed": [],
+        },
         "git_delta": [
-            {"status": "M", "path": "scripts/a.py"},
-            {"status": "M", "path": "tests/test_a.py"},
+            {"status": "M", "change_type": "modified", "path": "scripts/a.py", "diff": "diff --git a/scripts/a.py b/scripts/a.py\n+new"},
+            {"status": "M", "change_type": "modified", "path": "tests/test_a.py", "diff": "diff --git a/tests/test_a.py b/tests/test_a.py\n+test"},
         ],
-        "viz_path": "/tmp/rpg.html",
+        "prev_ref": "prev123",
+        "previous_commit": "old456",
+        "new_commit": "new789",
+        "viz_path": str(viz_path),
     })
 
-    cards = {card["label"]: card["value"] for card in captured["summary"]}
+    cards = {card["label"]: card for card in captured["summary"]}
     artifacts = {artifact["label"]: artifact["path"] for artifact in captured["artifacts"]}
+    steps = {step["name"]: step for step in captured["steps"]}
+    evidence = captured["evidence"]
+    focused = captured["focused_view"]
+    nodes_view = focused["nodes_view"]
+
     assert result["report_path"] == str(tmp_path / "report.html")
-    assert cards["git files"] == 2
-    assert cards["semantic files"] == 3
-    assert cards["RPG nodes"] == "4504 (delta: +2)"
-    assert cards["dep graph"] == "nodes=2708 (delta: +46), edges=5498 (delta: +103)"
-    assert artifacts["rpg_json"] == "/tmp/rpg.json"
+    assert cards["git files"]["value"] == 2
+    assert cards["semantic files"]["value"] == 3
+    assert cards["semantic files"]["detail"] == "3 semantic files, modified=3"
+    assert cards["RPG nodes"]["value"] == "4504 (delta: +2)"
+    assert cards["RPG nodes"]["detail"] == "edges=15000 (delta: +7)"
+    assert cards["dep graph"]["value"] == "nodes=2708 (delta: +46), edges=5498 (delta: +103)"
+    assert "dep_to_rpg_map_size=2" in cards["dep graph"]["detail"]
+    assert artifacts["rpg_json"] == str(rpg_path)
+    assert artifacts["rpg_html"] == str(viz_path)
+    assert artifacts["hook_calls_log"].endswith("hook_calls.jsonl")
+    assert artifacts["update_rpg_log"].endswith("update_rpg.log")
     assert captured["status"] == "success"
-    assert captured["steps"][0]["reason"] == "2 changed files"
-    assert captured["steps"][1]["reason"] == "3 semantic files, modified=3"
+    assert steps["git delta"]["reason"] == "2 changed files"
+    assert steps["semantic delta"]["reason"] == "3 semantic files, modified=3"
+    assert "prev_ref=prev123" in steps["commit range"]["reason"]
+    assert "previous_commit=old456" in steps["commit range"]["reason"]
+    assert "new_commit=new789" in steps["commit range"]["reason"]
+    assert "CMIND_HOOK=PostCommit" in steps["hook context"]["reason"]
+    assert captured["code_deltas"][0]["file"] == "scripts/a.py"
+    assert captured["code_deltas"][0]["change_type"] == "modified"
+    assert "+new" in captured["code_deltas"][0]["diff"]
+    assert captured["rpg_deltas"][0]["node_id"] == "feature_a"
+    assert captured["rpg_deltas"][0]["name"] == "Refresh graph visualization"
+    assert {row["path"] for row in captured["dep_graph_deltas"]} >= {"scripts/a.py", "tests/test_a.py"}
+    assert focused["summary"]["primary_rpg_nodes"] == 1
+    assert focused["summary"]["primary_code_nodes"] == 3
+    assert focused["summary"]["mapped_code_relations"] == 2
+    assert focused["summary"]["missing_mappings"] == 1
+    assert focused["warnings"] == []
+    assert nodes_view["summary"]["semantic_nodes"] == 1
+    assert nodes_view["summary"]["code_nodes"] == 3
+    assert nodes_view["summary"]["mappings"] == 2
+    assert nodes_view["semantic_nodes"][0]["node_id"] == "feature_a"
+    assert nodes_view["code_nodes"][1]["line_range"] == {"start": 10, "end": 12}
+    assert evidence["code_deltas"][1]["file"] == "tests/test_a.py"
+    assert evidence["semantic_summary"] == {"added": 0, "deleted": 0, "modified": 3, "renamed": 0}
+    assert evidence["commit_range"] == {
+        "prev_ref": "prev123",
+        "previous_commit": "old456",
+        "new_commit": "new789",
+    }
+    assert evidence["commit_range_reason"] == "prev_ref=prev123, previous_commit=old456, new_commit=new789"
+    assert evidence["hook_context"]["CMIND_HOOK"] == "PostCommit"
+    assert evidence["hook_context"]["hook_calls_log"].endswith("hook_calls.jsonl")
+    assert evidence["hook_context"]["update_rpg_log"].endswith("update_rpg.log")
+
+
+def test_attach_update_report_warns_on_zero_semantic_delta_without_inventing_nodes(tmp_path, monkeypatch):
+    import update_graphs
+
+    captured = {}
+
+    def fake_write_command_report(run):
+        captured.update(run.to_dict() if hasattr(run, "to_dict") else dict(run))
+        return tmp_path / "zero.html"
+
+    monkeypatch.setattr(update_graphs, "write_command_report", fake_write_command_report)
+
+    result = update_graphs._attach_update_report({
+        "mode": "update-rpg",
+        "status": "success",
+        "output_path": str(tmp_path / "missing-rpg.json"),
+        "node_count": 4504,
+        "nodes_delta": 0,
+        "dep_nodes": 2708,
+        "dep_nodes_delta": 0,
+        "dep_edges": 5498,
+        "dep_edges_delta": 0,
+        "diff_summary": {
+            "added": 0,
+            "deleted": 0,
+            "modified": 0,
+            "renamed": 0,
+        },
+        "git_delta": [
+            {"status": "M", "change_type": "modified", "path": "docs/readme.md", "diff": "+doc"},
+        ],
+        "prev_ref": "prev123",
+        "previous_commit": "old456",
+        "new_commit": "new789",
+    })
+
+    cards = {card["label"]: card for card in captured["summary"]}
+    steps = {step["name"]: step for step in captured["steps"]}
+    focused = captured["focused_view"]
+    nodes_view = focused["nodes_view"]
+    assert result["report_path"] == str(tmp_path / "zero.html")
+    assert cards["semantic files"]["value"] == 0
+    assert cards["semantic files"]["detail"] == "RPG semantic delta 为 0"
+    assert steps["semantic delta"]["status"] == "warning"
+    assert steps["semantic delta"]["reason"] == "RPG semantic delta 为 0"
+    assert captured["verification"][2]["detail"] == "RPG semantic delta 为 0"
+    assert focused["summary"]["primary_rpg_nodes"] == 0
+    assert focused["summary"]["primary_code_nodes"] == 0
+    assert nodes_view["semantic_nodes"] == []
+    assert nodes_view["code_nodes"] == []
+    assert nodes_view["mappings"] == []
+    assert captured.get("rpg_deltas", []) == []
+    assert captured.get("dep_graph_deltas", []) == []
+    assert any(warning["message"] == "RPG semantic delta 为 0" for warning in focused["warnings"])
+    assert any(warning["type"] == "unmapped_changed_file" for warning in focused["warnings"])
+    assert focused["unmatched_code_deltas"][0]["file"] == "docs/readme.md"
 
 
 # ============================================================================
