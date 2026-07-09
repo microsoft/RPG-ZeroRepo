@@ -221,6 +221,10 @@ def _normalize_focused_view(value: Any) -> dict[str, Any]:
         for edge in _as_sequence(value.get("edges"))
     ]
     normalized["hidden_counts"] = dict(value.get("hidden_counts") or {}) if isinstance(value.get("hidden_counts"), Mapping) else {}
+    normalized["hidden_context_nodes"] = [
+        dict(node) if isinstance(node, Mapping) else {"detail": node}
+        for node in _as_sequence(value.get("hidden_context_nodes"))
+    ]
     normalized["warnings"] = [
         dict(warning) if isinstance(warning, Mapping) else {"message": warning}
         for warning in _as_sequence(value.get("warnings"))
@@ -238,7 +242,7 @@ def _normalize_focused_view(value: Any) -> dict[str, Any]:
 def _normalize_nodes_view(value: Mapping[str, Any]) -> dict[str, Any]:
     normalized = dict(value)
     normalized["summary"] = dict(value.get("summary") or {}) if isinstance(value.get("summary"), Mapping) else {}
-    for key in ("semantic_nodes", "code_nodes", "mappings", "edges", "warnings", "changed_files"):
+    for key in ("semantic_nodes", "code_nodes", "mappings", "edges", "warnings", "changed_files", "hidden_context_nodes"):
         normalized[key] = [
             dict(item) if isinstance(item, Mapping) else {"detail": item}
             for item in _as_sequence(value.get(key))
@@ -718,10 +722,27 @@ def _combined_hidden_counts(hidden_counts: Mapping[str, Any]) -> list[tuple[str,
     return rows
 
 
-def _hidden_context_html(hidden_counts: Mapping[str, Any]) -> str:
+def _hidden_context_html(hidden_counts: Mapping[str, Any], hidden_context_nodes: Sequence[Any] = ()) -> str:
     parts = []
     for relation, count in _combined_hidden_counts(hidden_counts):
         parts.append(f"<p class=\"reason\">Hidden {_h(count)} additional {_h(relation)} neighbors.</p>")
+    rows = [node for node in _as_sequence(hidden_context_nodes) if isinstance(node, Mapping)]
+    if rows:
+        items = []
+        for node in rows:
+            node_id = node.get("node_id") or node.get("rpg_node_id") or node.get("id") or "hidden context"
+            title = node.get("name") or node.get("symbol") or node_id
+            reason = node.get("hidden_reason") or node.get("reason") or "hidden context"
+            path = node.get("breadcrumb_path") or node.get("feature_path") or node.get("path") or ""
+            items.append(
+                "<li>"
+                f"<code>{_h(node_id)}</code> {_h(title)}"
+                f" <span class=\"badge\">hidden context</span>"
+                f"<div class=\"reason\">{_h(reason)}</div>"
+                f"<div class=\"reason\">{_h(path)}</div>"
+                "</li>"
+            )
+        parts.append("<details><summary>Hidden context nodes</summary><ul class=\"hit-list\">" + "".join(items) + "</ul></details>")
     return "".join(parts)
 
 
@@ -1087,6 +1108,7 @@ def _focused_graph_payload(focused_view: Mapping[str, Any], file_anchors: Mappin
     mappings = [mapping for mapping in _as_sequence(nodes_view.get("mappings")) if isinstance(mapping, Mapping)]
     context_edges = [edge for edge in _as_sequence(nodes_view.get("edges")) if isinstance(edge, Mapping)]
     hidden_counts = nodes_view.get("hidden_counts") if isinstance(nodes_view.get("hidden_counts"), Mapping) else focused_view.get("hidden_counts", {})
+    hidden_context_nodes = [node for node in _as_sequence(nodes_view.get("hidden_context_nodes") or focused_view.get("hidden_context_nodes")) if isinstance(node, Mapping)]
     warnings = [warning for warning in _as_sequence(nodes_view.get("warnings")) if isinstance(warning, Mapping)]
     focused_graph = nodes_view.get("focused_graph") if isinstance(nodes_view.get("focused_graph"), Mapping) else {}
     hierarchy = nodes_view.get("hierarchy") or focused_graph.get("hierarchy") or {}
@@ -1342,6 +1364,7 @@ def _focused_graph_payload(focused_view: Mapping[str, Any], file_anchors: Mappin
         "mappings": mappings,
         "edges": context_edges,
         "hidden_counts": hidden_counts,
+        "hidden_context_nodes": hidden_context_nodes,
         "warnings": warnings,
         "hierarchy": hierarchy,
         "default_focus": default_focus,
@@ -1843,7 +1866,8 @@ def _render_focused_graph(focused_view: dict[str, Any], file_anchors: Mapping[st
         ("Warnings", "warnings", len(_as_sequence(nodes_view.get("warnings")))),
     ])
     hidden_counts = nodes_view.get("hidden_counts") if isinstance(nodes_view.get("hidden_counts"), Mapping) else focused_view.get("hidden_counts", {})
-    hidden_html = _hidden_context_html(hidden_counts if isinstance(hidden_counts, Mapping) else {})
+    hidden_context_nodes = [node for node in _as_sequence(nodes_view.get("hidden_context_nodes") or focused_view.get("hidden_context_nodes")) if isinstance(node, Mapping)]
+    hidden_html = _hidden_context_html(hidden_counts if isinstance(hidden_counts, Mapping) else {}, hidden_context_nodes)
     warnings = [warning for warning in _as_sequence(nodes_view.get("warnings") or focused_view.get("warnings")) if isinstance(warning, Mapping)]
     warnings_html = f"<details><summary>Warnings</summary>{_chain_warning_html(warnings)}</details>" if warnings else ""
     relation_edges_value = graph_payload.get("relation_edges")
@@ -1923,7 +1947,10 @@ def _legacy_render_focused_nodes_map(focused_view: dict[str, Any], file_anchors:
         for mapping in _as_sequence(nodes_view.get("mappings"))
         if isinstance(mapping, Mapping)
     ]
-    hidden_html = _hidden_context_html(nodes_view.get("hidden_counts") if isinstance(nodes_view.get("hidden_counts"), Mapping) else {})
+    hidden_html = _hidden_context_html(
+        nodes_view.get("hidden_counts") if isinstance(nodes_view.get("hidden_counts"), Mapping) else {},
+        _as_sequence(nodes_view.get("hidden_context_nodes")),
+    )
     warnings = [warning for warning in _as_sequence(nodes_view.get("warnings")) if isinstance(warning, Mapping)]
     warnings_html = f"<h3>Warnings</h3>{_chain_warning_html(warnings)}" if warnings else ""
     body = summary_html

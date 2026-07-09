@@ -1208,6 +1208,7 @@ def _build_nodes_view(
 
 _LEGACY_FOCUSED_VIEW_CAPS = {"primary_rpg_nodes": 20, "primary_code_nodes": 50, "edges": 80}
 _FOCUSED_WARNING_TYPES = {"missing_mapping", "missing_reason", "stale_graph"}
+_HIDDEN_CONTEXT_REASON = "selected by plan/impact, hidden because no modified mapped code"
 
 
 def _set_if_present(row: Dict[str, Any], key: str, value: Any) -> None:
@@ -1771,10 +1772,54 @@ def _feature_evidence_groups(
                 mapping_row["changed_files"] = changed_for_node
             mapping_rows_all.append(mapping_row)
 
-    primary_rpg_nodes = primary_rpg_nodes_all
+    selected_rpg_ids_all = {str(row.get("node_id") or "") for row in primary_rpg_nodes_all if row.get("node_id") not in (None, "")}
+    modified_mapped_rpg_ids = _ordered_unique([row.get("rpg_node_id") for row in mapping_rows_all if row.get("code_node_id")])
+    edge_endpoint_rpg_ids = _ordered_unique([
+        endpoint
+        for edge in all_edges
+        for endpoint in (edge.get("source_node_id"), edge.get("target_node_id"))
+        if str(endpoint or "") in current_rpg_nodes or str(endpoint or "") in selected_rpg_ids_all
+    ])
+    visible_rpg_ids = _ordered_unique(modified_mapped_rpg_ids + edge_endpoint_rpg_ids)
+    visible_rpg_id_set = set(visible_rpg_ids)
+    primary_rpg_by_id = {
+        str(row.get("node_id")): row
+        for row in primary_rpg_nodes_all
+        if row.get("node_id") not in (None, "")
+    }
+    primary_rpg_nodes: List[Dict[str, Any]] = []
+    for node_id in visible_rpg_ids:
+        row = primary_rpg_by_id.get(node_id)
+        if row is None and node_id in current_rpg_nodes:
+            row = dict(current_rpg_nodes[node_id])
+            row["node_id"] = node_id
+            row.setdefault("link_id", _node_link_id("rpg", node_id))
+            row.setdefault("status", "context")
+            row.setdefault("graph_state", "available")
+        if row is not None:
+            primary_rpg_nodes.append(row)
+    visible_primary_rpg_ids = {str(row.get("node_id") or "") for row in primary_rpg_nodes}
+    hidden_context_nodes: List[Dict[str, Any]] = []
+    for row in primary_rpg_nodes_all:
+        node_id = str(row.get("node_id") or "")
+        if not node_id or node_id in visible_primary_rpg_ids:
+            continue
+        hidden_row = dict(row)
+        hidden_row["hidden_reason"] = _HIDDEN_CONTEXT_REASON
+        hidden_row["reason"] = _HIDDEN_CONTEXT_REASON
+        hidden_context_nodes.append(hidden_row)
     primary_code_nodes_all = list(code_node_by_id.values())
-    primary_code_nodes = primary_code_nodes_all
-    mappings = mapping_rows_all
+    visible_code_ids = {
+        str(row.get("code_node_id") or row.get("dep_node_id") or "")
+        for row in mapping_rows_all
+        if str(row.get("rpg_node_id") or "") in visible_primary_rpg_ids and (row.get("code_node_id") or row.get("dep_node_id")) not in (None, "")
+    }
+    primary_code_nodes = [row for row in primary_code_nodes_all if str(row.get("node_id") or row.get("dep_node_id") or "") in visible_code_ids]
+    mappings = [
+        row
+        for row in mapping_rows_all
+        if str(row.get("rpg_node_id") or "") in visible_primary_rpg_ids
+    ]
     edges = all_edges
     hidden_counts: Dict[str, Any] = {}
     for key, count in impact_hidden_counts.items():
@@ -1783,8 +1828,8 @@ def _feature_evidence_groups(
 
     matched_files = {file_path for node in primary_rpg_nodes_all for file_path in node.get("changed_files") or []}
     unmatched_code_deltas = [delta for delta in code_deltas if _code_delta_file(delta) not in matched_files]
-    mapped_code_relations = sum(1 for row in mapping_rows_all if row.get("code_node_id"))
-    missing_mappings = sum(1 for row in mapping_rows_all if row.get("status") == "missing")
+    mapped_code_relations = sum(1 for row in mappings if row.get("code_node_id"))
+    missing_mappings = sum(1 for row in mappings if row.get("status") == "missing")
     diff_anchors = _diff_anchor_map(code_deltas)
     graph_context = {
         "current_graph_available": current_graph_available,
@@ -1814,12 +1859,14 @@ def _feature_evidence_groups(
         "edges": len(edges),
         "warnings": len(warnings),
         "changed_files": len(changed_files),
+        "hidden_context_nodes": len(hidden_context_nodes),
         "review_status": result.get("type", "review"),
         "apply_status": _apply_status(apply_result),
         "verification_status": _test_status(result, code_result, apply_result),
     }
+    nodes_view["hidden_context_nodes"] = hidden_context_nodes
     nodes_summary = dict(nodes_view.get("summary", {}))
-    for key in ("selected_feature_groups", "mapped_code_relations", "missing_mappings", "review_status", "apply_status", "verification_status"):
+    for key in ("selected_feature_groups", "mapped_code_relations", "missing_mappings", "hidden_context_nodes", "review_status", "apply_status", "verification_status"):
         _set_if_present(nodes_summary, key, summary.get(key))
     nodes_view["summary"] = nodes_summary
     return {
@@ -1830,6 +1877,7 @@ def _feature_evidence_groups(
         "mappings": mappings,
         "edges": edges,
         "hidden_counts": hidden_counts,
+        "hidden_context_nodes": hidden_context_nodes,
         "warnings": warnings,
         "changed_files": changed_files,
         "unmatched_code_deltas": unmatched_code_deltas,
