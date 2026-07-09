@@ -389,13 +389,13 @@ details summary {{ cursor:pointer; color:var(--accent); font-weight:600; }}
 .focus-links {{ display:flex; flex-wrap:wrap; gap:6px; }}
 .focus-link {{ border:1px solid var(--line); border-radius:999px; padding:2px 8px; background:#fff; font-size:12px; }}
 .focused-graph-section {{ overflow-x:hidden; }}
-.focused-graph-toolbar {{ display:flex; flex-wrap:wrap; gap:8px; align-items:center; margin:10px 0 12px; padding:10px; border:1px solid #334155; border-radius:12px; background:#0f172a; color:#e5e7eb; }}
+.focused-graph-stage {{ border:1px solid #334155; border-radius:12px; background:#0f172a; height:clamp(520px,72vh,820px); position:relative; overflow:hidden; }}
+.focused-graph-svg {{ display:block; width:100%; height:100%; cursor:grab; touch-action:none; }}
+.focused-graph-svg:active {{ cursor:grabbing; }}
+.focused-graph-toolbar {{ position:absolute; top:14px; left:14px; z-index:3; display:flex; flex-wrap:wrap; gap:8px; align-items:center; max-width:calc(100% - 28px); margin:0; padding:10px; border:1px solid #334155; border-radius:12px; background:rgba(15,23,42,.92); color:#e5e7eb; box-shadow:0 14px 32px rgba(2,6,23,.35); }}
 .focused-graph-toolbar button, .focused-graph-toolbar input {{ border:1px solid #475569; border-radius:8px; background:#1e293b; color:#e5e7eb; padding:6px 10px; font:inherit; }}
 .focused-graph-toolbar input::placeholder {{ color:#94a3b8; }}
 .focused-graph-toolbar label {{ display:inline-flex; gap:6px; align-items:center; color:#cbd5e1; }}
-.focused-graph-stage {{ border:1px solid #334155; border-radius:12px; background:#0f172a; min-height:680px; position:relative; overflow:hidden; }}
-.focused-graph-svg {{ display:block; width:100%; height:680px; cursor:grab; touch-action:none; }}
-.focused-graph-svg:active {{ cursor:grabbing; }}
 .focused-graph-detail {{ position:absolute; top:14px; right:14px; z-index:2; width:min(320px,calc(100% - 28px)); max-height:calc(100% - 28px); overflow:auto; border:1px solid #334155; border-radius:12px; background:rgba(15,23,42,.94); color:#e5e7eb; padding:12px; box-shadow:0 18px 40px rgba(2,6,23,.35); }}
 .focused-graph-detail h3 {{ margin:0 0 8px; font-size:15px; color:#f8fafc; overflow-wrap:anywhere; }}
 .focused-graph-detail dl {{ margin:0; display:grid; gap:8px; }}
@@ -430,7 +430,7 @@ details summary {{ cursor:pointer; color:var(--accent); font-weight:600; }}
 .focused-graph-node.dimmed {{ opacity:.18; }}
 .focused-graph-node.hidden {{ display:none; }}
 .focused-graph-fallback {{ margin:12px; padding:12px; border:1px dashed #475569; border-radius:10px; background:#1e293b; color:#cbd5e1; }}
-.focused-graph-legend {{ display:flex; flex-wrap:wrap; gap:8px; margin:8px 0 12px; padding:10px; border:1px solid #334155; border-radius:12px; background:#0f172a; }}
+.focused-graph-legend {{ position:absolute; left:14px; bottom:14px; z-index:3; display:flex; flex-wrap:wrap; gap:8px; max-width:calc(100% - 28px); margin:0; padding:10px; border:1px solid #334155; border-radius:12px; background:rgba(15,23,42,.92); box-shadow:0 14px 32px rgba(2,6,23,.35); }}
 .legend-item {{ display:inline-flex; gap:6px; align-items:center; color:#cbd5e1; font-size:13px; }}
 .legend-swatch {{ width:10px; height:10px; border-radius:999px; display:inline-block; border:1px solid #475569; flex:0 0 auto; }}
 .legend-line {{ width:28px; height:0; border-radius:0; border:0; border-top:2px solid var(--line); background:transparent; }}
@@ -1352,14 +1352,25 @@ def _focused_graph_runtime() -> str:
   if (!section) return;
   const dataEl = section.querySelector('[data-focused-graph-json]');
   const svg = section.querySelector('[data-focused-graph-svg]');
+  const stage = section.querySelector('.focused-graph-stage');
   const fallback = section.querySelector('[data-focused-graph-fallback]');
   const statusEl = section.querySelector('[data-focused-graph-status]');
   const detailEl = section.querySelector('[data-focused-graph-detail]');
   if (!window.d3 || !dataEl || !svg) return;
   if (fallback) fallback.hidden = true;
   const data = JSON.parse(dataEl.textContent || '{}');
-  const width = Number(svg.getAttribute('width')) || 960;
-  const height = Number(svg.getAttribute('height')) || 680;
+  const svgSelection = d3.select(svg);
+  let width = 960;
+  let height = 680;
+
+  function refreshGraphViewport() {
+    const svgBox = svg.getBoundingClientRect();
+    const stageBox = stage ? stage.getBoundingClientRect() : {width: 0, height: 0};
+    width = Math.max(320, Math.round(svgBox.width || stageBox.width || svg.clientWidth || 960));
+    height = Math.max(360, Math.round(svgBox.height || stageBox.height || svg.clientHeight || 680));
+    svgSelection.attr('viewBox', `0 0 ${width} ${height}`);
+  }
+  refreshGraphViewport();
   const defaultFocus = data.default_focus || {};
   const defaultShowEdges = defaultFocus.show_edges !== false;
   const text = value => value === undefined || value === null ? '' : String(value);
@@ -1425,7 +1436,6 @@ def _focused_graph_runtime() -> str:
 
   const relationEdges = list(data.relation_edges || data.links).filter(edge => text(edge.relation) !== 'contains');
   const treemap = d3.tree().nodeSize([28, 250]);
-  const svgSelection = d3.select(svg).attr('viewBox', `0 0 ${width} ${height}`);
   svgSelection.selectAll('*').remove();
   const graphLayer = svgSelection.append('g').attr('class', 'focused-graph-layer').attr('transform', 'translate(80,40)');
   const relationLayer = graphLayer.append('g').attr('class', 'focused-graph-relation-links');
@@ -1807,6 +1817,25 @@ def _focused_graph_runtime() -> str:
     currentNodes.forEach(d => { d.x0 = d.x; d.y0 = d.y; });
   }
 
+  let resizeFrame = null;
+  function scheduleResize() {
+    if (resizeFrame !== null) return;
+    resizeFrame = window.requestAnimationFrame(() => {
+      resizeFrame = null;
+      const previousWidth = width;
+      const previousHeight = height;
+      refreshGraphViewport();
+      if (width !== previousWidth || height !== previousHeight) update(root);
+    });
+  }
+  if (window.ResizeObserver) {
+    const resizeObserver = new ResizeObserver(scheduleResize);
+    resizeObserver.observe(svg);
+    if (stage) resizeObserver.observe(stage);
+  } else {
+    window.addEventListener('resize', scheduleResize);
+  }
+
   section.querySelector('[data-action="reset"]')?.addEventListener('click', resetDefault);
   section.querySelector('[data-action="expand-all"]')?.addEventListener('click', expandAll);
   section.querySelector('[data-action="depth-plus"]')?.addEventListener('click', expandDepth);
@@ -1872,10 +1901,11 @@ def _render_focused_graph(focused_view: dict[str, Any], file_anchors: Mapping[st
     )
     return (
         '<section class="focused-graph-section" data-focused-graph><h2>Focused graph</h2>'
-        f"{summary_html}{controls}{legend}"
+        f"{summary_html}"
         f"<script type=\"application/json\" data-focused-graph-json>{graph_json}</script>"
         '<div class="focused-graph-stage">'
-        '<svg class="focused-graph-svg" data-focused-graph-svg role="img" aria-label="Focused graph view" width="960" height="680"></svg>'
+        f"{controls}{legend}"
+        '<svg class="focused-graph-svg" data-focused-graph-svg role="img" aria-label="Focused graph view"></svg>'
         '<aside class="focused-graph-detail" data-focused-graph-detail aria-live="polite"><h3>Node details</h3><p class="empty">Select a node to inspect metadata.</p></aside>'
         f'<div class="focused-graph-fallback" data-focused-graph-fallback{fallback_hidden}>Static focused graph fallback is available when D3 cannot run.{d3_missing_note}</div>'
         '</div>'

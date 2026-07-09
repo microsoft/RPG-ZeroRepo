@@ -381,7 +381,10 @@ def test_common_run_report_write_command_report_renders_retrievals_code_deltas_a
     html = report.read_text(encoding="utf-8")
     assert "Focused graph" in html
     assert "main { max-width:1440px;" in html
-    assert "height=\"680\"" in html
+    assert "height=\"680\"" not in html
+    assert "width=\"960\"" not in html
+    assert '<div class="focused-graph-stage"><div class="focused-graph-toolbar">' in html
+    assert '<div class="focused-graph-legend" aria-label="Focused graph legend">' in html
     assert "Focused nodes map" not in html
     assert "semantic-code impact chain" not in html
     assert html.count("<h2>Focused graph</h2>") == 1
@@ -421,16 +424,26 @@ def test_common_run_report_write_command_report_renders_retrievals_code_deltas_a
     assert "focused-graph-node.hidden" in html
     assert "focused-graph-link.active" in html
     assert "focused-graph-link.dimmed" in html
-    assert ".focused-graph-stage { border:1px solid #334155; border-radius:12px; background:#0f172a; min-height:680px;" in html
-    assert ".focused-graph-svg { display:block; width:100%; height:680px;" in html
-    assert ".focused-graph-toolbar { display:flex; flex-wrap:wrap; gap:8px; align-items:center; margin:10px 0 12px; padding:10px; border:1px solid #334155; border-radius:12px; background:#0f172a;" in html
+    assert ".focused-graph-stage { border:1px solid #334155; border-radius:12px; background:#0f172a; height:clamp(520px,72vh,820px);" in html
+    assert ".focused-graph-svg { display:block; width:100%; height:100%;" in html
+    assert ".focused-graph-toolbar { position:absolute; top:14px; left:14px; z-index:3; display:flex; flex-wrap:wrap; gap:8px; align-items:center; max-width:calc(100% - 28px); margin:0;" in html
     assert ".focused-graph-toolbar button, .focused-graph-toolbar input { border:1px solid #475569; border-radius:8px; background:#1e293b; color:#e5e7eb;" in html
-    assert ".focused-graph-legend { display:flex; flex-wrap:wrap; gap:8px; margin:8px 0 12px; padding:10px; border:1px solid #334155; border-radius:12px; background:#0f172a;" in html
+    assert ".focused-graph-legend { position:absolute; left:14px; bottom:14px; z-index:3; display:flex; flex-wrap:wrap; gap:8px; max-width:calc(100% - 28px); margin:0;" in html
     assert ".focused-graph-detail { position:absolute; top:14px; right:14px;" in html
     assert "rootHierarchyId" in html
     assert "defaultExpandedIds" in html
     assert "visibleEndpoint" in html
     assert "updateStatus" in html
+    assert "const svgSelection = d3.select(svg);" in html
+    assert "function refreshGraphViewport()" in html
+    assert "svg.getBoundingClientRect()" in html
+    assert "stage.getBoundingClientRect()" in html
+    assert "svgSelection.attr('viewBox', `0 0 ${width} ${height}`);" in html
+    assert "window.ResizeObserver" in html
+    assert "new ResizeObserver(scheduleResize)" in html
+    assert "window.requestAnimationFrame" in html
+    assert "Number(svg.getAttribute('width'))" not in html
+    assert "Number(svg.getAttribute('height'))" not in html
     assert "const visible = showEdges ? currentRelationEdges.length : 0;" in html
     assert "const total = relationEdges.length;" in html
     assert "statusEl.textContent = `Visible relation edges: ${visible}/${total}`;" in html
