@@ -393,11 +393,18 @@ details summary {{ cursor:pointer; color:var(--accent); font-weight:600; }}
 .focus-links {{ display:flex; flex-wrap:wrap; gap:6px; }}
 .focus-link {{ border:1px solid var(--line); border-radius:999px; padding:2px 8px; background:#fff; font-size:12px; }}
 .focused-graph-section {{ overflow-x:hidden; }}
+body.focused-graph-fullscreen-active {{ overflow:hidden; }}
+.focused-graph-section.focused-graph-fullscreen {{ position:fixed; inset:0; z-index:9999; margin:0; padding:0; background:#020617; overflow:hidden; }}
+.focused-graph-section.focused-graph-fullscreen > h2, .focused-graph-section.focused-graph-fullscreen > .focus-summary, .focused-graph-section.focused-graph-fullscreen > details {{ display:none; }}
+.focused-graph-section.focused-graph-fullscreen .focused-graph-stage {{ width:100vw; height:100vh; border:0; border-radius:0; }}
 .focused-graph-stage {{ border:1px solid #334155; border-radius:12px; background:#0f172a; height:clamp(520px,72vh,820px); position:relative; overflow:hidden; }}
 .focused-graph-svg {{ display:block; width:100%; height:100%; cursor:grab; touch-action:none; }}
 .focused-graph-svg:active {{ cursor:grabbing; }}
 .focused-graph-toolbar {{ position:absolute; top:14px; left:14px; z-index:3; display:flex; flex-wrap:wrap; gap:8px; align-items:center; max-width:calc(100% - 28px); margin:0; padding:10px; border:1px solid #334155; border-radius:12px; background:rgba(15,23,42,.92); color:#e5e7eb; box-shadow:0 14px 32px rgba(2,6,23,.35); }}
 .focused-graph-toolbar button, .focused-graph-toolbar input {{ border:1px solid #475569; border-radius:8px; background:#1e293b; color:#e5e7eb; padding:6px 10px; font:inherit; }}
+.focused-graph-toolbar button {{ cursor:pointer; }}
+.focused-graph-toolbar button:hover, .focused-graph-toolbar button:focus-visible {{ border-color:#60a5fa; background:#334155; }}
+.focused-graph-toolbar button[aria-pressed="true"] {{ background:#1d4ed8; border-color:#93c5fd; color:#eff6ff; }}
 .focused-graph-toolbar input::placeholder {{ color:#94a3b8; }}
 .focused-graph-toolbar label {{ display:inline-flex; gap:6px; align-items:center; color:#cbd5e1; }}
 .focused-graph-detail {{ position:absolute; top:14px; right:14px; z-index:2; width:min(320px,calc(100% - 28px)); max-height:calc(100% - 28px); overflow:auto; border:1px solid #334155; border-radius:12px; background:rgba(15,23,42,.94); color:#e5e7eb; padding:12px; box-shadow:0 18px 40px rgba(2,6,23,.35); }}
@@ -1383,12 +1390,14 @@ def _focused_graph_runtime() -> str:
   const fallback = section.querySelector('[data-focused-graph-fallback]');
   const statusEl = section.querySelector('[data-focused-graph-status]');
   const detailEl = section.querySelector('[data-focused-graph-detail]');
+  const fullscreenButton = section.querySelector('[data-action="fullscreen"]');
   if (!window.d3 || !dataEl || !svg) return;
   if (fallback) fallback.hidden = true;
   const data = JSON.parse(dataEl.textContent || '{}');
   const svgSelection = d3.select(svg);
   let width = 960;
   let height = 680;
+  let isFullscreen = false;
 
   function refreshGraphViewport() {
     const svgBox = svg.getBoundingClientRect();
@@ -1397,6 +1406,21 @@ def _focused_graph_runtime() -> str:
     height = Math.max(360, Math.round(svgBox.height || stageBox.height || svg.clientHeight || 680));
     svgSelection.attr('viewBox', `0 0 ${width} ${height}`);
   }
+
+  function updateFullscreenButton() {
+    if (!fullscreenButton) return;
+    fullscreenButton.textContent = isFullscreen ? 'Restore embedded' : 'Fullscreen';
+    fullscreenButton.setAttribute('aria-pressed', isFullscreen ? 'true' : 'false');
+  }
+
+  function toggleFullscreen() {
+    isFullscreen = !isFullscreen;
+    section.classList.toggle('focused-graph-fullscreen', isFullscreen);
+    document.body.classList.toggle('focused-graph-fullscreen-active', isFullscreen);
+    updateFullscreenButton();
+    scheduleResize();
+  }
+
   refreshGraphViewport();
   const defaultFocus = data.default_focus || {};
   const defaultShowEdges = defaultFocus.show_edges !== false;
@@ -1788,9 +1812,10 @@ def _focused_graph_runtime() -> str:
       });
     nodeEnter.append('circle').attr('r', d => d._children ? 6 : (d.children ? 5 : 4));
     nodeEnter.append('text')
-      .attr('dy', 4)
-      .attr('x', d => d.children || d._children ? -10 : 10)
-      .attr('text-anchor', d => d.children || d._children ? 'end' : 'start')
+      .attr('x', d => d.children || d._children ? 0 : 10)
+      .attr('y', d => d.children || d._children ? 14 : 0)
+      .attr('dy', d => d.children || d._children ? 8 : 4)
+      .attr('text-anchor', d => d.children || d._children ? 'middle' : 'start')
       .attr('font-size', 12)
       .attr('fill', '#e5e7eb')
       .text(d => nodeLabel(d).length > 46 ? nodeLabel(d).slice(0, 44) + '…' : nodeLabel(d));
@@ -1805,8 +1830,10 @@ def _focused_graph_runtime() -> str:
       .attr('class', d => `focused-graph-node${d.id === selectedId ? ' selected' : ''}${isDefaultFocused(d) ? ' focused' : ' non-focused'}${nodeMatches(d) ? ' search-match' : ''}${selectedId && d.id !== selectedId && !currentRelationEdges.some(edge => edge._source.id === d.id || edge._target.id === d.id) ? ' dimmed' : ''}`);
     nodeUpdate.select('circle').attr('r', d => d._children ? 6 : (d.children ? 5 : 4));
     nodeUpdate.select('text')
-      .attr('x', d => d.children || d._children ? -10 : 10)
-      .attr('text-anchor', d => d.children || d._children ? 'end' : 'start');
+      .attr('x', d => d.children || d._children ? 0 : 10)
+      .attr('y', d => d.children || d._children ? 14 : 0)
+      .attr('dy', d => d.children || d._children ? 8 : 4)
+      .attr('text-anchor', d => d.children || d._children ? 'middle' : 'start');
     node.exit().transition().duration(180).attr('transform', `translate(${source.y || 0},${source.x || 0})`).remove();
 
     const treeLinks = layout.links();
@@ -1844,7 +1871,9 @@ def _focused_graph_runtime() -> str:
     window.addEventListener('resize', scheduleResize);
   }
 
+  updateFullscreenButton();
   section.querySelector('[data-action="reset"]')?.addEventListener('click', resetDefault);
+  fullscreenButton?.addEventListener('click', toggleFullscreen);
   section.querySelector('[data-action="edges"]')?.addEventListener('change', event => { showEdges = event.target.checked; update(root); });
   section.querySelector('[data-action="search"]')?.addEventListener('input', event => { query = text(event.target.value).toLowerCase(); update(root); });
   update(root);
@@ -1886,6 +1915,7 @@ def _render_focused_graph(focused_view: dict[str, Any], file_anchors: Mapping[st
     controls = (
         '<div class="focused-graph-toolbar">'
         '<button type="button" data-action="reset">Reset default</button>'
+        '<button type="button" data-action="fullscreen" aria-pressed="false">Fullscreen</button>'
         '<label><input type="checkbox" data-action="edges" checked> Edges</label>'
         '<input type="search" data-action="search" placeholder="Search nodes" aria-label="Search focused graph nodes">'
         f'<span class="badge" data-focused-graph-status>Visible relation edges: 0/{relation_edge_total}</span>'
