@@ -243,6 +243,10 @@ def test_review_publish_report_returns_report_path(tmp_path: Path, monkeypatch) 
         )
         assert review_artifact["status"] == "available"
         assert apply_artifact["status"] == "available"
+        summary_by_label = {row["label"]: row for row in data["summary"]}
+        assert summary_by_label["Review"] == {"label": "Review", "value": "skipped", "detail": "passed"}
+        assert "Review status" not in summary_by_label
+        assert "Review result" not in summary_by_label
         steps_by_name = {row["name"]: row for row in data["steps"]}
         assert steps_by_name["apply/dep-refresh"]["status"] == "success"
         assert "1 applied features" in steps_by_name["apply/dep-refresh"]["reason"]

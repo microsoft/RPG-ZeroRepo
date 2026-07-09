@@ -328,6 +328,15 @@ def _render_page(
     status_html = f"<span class=\"status\">{_h(status)}</span>" if status else ""
     code_delta_anchors = _code_delta_anchors(code_deltas)
     code_file_anchors = _code_file_anchor_map(code_deltas, code_delta_anchors)
+    focused_graph_html = _render_focused_graph(focused_view, code_file_anchors)
+    code_deltas_html = _render_code_deltas(code_deltas, code_delta_anchors)
+    summary_html = _render_summary_cards(summary_cards)
+    timeline_html = _render_timeline(stages, verification)
+    safety_html = _render_safety_boundary(user_decisions)
+    if focused_graph_html:
+        primary_sections_html = summary_html + focused_graph_html + code_deltas_html + timeline_html + safety_html
+    else:
+        primary_sections_html = summary_html + timeline_html + safety_html + code_deltas_html
     return f"""<!doctype html>
 <html lang=\"en\">
 <head>
@@ -440,11 +449,7 @@ details summary {{ cursor:pointer; color:var(--accent); font-weight:600; }}
 <h1>{_h(title)}</h1>
 <div class=\"meta\"><span>Command: <strong>{_h(command)}</strong></span><span>Generated: {_h(generated_at)}</span>{status_html}</div>
 </header>
-{_render_summary_cards(summary_cards)}
-{_render_timeline(stages, verification)}
-{_render_safety_boundary(user_decisions)}
-{_render_focused_graph(focused_view, code_file_anchors)}
-{_render_code_deltas(code_deltas, code_delta_anchors)}
+{primary_sections_html}
 {_render_artifacts(artifacts)}
 {_render_evidence(evidence)}
 </main>
@@ -1820,7 +1825,7 @@ def _render_focused_graph(focused_view: dict[str, Any], file_anchors: Mapping[st
     hidden_counts = nodes_view.get("hidden_counts") if isinstance(nodes_view.get("hidden_counts"), Mapping) else focused_view.get("hidden_counts", {})
     hidden_html = _hidden_context_html(hidden_counts if isinstance(hidden_counts, Mapping) else {})
     warnings = [warning for warning in _as_sequence(nodes_view.get("warnings") or focused_view.get("warnings")) if isinstance(warning, Mapping)]
-    warnings_html = f"<h3>Warnings</h3>{_chain_warning_html(warnings)}" if warnings else ""
+    warnings_html = f"<details><summary>Warnings</summary>{_chain_warning_html(warnings)}</details>" if warnings else ""
     relation_edge_total = len(_as_sequence(graph_payload.get("relation_edges") or graph_payload.get("edges") or graph_payload.get("links")))
     graph_json = _json_for_script(graph_payload)
     d3_js = _inline_d3()

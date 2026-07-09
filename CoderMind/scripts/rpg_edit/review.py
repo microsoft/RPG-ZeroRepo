@@ -1850,8 +1850,7 @@ def _review_summary_cards(
     result_value = "passed" if result.get("success", result.get("type") == "skipped") else "failed"
     changed_files = summary.get("changed_files", len(code_result.get("files_modified") or []))
     return [
-        {"label": "Review status", "value": result.get("type", "review")},
-        {"label": "Review result", "value": result_value},
+        {"label": "Review", "value": result.get("type", "review"), "detail": result_value},
         {"label": "Selected features", "value": summary.get("selected_feature_groups", len(plan.get("affected_nodes") or []))},
         {"label": "Mapped code relations", "value": summary.get("mapped_code_relations", 0)},
         {"label": "Missing mappings", "value": summary.get("missing_mappings", 0)},
