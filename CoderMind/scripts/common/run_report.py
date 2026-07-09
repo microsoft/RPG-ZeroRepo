@@ -1436,8 +1436,10 @@ def _focused_graph_runtime() -> str:
 
   const relationEdges = list(data.relation_edges || data.links).filter(edge => text(edge.relation) !== 'contains');
   const treemap = d3.tree().nodeSize([28, 250]);
+  const graphOffsetX = 80;
+  const graphOffsetY = 96;
   svgSelection.selectAll('*').remove();
-  const graphLayer = svgSelection.append('g').attr('class', 'focused-graph-layer').attr('transform', 'translate(80,40)');
+  const graphLayer = svgSelection.append('g').attr('class', 'focused-graph-layer').attr('transform', `translate(${graphOffsetX},${graphOffsetY})`);
   const relationLayer = graphLayer.append('g').attr('class', 'focused-graph-relation-links');
   const treeLinkLayer = graphLayer.append('g').attr('class', 'focused-graph-tree-links');
   const nodeLayer = graphLayer.append('g').attr('class', 'focused-graph-nodes');
@@ -1656,7 +1658,7 @@ def _focused_graph_runtime() -> str:
     const edges = section.querySelector('[data-action="edges"]');
     if (edges) edges.checked = showEdges;
     renderFocusedGraphDetail(null);
-    svgSelection.transition().duration(150).call(zoom.transform, d3.zoomIdentity.translate(80, 40));
+    svgSelection.transition().duration(150).call(zoom.transform, d3.zoomIdentity.translate(graphOffsetX, graphOffsetY));
     update(root);
   }
 

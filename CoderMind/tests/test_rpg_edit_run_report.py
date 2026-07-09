@@ -366,9 +366,13 @@ def test_review_publish_report_returns_report_path(tmp_path: Path, monkeypatch) 
         assert "rpg-n3" in hierarchy_text
         assert "Node / Context Node" in hierarchy_text
         assert '"feature_path": "context.py"' not in hierarchy_text
-        assert nodes_view["default_focus"]["node_link_ids"]
-        assert "rpg-n1" in nodes_view["default_focus"]["node_link_ids"]
-        assert "rpg-n3" not in nodes_view["default_focus"]["node_link_ids"]
+        default_node_link_ids = nodes_view["default_focus"]["node_link_ids"]
+        assert default_node_link_ids == ["rpg-n1", "code-a.py-f"]
+        assert "rpg-n2" not in default_node_link_ids
+        assert "rpg-n3" not in default_node_link_ids
+        focused_tree_node_ids = nodes_view["default_focus"]["focused_tree_node_ids"]
+        assert "rpg-n2" not in focused_tree_node_ids
+        assert "rpg-n3" not in focused_tree_node_ids
         assert nodes_view["default_focus"]["edge_depth"] == 1
         assert nodes_view["default_focus"]["show_edges"] is True
         assert nodes_view["focused_graph"]["schema"] == "cmind.focused_graph.v1"
@@ -608,8 +612,10 @@ def test_review_report_reconstructs_affected_node_evidence_from_impact(tmp_path:
         assert "rpg-background" in hierarchy_text
         assert '"feature_path": "Planned Node"' in hierarchy_text
         assert '"feature_path": "scripts/common/run_report.py"' not in hierarchy_text
-        assert nodes_view["default_focus"]["node_link_ids"] == ["rpg-planned", "code-scripts-common-run_report.py-_render_artifacts"]
-        assert "rpg-background" not in nodes_view["default_focus"]["node_link_ids"]
+        default_node_link_ids = nodes_view["default_focus"]["node_link_ids"]
+        assert default_node_link_ids == ["rpg-planned", "code-scripts-common-run_report.py-_render_artifacts"]
+        assert "rpg-background" not in default_node_link_ids
+        assert "rpg-background" not in nodes_view["default_focus"]["focused_tree_node_ids"]
         assert nodes_view["default_focus"]["edge_depth"] == 1
         assert nodes_view["focused_graph"]["schema"] == "cmind.focused_graph.v1"
         assert nodes_view["focused_graph"]["default_focus"] == nodes_view["default_focus"]

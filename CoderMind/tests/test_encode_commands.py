@@ -578,7 +578,11 @@ def test_attach_update_report_uses_update_rpg_result_fields(tmp_path, monkeypatc
     assert nodes_view["graph_context"]["rpg_nodes"] == 4504
     assert nodes_view["graph_context"]["dep_edges"] == 5498
     assert nodes_view["graph_context"]["semantic_delta"] == 3
-    assert "rpg-feature_a" in nodes_view["default_focus"]["node_link_ids"]
+    default_node_link_ids = nodes_view["default_focus"]["node_link_ids"]
+    assert "rpg-feature_a" in default_node_link_ids
+    assert "code-scripts-a.py" in default_node_link_ids
+    assert "code-scripts-a.py-f" in default_node_link_ids
+    assert "code-tests-test_a.py" in default_node_link_ids
     assert "code-scripts-a.py-f" in nodes_view["default_focus"]["focused_code_link_ids"]
     assert "edge-scripts-a.py-f-imports-tests-test_a.py" in nodes_view["default_focus"]["edge_link_ids"]
     assert "code-tests-test_a.py" in nodes_view["default_focus"]["relation_endpoint_link_ids"]
@@ -660,6 +664,10 @@ def test_attach_update_report_warns_on_zero_semantic_delta_without_inventing_nod
         "children": [],
     }
     assert nodes_view["default_focus"]["node_link_ids"] == []
+    assert nodes_view["default_focus"]["focused_node_ids"] == []
+    assert nodes_view["default_focus"]["focused_tree_node_ids"] == []
+    assert nodes_view["default_focus"]["focused_code_link_ids"] == []
+    assert nodes_view["default_focus"]["relation_endpoint_link_ids"] == []
     assert nodes_view["default_focus"]["semantic_node_ids"] == []
     assert nodes_view["default_focus"]["code_node_ids"] == []
     assert nodes_view["focused_graph"]["schema"] == "cmind.focused_graph.v1"

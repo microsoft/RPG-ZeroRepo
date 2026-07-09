@@ -785,13 +785,10 @@ def _focused_graph_default_focus(
     focused_semantic_links = [
         str(node.get("link_id") or _node_link_id("rpg", node.get("node_id")))
         for node in semantic_nodes
-        if node.get("selected")
-        or node.get("changed")
+        if node.get("changed")
         or node.get("changed_files")
         or node.get("diff_anchor")
-        or node.get("warning_types")
-        or node.get("mapping_status")
-        or node.get("locate_status")
+        or node.get("change")
         or node.get("apply_action")
     ]
     code_links = [str(node.get("link_id") or _node_link_id("code", node.get("node_id") or node.get("dep_node_id"))) for node in code_nodes]
@@ -923,12 +920,7 @@ def _focused_graph_default_focus(
         if node.get("changed") or node.get("changed_files") or node.get("diff_anchor"):
             changed_code_links.append(link_id)
             changed_feature_links.extend(_listify(node.get("mapped_rpg_link_ids")) + code_to_feature_links.get(link_id, []))
-    warning_links = []
-    for warning in warnings:
-        warning_links.extend(_listify(warning.get("node_link_id")) + _listify(warning.get("code_link_id")))
-    node_link_ids = _ordered_unique(focused_semantic_links + changed_feature_links + changed_code_links + warning_links)
-    if not node_link_ids:
-        node_link_ids = _ordered_unique(focused_semantic_links or semantic_links + code_links)
+    node_link_ids = _ordered_unique(focused_semantic_links + changed_feature_links + changed_code_links)
 
     expanded_node_ids: List[Any] = ["focused-graph-root"]
     focused_path_node_ids: List[Any] = []
@@ -955,9 +947,6 @@ def _focused_graph_default_focus(
 
     for link_id in node_link_ids:
         focus_tree_link(link_id)
-    if not focused_tree_node_ids:
-        for link_id in semantic_links:
-            focus_tree_link(link_id)
 
     expanded_node_ids = _ordered_unique(expanded_node_ids)
     focused_path_node_ids = _ordered_unique(focused_path_node_ids)
@@ -1646,7 +1635,11 @@ def _feature_evidence_groups(
             + [current_dep_nodes.get(dep_id, {}).get("path") for dep_id in mapped_dep_ids]
         )
         affected_files = _ordered_unique(_listify(impact.get("affected_files")) + relation_paths)
-        relevant_files = set(affected_files or relation_paths or changed_files)
+        relevant_files = set(_ordered_unique(affected_files + [
+            candidate.get("path"),
+            candidate.get("meta_path"),
+            current_node.get("path"),
+        ]))
         relevant_deltas = [delta for delta in code_deltas if _code_delta_file(delta) in relevant_files]
         changed_for_node = _ordered_unique([_code_delta_file(delta) for delta in relevant_deltas])
         focus_reason = _focus_reason(candidate, impact)
