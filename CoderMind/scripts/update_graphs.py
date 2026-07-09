@@ -33,6 +33,12 @@ SCRIPTS_DIR = Path(__file__).resolve().parent
 if str(SCRIPTS_DIR) not in sys.path:
     sys.path.insert(0, str(SCRIPTS_DIR))
 
+from common.diff_ranges import (  # noqa: E402
+    changed_line_ranges_by_file,
+    is_file_level_node,
+    line_range_from_mapping,
+    row_overlaps_changed_lines,
+)
 from common.paths import REPO_RPG_FILE, DEP_GRAPH_FILE, RPG_HTML_FILE, HOOK_CALLS_LOG  # noqa: E402
 from common.rpg_io import atomic_write_rpg, safe_load_rpg  # noqa: E402
 from common.run_events import (  # noqa: E402
@@ -345,6 +351,26 @@ def _dep_node_matches_file(dep_id: str, attrs: dict[str, Any], file_path: str) -
         if candidate.startswith(file_path + ":"):
             return True
     return False
+
+
+def _modified_dep_nodes_for_file(
+    dep_items: list[tuple[str, dict[str, Any]]],
+    file_path: str,
+    changed_ranges: dict[str, list[tuple[int, int]]],
+) -> list[tuple[str, dict[str, Any]]]:
+    ranged_matches: list[tuple[str, dict[str, Any]]] = []
+    fallback_matches: list[tuple[str, dict[str, Any]]] = []
+    for dep_id, attrs in dep_items:
+        if not _dep_node_matches_file(dep_id, attrs, file_path):
+            continue
+        if line_range_from_mapping(attrs):
+            if row_overlaps_changed_lines(attrs, file_path, changed_ranges):
+                ranged_matches.append((dep_id, attrs))
+        elif is_file_level_node(dep_id, attrs, file_path):
+            fallback_matches.append((dep_id, attrs))
+    if ranged_matches:
+        return ranged_matches
+    return fallback_matches[:1]
 
 
 def _slug_id(prefix: str, value: Any) -> str:
@@ -1034,21 +1060,26 @@ def _edge_rows(dep_edges: Any, code_ids: set[str]) -> list[dict[str, Any]]:
     rows: list[dict[str, Any]] = []
     if not isinstance(dep_edges, list):
         return rows
+    changed_states = {"added", "changed", "deleted", "modified", "renamed"}
     for edge in dep_edges:
         if not isinstance(edge, dict):
             continue
+        attrs = edge.get("attrs") if isinstance(edge.get("attrs"), dict) else {}
+        change = str(edge.get("change") or edge.get("change_type") or edge.get("status") or attrs.get("change") or attrs.get("change_type") or "").lower()
+        if change not in changed_states:
+            continue
         source = edge.get("src") or edge.get("source") or edge.get("from")
         target = edge.get("dst") or edge.get("target") or edge.get("to")
-        if source not in code_ids and target not in code_ids:
+        if source not in code_ids or target not in code_ids:
             continue
-        attrs = edge.get("attrs") if isinstance(edge.get("attrs"), dict) else {}
         rows.append({
             "source_node_id": source,
             "target_node_id": target,
             "relation": edge.get("relation") or edge.get("type") or attrs.get("type") or "dependency",
             "source_graph": "dep_graph",
             "edge_source": "dep_graph",
-            "reason": "adjacent to changed code",
+            "reason": "edge changed",
+            "status": change,
         })
     return rows[:50]
 
@@ -1056,6 +1087,7 @@ def _edge_rows(dep_edges: Any, code_ids: set[str]) -> list[dict[str, Any]]:
 def _build_update_focus(result: dict, code_deltas: list[dict[str, Any]], semantic_total: int) -> tuple[dict[str, Any], list[dict[str, Any]], list[dict[str, Any]]]:
     changed_files = _changed_report_files(result, code_deltas)
     diff_anchors = _diff_anchor_map(code_deltas)
+    changed_ranges = changed_line_ranges_by_file(code_deltas)
     rpg_data = _load_report_rpg(result)
     dep_graph = rpg_data.get("dep_graph") if isinstance(rpg_data.get("dep_graph"), dict) else {}
     dep_to_rpg = rpg_data.get("_dep_to_rpg_map") if isinstance(rpg_data.get("_dep_to_rpg_map"), dict) else {}
@@ -1075,11 +1107,8 @@ def _build_update_focus(result: dict, code_deltas: list[dict[str, Any]], semanti
 
     dep_items = _dep_node_items(dep_graph.get("nodes") if isinstance(dep_graph, dict) else {})
     for changed_file in changed_files:
-        file_matched = False
-        for dep_id, attrs in dep_items:
-            if not _dep_node_matches_file(dep_id, attrs, changed_file):
-                continue
-            file_matched = True
+        modified_dep_nodes = _modified_dep_nodes_for_file(dep_items, changed_file, changed_ranges)
+        for dep_id, attrs in modified_dep_nodes:
             if dep_id in matched_dep_ids:
                 continue
             mapped_rpg_ids = _ordered_unique_text(_listify(attrs.get("rpg_nodes")) + _listify(dep_to_rpg.get(dep_id)))
@@ -1096,14 +1125,15 @@ def _build_update_focus(result: dict, code_deltas: list[dict[str, Any]], semanti
                     "dep_node_id": dep_id,
                     "status": "mapped",
                     "state": "mapped",
-                    "source": "rpg_json",
+                    "source": "modified_code_range",
                     "path": _dep_node_path(dep_id, attrs),
+                    "reason": "mapped from modified code",
                     "changed_files": [changed_file],
                 })
-        if not file_matched:
+        if not modified_dep_nodes:
             warnings.append({
                 "type": "unmapped_changed_file",
-                "message": "changed file has no dep_graph node in updated RPG JSON",
+                "message": "changed file has no modified dep_graph node in updated RPG JSON",
                 "path": changed_file,
             })
 

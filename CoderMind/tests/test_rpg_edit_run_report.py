@@ -219,7 +219,7 @@ def test_review_publish_report_returns_report_path(tmp_path: Path, monkeypatch) 
         assert to_commit == "abc123"
         assert files == ["a.py"]
         assert py_only is False
-        return [{"file": "a.py", "change_type": "modify", "diff": "+new <unsafe>"}]
+        return [{"file": "a.py", "change_type": "modify", "diff": "diff --git a/a.py b/a.py\n@@ -10,3 +10,4 @@\n+new <unsafe>"}]
 
     monkeypatch.setattr(review, "file_diffs_between", fake_file_diffs_between)
     monkeypatch.setattr(
@@ -269,7 +269,7 @@ def test_review_publish_report_returns_report_path(tmp_path: Path, monkeypatch) 
         assert "locate score=1.0" in data["retrievals"][0]["hits"][0]["reason"]
         assert "impact callers=1, affected_files=1" in data["retrievals"][0]["hits"][0]["reason"]
         assert data["retrievals"][1]["tool"] == str(impact_path)
-        assert data["code_deltas"] == [{"file": "a.py", "change_type": "modify", "diff": "+new <unsafe>"}]
+        assert data["code_deltas"] == [{"file": "a.py", "change_type": "modify", "diff": "diff --git a/a.py b/a.py\n@@ -10,3 +10,4 @@\n+new <unsafe>"}]
         artifact_paths = {item["label"]: item["path"] for item in data["artifacts"]}
         assert artifact_paths["validate"] == str(validate_path)
         assert artifact_paths["locate"] == str(locate_path)
@@ -333,7 +333,7 @@ def test_review_publish_report_returns_report_path(tmp_path: Path, monkeypatch) 
         assert any(row["type"] == "missing_mapping" and row["node_id"] == "n2" for row in focused["warnings"])
         nodes_view = focused["nodes_view"]
         assert nodes_view["summary"]["selected_feature_groups"] == 2
-        assert nodes_view["summary"]["semantic_nodes"] == 3
+        assert nodes_view["summary"]["semantic_nodes"] == 2
         semantic_by_id = {row["node_id"]: row for row in nodes_view["semantic_nodes"]}
         assert semantic_by_id["n1"]["breadcrumb_path"] == "Node"
         assert semantic_by_id["n1"]["mapping_status"] == "mapped"
@@ -344,10 +344,7 @@ def test_review_publish_report_returns_report_path(tmp_path: Path, monkeypatch) 
         assert semantic_by_id["n2"]["state"] == "missing_mapping"
         assert semantic_by_id["n2"]["mapping_status"] == "missing"
         assert semantic_by_id["n2"]["selected"] is True
-        assert semantic_by_id["n3"]["breadcrumb_path"] == "Node / Context Node"
-        assert semantic_by_id["n3"]["path"] == "context.py"
-        assert semantic_by_id["n3"]["state"] == "context"
-        assert "selected" not in semantic_by_id["n3"]
+        assert "n3" not in semantic_by_id
         code = nodes_view["code_nodes"][0]
         assert code["dep_node_id"] == "a.py:f"
         assert code["path"] == "a.py"
@@ -363,8 +360,8 @@ def test_review_publish_report_returns_report_path(tmp_path: Path, monkeypatch) 
         assert any(row["type"] == "missing_mapping" and row["node_id"] == "n2" for row in nodes_view["warnings"])
         assert nodes_view["hierarchy"]["id"] == "focused-graph-root"
         hierarchy_text = json.dumps(nodes_view["hierarchy"], ensure_ascii=False)
-        assert "rpg-n3" in hierarchy_text
-        assert "Node / Context Node" in hierarchy_text
+        assert "rpg-n3" not in hierarchy_text
+        assert "Node / Context Node" not in hierarchy_text
         assert '"feature_path": "context.py"' not in hierarchy_text
         default_node_link_ids = nodes_view["default_focus"]["node_link_ids"]
         assert default_node_link_ids == ["rpg-n1", "code-a.py-f"]
@@ -441,7 +438,7 @@ def test_review_report_reconstructs_affected_node_evidence_from_impact(tmp_path:
         json.dumps({"type": "impact", "results": {"planned": {"name": "Planned Node", "dep_nodes": [dep_id], "affected_files": ["scripts/common/run_report.py"]}}}),
         encoding="utf-8",
     )
-    code_path.write_text(json.dumps({"success": True, "files_modified": ["scripts/common/run_report.py"], "last_status": "complete"}), encoding="utf-8")
+    code_path.write_text(json.dumps({"success": True, "commit_sha": "def456", "files_modified": ["scripts/common/run_report.py"], "last_status": "complete"}), encoding="utf-8")
     dep_backup_path = tmp_path / "dep_graph.before-edit-456.json"
     rpg_backup_path = tmp_path / "rpg.before-edit-456.json"
     apply_path.write_text(
@@ -492,6 +489,14 @@ def test_review_report_reconstructs_affected_node_evidence_from_impact(tmp_path:
     monkeypatch.setattr(review, "RPG_EDIT_APPLY_RESULT_FILE", apply_path)
     monkeypatch.setattr(review, "RPG_EDIT_REVIEW_RESULT_FILE", review_path)
     monkeypatch.setattr(review, "REPO_RPG_FILE", rpg_path)
+
+    def fake_file_diffs_between(repo_dir, from_commit=None, to_commit="HEAD", *, files=None, py_only=False):
+        assert to_commit == "def456"
+        assert files == ["scripts/common/run_report.py"]
+        assert py_only is False
+        return [{"file": "scripts/common/run_report.py", "change_type": "modify", "diff": "diff --git a/scripts/common/run_report.py b/scripts/common/run_report.py\n@@ -540,3 +540,4 @@\n+new"}]
+
+    monkeypatch.setattr(review, "file_diffs_between", fake_file_diffs_between)
     monkeypatch.setattr(
         review,
         "read_head",
@@ -587,7 +592,7 @@ def test_review_report_reconstructs_affected_node_evidence_from_impact(tmp_path:
         assert "impact" in mapping["source"]
         nodes_view = focused["nodes_view"]
         assert nodes_view["summary"]["selected_feature_groups"] == 1
-        assert nodes_view["summary"]["semantic_nodes"] == 2
+        assert nodes_view["summary"]["semantic_nodes"] == 1
         semantic_by_id = {row["node_id"]: row for row in nodes_view["semantic_nodes"]}
         semantic = semantic_by_id["planned"]
         assert semantic["breadcrumb_path"] == "Planned Node"
@@ -595,8 +600,7 @@ def test_review_report_reconstructs_affected_node_evidence_from_impact(tmp_path:
         assert semantic["mapping_status"] == "mapped"
         assert semantic["selected"] is True
         assert semantic["changed_files"] == [{"path": "scripts/common/run_report.py", "diff_anchor": "diff-scripts_common_run_report.py"}]
-        assert semantic_by_id["background"]["breadcrumb_path"] == "Planned Node / Background Node"
-        assert semantic_by_id["background"]["state"] == "context"
+        assert "background" not in semantic_by_id
         code = nodes_view["code_nodes"][0]
         assert code["dep_node_id"] == dep_id
         assert code["path"] == "scripts/common/run_report.py"
@@ -609,7 +613,7 @@ def test_review_report_reconstructs_affected_node_evidence_from_impact(tmp_path:
         assert any(row["type"] == "missing_reason" and row["node_id"] == "planned" for row in nodes_view["warnings"])
         assert nodes_view["hierarchy"]["id"] == "focused-graph-root"
         hierarchy_text = json.dumps(nodes_view["hierarchy"], ensure_ascii=False)
-        assert "rpg-background" in hierarchy_text
+        assert "rpg-background" not in hierarchy_text
         assert '"feature_path": "Planned Node"' in hierarchy_text
         assert '"feature_path": "scripts/common/run_report.py"' not in hierarchy_text
         default_node_link_ids = nodes_view["default_focus"]["node_link_ids"]

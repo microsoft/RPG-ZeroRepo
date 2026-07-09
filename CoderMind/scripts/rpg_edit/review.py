@@ -36,6 +36,12 @@ SCRIPTS_DIR = Path(__file__).resolve().parent.parent
 if str(SCRIPTS_DIR) not in sys.path:
     sys.path.insert(0, str(SCRIPTS_DIR))
 
+from common.diff_ranges import (  # noqa: E402
+    changed_line_ranges_by_file,
+    is_file_level_node,
+    line_range_from_mapping,
+    row_overlaps_changed_lines,
+)
 from common.paths import (  # noqa: E402
     REPO_DIR,
     REPORTS_DIR,
@@ -340,6 +346,31 @@ def _dep_node_path(dep_id: Any) -> str:
         return ""
     dep_id_text = str(dep_id)
     return dep_id_text.split(":", 1)[0] if ":" in dep_id_text else dep_id_text
+
+
+def _modified_dep_ids(
+    dep_ids: List[str],
+    relation_by_dep: Mapping[str, Dict[str, Any]],
+    current_dep_nodes: Mapping[str, Dict[str, Any]],
+    changed_ranges: Mapping[str, List[Tuple[int, int]]],
+    changed_files: List[str],
+) -> List[str]:
+    changed_file_set = set(changed_files)
+    ranged_matches: List[str] = []
+    fallback_matches: List[str] = []
+    for dep_id in dep_ids:
+        relation = relation_by_dep.get(dep_id, {})
+        current = current_dep_nodes.get(dep_id, {})
+        row = {**relation, **current}
+        path = str(current.get("path") or relation.get("path") or _dep_node_path(dep_id))
+        if path not in changed_file_set:
+            continue
+        if line_range_from_mapping(row):
+            if row_overlaps_changed_lines(row, path, changed_ranges):
+                ranged_matches.append(dep_id)
+        elif is_file_level_node(dep_id, row, path):
+            fallback_matches.append(dep_id)
+    return _ordered_unique(ranged_matches or fallback_matches[:1])
 
 
 def _mapped_code_relations(candidate: Dict[str, Any], impact: Dict[str, Any]) -> List[Dict[str, Any]]:
@@ -1043,7 +1074,7 @@ def _build_nodes_view(
             warnings_by_code.setdefault(str(code_id), []).append(warning)
 
     semantic_nodes: List[Dict[str, Any]] = []
-    semantic_source_nodes = list(all_rpg_by_id.values()) if all_rpg_by_id else primary_rpg_nodes
+    semantic_source_nodes = primary_rpg_nodes
     for node in semantic_source_nodes:
         node_id = str(node.get("node_id") or "")
         is_selected = node_id in selected_rpg_ids
@@ -1506,6 +1537,7 @@ def _feature_evidence_groups(
         + [str(path) for path in _listify(code_result.get("files_modified"))]
         + [str(change.get("file_path")) for change in plan.get("code_changes") or [] if isinstance(change, dict) and change.get("file_path")]
     )
+    changed_ranges = changed_line_ranges_by_file(code_deltas)
     warnings: List[Dict[str, Any]] = []
     warning_keys: set[str] = set()
 
@@ -1531,7 +1563,6 @@ def _feature_evidence_groups(
     mapping_rows_all: List[Dict[str, Any]] = []
     code_node_by_id: Dict[str, Dict[str, Any]] = {}
     all_edges: List[Dict[str, Any]] = []
-    edge_keys: set[Tuple[str, str, str, str]] = set()
     impact_hidden_counts: Dict[str, int] = {}
 
     def count_value(value: Any, fallback: int) -> int:
@@ -1571,48 +1602,6 @@ def _feature_evidence_groups(
             add_warning("stale_graph", "Mapped code node is absent from the current dependency graph", dep_node_id=dep_id_text)
         code_node_by_id[dep_id_text] = row
 
-    def add_edge(edge: Dict[str, Any]) -> None:
-        source_node = edge.get("source_node_id")
-        target_node = edge.get("target_node_id")
-        relation = edge.get("relation") or "dependency"
-        source = edge.get("source") or "impact"
-        if source_node in (None, "") or target_node in (None, ""):
-            return
-        source_text = str(source_node)
-        target_text = str(target_node)
-        relation_text = str(relation)
-        source_text_label = str(source)
-        key = (source_text, target_text, relation_text, source_text_label)
-        if key in edge_keys:
-            return
-        edge_keys.add(key)
-        source_graph = edge.get("source_graph") or ("rpg" if source_text_label == "rpg_semantic" else "dep_graph" if source_text_label == "dep_graph" else source_text_label)
-        row: Dict[str, Any] = {
-            "source_node_id": source_text,
-            "target_node_id": target_text,
-            "relation": relation_text,
-            "source": source_text_label,
-            "source_graph": source_graph,
-            "relation_source": edge.get("relation_source") or source_text_label,
-            "edge_source": edge.get("edge_source") or source_graph,
-        }
-        for key_name in ("rpg_node_id", "neighbor_node_id", "direction", "name", "path", "reason", "status"):
-            _set_if_present(row, key_name, edge.get(key_name))
-        all_edges.append(row)
-
-    def impact_neighbor(item: Any) -> Optional[Dict[str, Any]]:
-        if isinstance(item, dict):
-            node_id = item.get("dep_node_id") or item.get("node_id") or item.get("id")
-            if node_id in (None, ""):
-                return None
-            row: Dict[str, Any] = {"node_id": str(node_id)}
-            for key_name in ("name", "path", "reason", "status", "type"):
-                _set_if_present(row, key_name, item.get(key_name))
-            return row
-        if item in (None, ""):
-            return None
-        return {"node_id": str(item)}
-
     neighbor_specs = [
         ("callers", "caller", "upstream", "total_callers"),
         ("callees", "callee", "downstream", "total_callees"),
@@ -1630,6 +1619,7 @@ def _feature_evidence_groups(
         relations = _mapped_code_relations(candidate, impact)
         relation_by_dep = {str(row.get("dep_node_id") or row.get("node_id")): row for row in relations if row.get("dep_node_id") or row.get("node_id")}
         mapped_dep_ids = _ordered_unique(list(relation_by_dep) + (current_rpg_to_dep.get(node_id) or []))
+        modified_dep_ids = _modified_dep_ids(mapped_dep_ids, relation_by_dep, current_dep_nodes, changed_ranges, changed_files)
         relation_paths = _ordered_unique(
             [row.get("path") for row in relations]
             + [current_dep_nodes.get(dep_id, {}).get("path") for dep_id in mapped_dep_ids]
@@ -1647,39 +1637,18 @@ def _feature_evidence_groups(
             add_warning("missing_reason", "Focused view has no explicit selection reason", node_id=node_id)
         if not mapped_dep_ids:
             add_warning("missing_mapping", "Selected RPG node has no mapped code node", node_id=node_id)
+        for dep_id in mapped_dep_ids:
+            if current_graph_available and dep_id not in current_dep_nodes:
+                add_warning("stale_graph", "Mapped code node is absent from the current dependency graph", node_id=node_id, dep_node_id=dep_id)
         if current_graph_available and node_id not in current_rpg_nodes:
             add_warning("stale_graph", "Selected RPG node is absent from the current RPG graph", node_id=node_id)
 
         impact_summary = impact.get("impact_summary") if isinstance(impact.get("impact_summary"), dict) else {}
         node_hidden_counts: Dict[str, int] = {}
-        for impact_key, relation, direction, total_key in neighbor_specs:
+        for impact_key, _relation, _direction, total_key in neighbor_specs:
             items = _listify(impact.get(impact_key))
             total = count_value(impact_summary.get(total_key), len(items))
-            visible = 0
-            for item in items:
-                neighbor = impact_neighbor(item)
-                if not neighbor:
-                    continue
-                visible += 1
-                if relation == "caller":
-                    source_node = neighbor["node_id"]
-                    target_node = node_id
-                else:
-                    source_node = node_id
-                    target_node = neighbor["node_id"]
-                edge_row = {
-                    "source_node_id": source_node,
-                    "target_node_id": target_node,
-                    "relation": relation,
-                    "source": "impact",
-                    "rpg_node_id": node_id,
-                    "neighbor_node_id": neighbor["node_id"],
-                    "direction": direction,
-                }
-                for key_name in ("name", "path", "reason", "status"):
-                    _set_if_present(edge_row, key_name, neighbor.get(key_name))
-                add_edge(edge_row)
-            hidden = max(0, total - visible)
+            hidden = max(0, total)
             if hidden:
                 node_hidden_counts[impact_key] = hidden
                 impact_hidden_counts[impact_key] = impact_hidden_counts.get(impact_key, 0) + hidden
@@ -1713,7 +1682,7 @@ def _feature_evidence_groups(
         primary_rpg_nodes_all.append(rpg_row)
 
         if mapped_dep_ids:
-            for dep_id in mapped_dep_ids:
+            for dep_id in modified_dep_ids:
                 relation = relation_by_dep.get(dep_id, {})
                 current_dep = current_dep_nodes.get(dep_id, {})
                 path = current_dep.get("path") or relation.get("path")
@@ -1741,20 +1710,6 @@ def _feature_evidence_groups(
             if changed_for_node:
                 mapping_row["changed_files"] = changed_for_node
             mapping_rows_all.append(mapping_row)
-
-    for dep_id, dep_node in current_dep_nodes.items():
-        if dep_node.get("path") in changed_files:
-            add_code_node(dep_id, source="changed_file", fallback_path=dep_node.get("path"))
-
-    selected_rpg_ids = {row.get("node_id") for row in primary_rpg_nodes_all}
-    for edge in current_rpg_edges:
-        if edge.get("source_node_id") in selected_rpg_ids or edge.get("target_node_id") in selected_rpg_ids:
-            add_edge(edge)
-
-    selected_code_ids = set(code_node_by_id)
-    for edge in current_dep_edges:
-        if edge.get("source_node_id") in selected_code_ids or edge.get("target_node_id") in selected_code_ids:
-            add_edge(edge)
 
     primary_rpg_nodes = primary_rpg_nodes_all
     primary_code_nodes_all = list(code_node_by_id.values())
@@ -2569,7 +2524,7 @@ def impact_review(
     impact_path: Optional[Path],
     repo_path: Path,
     max_iterations: int = 3,
-    timeout: int = 600,
+    timeout: int = 1200,
     report_scope: str = "final",
     report_dir: Optional[Path] = None,
     parent_run_id: Optional[str] = None,
@@ -2760,8 +2715,8 @@ def main():
                         help="Repository root path")
     parser.add_argument("--max-iterations", type=int, default=3,
                         help="Maximum review+repair iterations (default: 3)")
-    parser.add_argument("--timeout", type=int, default=600,
-                        help="Sub-agent timeout per iteration in seconds (default: 600)")
+    parser.add_argument("--timeout", type=int, default=1200,
+                        help="Sub-agent timeout per iteration in seconds (default: 1200)")
     parser.add_argument("--report-scope", choices=sorted(_REPORT_SCOPES), default="final",
                         help="HTML report publication scope (default: %(default)s)")
     parser.add_argument("--no-report", action="store_true",
