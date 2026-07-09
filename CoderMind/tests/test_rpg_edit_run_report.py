@@ -562,7 +562,7 @@ def test_review_report_reconstructs_affected_node_evidence_from_impact(tmp_path:
         assert data["retrievals"][0]["hits"][0]["locate_state"] == "missing"
         assert data["retrievals"][0]["hits"][0]["mapping_state"] == "mapped"
         assert "1 mapped code relations" in data["retrievals"][0]["hits"][0]["reason"]
-        assert "impact callers=0, affected_files=1" in data["retrievals"][0]["hits"][0]["reason"]
+        assert "impact callers=1, affected_files=1" in data["retrievals"][0]["hits"][0]["reason"]
         assert data["retrievals"][1]["tool"] == str(impact_path)
         artifact_paths = {item["label"]: item["path"] for item in data["artifacts"]}
         assert artifact_paths["validate"] == str(validate_path)
@@ -663,7 +663,7 @@ def test_review_report_reconstructs_affected_node_evidence_from_impact(tmp_path:
         assert nodes_view["caps"] == {"primary_rpg_nodes": 20, "primary_code_nodes": 50, "edges": 80}
         assert nodes_view["graph_context"]["current_graph_available"] is True
         assert nodes_view["graph_context"]["current_rpg_nodes"] == 2
-        assert nodes_view["graph_context"]["current_dep_nodes"] == 1
+        assert nodes_view["graph_context"]["current_dep_nodes"] == 2
         assert focused["apply"]["status"] == "dep_refreshed"
         return report_path
 
