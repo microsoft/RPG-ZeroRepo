@@ -425,7 +425,7 @@ details summary {{ cursor:pointer; color:var(--accent); font-weight:600; }}
 .focused-graph-node circle {{ fill:#3b82f6; stroke:#e2e8f0; stroke-width:2; transition:stroke .15s ease, stroke-width .15s ease; }}
 .focused-graph-node.non-focused circle {{ fill:#cbd5e1; }}
 .focused-graph-node.non-focused text {{ fill:#94a3b8; }}
-.focused-graph-node.selected circle, .focused-graph-node.active circle, .focused-graph-node.focused circle {{ stroke:#f8fafc; stroke-width:3; }}
+.focused-graph-node.selected circle, .focused-graph-node.active circle, .focused-graph-node.focused circle {{ stroke:#3b82f6; stroke-width:3; }}
 .focused-graph-node.search-match circle {{ stroke:#f59e0b; stroke-width:3; }}
 .focused-graph-node.dimmed {{ opacity:.18; }}
 .focused-graph-node.hidden {{ display:none; }}
@@ -438,7 +438,7 @@ details summary {{ cursor:pointer; color:var(--accent); font-weight:600; }}
 .legend-tree-link {{ border-top-color:#cbd5e1; border-top-width:1.4px; }}
 .legend-semantic-edge {{ border-top-color:#7c3aed; }}
 .legend-dependency-edge, .legend-imports-edge {{ border-top-color:#ea580c; }}
-.legend-invokes-edge, .legend-caller-edge, .legend-callee-edge {{ border-top-color:#16a34a; }}
+.legend-invokes-edge {{ border-top-color:#16a34a; }}
 .legend-inherits-edge {{ border-top-color:#9333ea; }}
 .legend-references-edge {{ border-top-color:#2563eb; }}
 .legend-dep-graph-edge {{ border-top-style:dashed; }}
@@ -1646,27 +1646,6 @@ def _focused_graph_runtime() -> str:
     walkAll(root, d => { if (nodeMatches(d)) openAncestors(d); });
   }
 
-  function expandAll() {
-    walkAll(root, d => { if (d._children) { d.children = d._children; d._children = null; } });
-    update(root);
-  }
-
-  function expandDepth() {
-    let minDepth = Infinity;
-    walkAll(root, d => { if (d._children && d.depth < minDepth) minDepth = d.depth; });
-    if (minDepth === Infinity) return;
-    walkAll(root, d => { if (d._children && d.depth === minDepth) { d.children = d._children; d._children = null; } });
-    update(root);
-  }
-
-  function collapseDepth() {
-    let maxDepth = -1;
-    walkAll(root, d => { if (d.children && d.children.length && d.depth > maxDepth) maxDepth = d.depth; });
-    if (maxDepth <= 0) return;
-    walkAll(root, d => { if (d.children && d.children.length && d.depth === maxDepth) { d._children = d.children; d.children = null; } });
-    update(root);
-  }
-
   function resetDefault() {
     query = '';
     selectedId = null;
@@ -1837,9 +1816,6 @@ def _focused_graph_runtime() -> str:
   }
 
   section.querySelector('[data-action="reset"]')?.addEventListener('click', resetDefault);
-  section.querySelector('[data-action="expand-all"]')?.addEventListener('click', expandAll);
-  section.querySelector('[data-action="depth-plus"]')?.addEventListener('click', expandDepth);
-  section.querySelector('[data-action="depth-minus"]')?.addEventListener('click', collapseDepth);
   section.querySelector('[data-action="edges"]')?.addEventListener('change', event => { showEdges = event.target.checked; update(root); });
   section.querySelector('[data-action="search"]')?.addEventListener('input', event => { query = text(event.target.value).toLowerCase(); update(root); });
   update(root);
@@ -1877,9 +1853,6 @@ def _render_focused_graph(focused_view: dict[str, Any], file_anchors: Mapping[st
     controls = (
         '<div class="focused-graph-toolbar">'
         '<button type="button" data-action="reset">Reset default</button>'
-        '<button type="button" data-action="expand-all">Expand all</button>'
-        '<button type="button" data-action="depth-plus" title="Expand hierarchy depth">+1</button>'
-        '<button type="button" data-action="depth-minus" title="Collapse hierarchy depth">-1</button>'
         '<label><input type="checkbox" data-action="edges" checked> Edges</label>'
         '<input type="search" data-action="search" placeholder="Search nodes" aria-label="Search focused graph nodes">'
         f'<span class="badge" data-focused-graph-status>Visible relation edges: 0/{relation_edge_total}</span>'
@@ -1895,8 +1868,6 @@ def _render_focused_graph(focused_view: dict[str, Any], file_anchors: Mapping[st
         '<span class="legend-item"><span class="legend-swatch legend-line legend-imports-edge legend-dep-graph-edge"></span>imports</span>'
         '<span class="legend-item"><span class="legend-swatch legend-line legend-inherits-edge"></span>inherits</span>'
         '<span class="legend-item"><span class="legend-swatch legend-line legend-references-edge"></span>references</span>'
-        '<span class="legend-item"><span class="legend-swatch legend-line legend-caller-edge"></span>caller</span>'
-        '<span class="legend-item"><span class="legend-swatch legend-line legend-callee-edge"></span>callee</span>'
         '</div>'
     )
     return (

@@ -399,8 +399,9 @@ def test_common_run_report_write_command_report_renders_retrievals_code_deltas_a
     assert "https://d3js.org v7.9.0" in html
     assert "<script src=" not in html
     assert "data-action=\"reset\"" in html
-    assert "data-action=\"depth-plus\"" in html
-    assert "data-action=\"depth-minus\"" in html
+    assert "data-action=\"expand-all\"" not in html
+    assert "data-action=\"depth-plus\"" not in html
+    assert "data-action=\"depth-minus\"" not in html
     assert "data-action=\"edges\"" in html
     assert "data-action=\"search\"" in html
     assert "data-focused-graph-status" in html
@@ -410,8 +411,9 @@ def test_common_run_report_write_command_report_renders_retrievals_code_deltas_a
     assert "Select a node to inspect metadata." in html
     assert "Visible relation edges: 0/3" in html
     assert "Reset" in html
-    assert "+1" in html
-    assert "-1" in html
+    assert "Expand all" not in html
+    assert ">+1</button>" not in html
+    assert ">-1</button>" not in html
     assert "Edges" in html
     assert "Search nodes" in html
     assert "d3.zoom()" in html
@@ -461,16 +463,19 @@ def test_common_run_report_write_command_report_renders_retrievals_code_deltas_a
     assert "if (!isCodeContextDetail(detail)) addValueRow(rows, 'Feature path', detail.breadcrumb_path || detail.feature_path);" in html
     assert "item.source" not in html
     assert "SHOULD NOT RENDER FROM CODE" in html
-    assert "expandDepth" in html
-    assert "collapseDepth" in html
-    assert "Expand hierarchy depth" in html
-    assert "Collapse hierarchy depth" in html
+    assert "expandAll" not in html
+    assert "expandDepth" not in html
+    assert "collapseDepth" not in html
+    assert "Expand hierarchy depth" not in html
+    assert "Collapse hierarchy depth" not in html
     assert "d3.zoomIdentity" in html
     assert "Static focused graph fallback is available when D3 cannot run." in html
-    for label in ("Tree link", "RPG semantic edge", "dep_graph dependency edge", "invokes", "imports", "inherits", "references", "caller", "callee"):
+    for label in ("Tree link", "RPG semantic edge", "dep_graph dependency edge", "invokes", "imports", "inherits", "references"):
         assert label in html
-    for klass in ("legend-tree-link", "legend-invokes-edge", "legend-imports-edge", "legend-inherits-edge", "legend-references-edge", "legend-caller-edge", "legend-callee-edge"):
+    for klass in ("legend-tree-link", "legend-invokes-edge", "legend-imports-edge", "legend-inherits-edge", "legend-references-edge"):
         assert klass in html
+    assert "legend-caller-edge" not in html
+    assert "legend-callee-edge" not in html
     assert "semantic_nodes" in html
     assert "code_nodes" in html
     assert "mappings" in html
