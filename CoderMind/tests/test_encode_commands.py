@@ -548,7 +548,7 @@ def test_attach_update_report_uses_update_rpg_result_fields(tmp_path, monkeypatc
     assert nodes_view["summary"]["semantic_nodes"] == 1
     assert nodes_view["summary"]["code_nodes"] == 2
     assert nodes_view["summary"]["mappings"] == 1
-    assert nodes_view["summary"]["edges"] == 0
+    assert nodes_view["summary"]["edges"] == 1
     assert nodes_view["summary"]["changed_files"] == 2
     semantic_node = nodes_view["semantic_nodes"][0]
     code_nodes = {row["node_id"]: row for row in nodes_view["code_nodes"]}
@@ -556,7 +556,14 @@ def test_attach_update_report_uses_update_rpg_result_fields(tmp_path, monkeypatc
     assert set(code_nodes) == {"scripts/a.py:f", "tests/test_a.py"}
     assert "scripts/a.py:g" not in code_nodes
     assert "scripts/a.py" not in code_nodes
-    assert nodes_view["edges"] == []
+    assert len(nodes_view["edges"]) == 1
+    edge = nodes_view["edges"][0]
+    assert edge["source_node_id"] == "feature_a"
+    assert edge["target_node_id"] == "tests/test_a.py"
+    assert edge["source_link_id"] == "rpg-feature_a"
+    assert edge["target_link_id"] == "context-tests-test_a.py"
+    assert edge["relation"] == "imports"
+    assert edge["source_graph"] == "dep_graph"
     assert semantic_node["node_id"] == "feature_a"
     assert semantic_node["link_id"] == "rpg-feature_a"
     assert semantic_node["mapped_code_node_ids"] == ["scripts/a.py:f"]
@@ -580,6 +587,9 @@ def test_attach_update_report_uses_update_rpg_result_fields(tmp_path, monkeypatc
     ]
     assert nodes_view["hierarchy"]["id"] == "focused-graph-root"
     assert nodes_view["hierarchy"]["children"][0]["id"] == "feature-path-test_repo"
+    hierarchy_text = json.dumps(nodes_view["hierarchy"], ensure_ascii=False)
+    assert "Mapped code" not in hierarchy_text
+    assert "Additional code context" not in hierarchy_text
     assert nodes_view["focused_graph"]["schema"] == "cmind.focused_graph.v1"
     assert nodes_view["focused_graph"]["hierarchy"] == nodes_view["hierarchy"]
     assert nodes_view["focused_graph"]["default_focus"] == nodes_view["default_focus"]
@@ -588,12 +598,13 @@ def test_attach_update_report_uses_update_rpg_result_fields(tmp_path, monkeypatc
     assert nodes_view["graph_context"]["semantic_delta"] == 3
     default_node_link_ids = nodes_view["default_focus"]["node_link_ids"]
     assert "rpg-feature_a" in default_node_link_ids
+    assert "context-tests-test_a.py" in default_node_link_ids
     assert "code-scripts-a.py" not in default_node_link_ids
-    assert "code-scripts-a.py-f" in default_node_link_ids
-    assert "code-tests-test_a.py" in default_node_link_ids
-    assert "code-scripts-a.py-f" in nodes_view["default_focus"]["focused_code_link_ids"]
-    assert nodes_view["default_focus"]["edge_link_ids"] == []
-    assert nodes_view["default_focus"]["relation_endpoint_link_ids"] == []
+    assert "code-scripts-a.py-f" not in default_node_link_ids
+    assert "code-tests-test_a.py" not in default_node_link_ids
+    assert nodes_view["default_focus"]["focused_code_link_ids"] == []
+    assert nodes_view["default_focus"]["edge_link_ids"] == ["edge-feature_a-imports-tests-test_a.py"]
+    assert "context-tests-test_a.py" in nodes_view["default_focus"]["relation_endpoint_link_ids"]
     assert evidence["code_deltas"][1]["file"] == "tests/test_a.py"
     assert evidence["semantic_summary"] == {"added": 0, "deleted": 0, "modified": 3, "renamed": 0}
     assert evidence["commit_range"] == {

@@ -585,6 +585,63 @@ def test_common_run_report_write_command_report_renders_retrievals_code_deltas_a
     assert "Inspector metadata" not in html
 
 
+def test_common_run_report_write_command_report_counts_explicit_empty_relation_edges(tmp_path: Path) -> None:
+    report = write_command_report(
+        {
+            "command": "test",
+            "title": "Test",
+            "status": "ok",
+            "summary": [],
+            "steps": [],
+            "focused_view": {
+                "summary": {"semantic_nodes": 2, "edges": 0},
+                "nodes_view": {
+                    "summary": {"semantic_nodes": 2, "edges": 0},
+                    "semantic_nodes": [
+                        {"node_id": "n1", "link_id": "rpg-n1", "name": "Node 1"},
+                        {"node_id": "n2", "link_id": "rpg-n2", "name": "Node 2"},
+                    ],
+                    "code_nodes": [],
+                    "mappings": [],
+                    "edges": [],
+                    "hierarchy": {
+                        "id": "focused-graph-root",
+                        "name": "Focused graph",
+                        "kind": "root",
+                        "children": [
+                            {"id": "rpg-n1", "name": "Node 1", "kind": "feature"},
+                            {"id": "rpg-n2", "name": "Node 2", "kind": "feature"},
+                        ],
+                    },
+                    "default_focus": {"node_link_ids": ["rpg-n1"], "show_edges": True},
+                    "focused_graph": {
+                        "schema": "cmind.focused_graph.v1",
+                        "hierarchy": {
+                            "id": "focused-graph-root",
+                            "name": "Focused graph",
+                            "kind": "root",
+                            "children": [
+                                {"id": "rpg-n1", "name": "Node 1", "kind": "feature"},
+                                {"id": "rpg-n2", "name": "Node 2", "kind": "feature"},
+                            ],
+                        },
+                        "default_focus": {"node_link_ids": ["rpg-n1"], "show_edges": True},
+                    },
+                },
+            },
+        },
+        report_dir=tmp_path,
+    )
+
+    html = report.read_text(encoding="utf-8")
+    assert "Visible relation edges: 0/0" in html
+    assert "Visible relation edges: 0/2" not in html
+    graph_json = html.split("data-focused-graph-json>", 1)[1].split("</script>", 1)[0]
+    graph_payload = json.loads(html_lib.unescape(graph_json))
+    assert graph_payload["relation_edges"] == []
+    assert len(graph_payload["links"]) == 2
+
+
 def test_common_run_report_write_command_report_renders_static_fallback_without_d3(tmp_path: Path, monkeypatch) -> None:
     monkeypatch.setattr(run_report, "_D3_ASSET", tmp_path / "missing-d3.v7.min.js")
 

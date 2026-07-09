@@ -666,12 +666,12 @@ def _focused_graph_hierarchy(
         link_text = str(link_id or "")
         if not link_text or link_text in set(semantic_link_by_id.values()):
             return None
-        if node_text in code_by_id:
-            return make_code_leaf({"node_id": node_text, "link_id": link_text})
+        if node_text in code_by_id and link_text == code_link_by_id.get(node_text):
+            return None
         leaf: Dict[str, Any] = {
             "id": link_text,
             "node_id": node_text or link_text,
-            "name": edge.get("name") or edge.get("path") or node_text or "context",
+            "name": edge.get(f"{side}_name") or edge.get("name") or edge.get(f"{side}_path") or edge.get("path") or node_text or "context",
             "kind": "context",
             "state": edge.get("state") or "context",
             "relation": edge.get("relation"),
@@ -679,7 +679,9 @@ def _focused_graph_hierarchy(
             "source": edge.get("source") or edge.get("source_graph") or edge.get("edge_source"),
             "aliases": _ordered_unique([node_text, link_text]),
         }
-        for key in ("path", "reason", "source_graph", "edge_source", "relation_source"):
+        path = edge.get(f"{side}_path") or edge.get("path")
+        _set_if_present(leaf, "path", path)
+        for key in ("reason", "source_graph", "edge_source", "relation_source"):
             _set_if_present(leaf, key, edge.get(key))
         return leaf
 
@@ -762,36 +764,12 @@ def _focused_graph_hierarchy(
         ):
             _set_if_present(leaf, key, node.get(key))
         merge_code_metadata(leaf, code_refs)
-        code_group: Optional[Dict[str, Any]] = None
-        for ref in code_refs:
-            if code_group is None:
-                code_group = endpoint_group(leaf, link_id, "Mapped code", "code_group")
-            append_endpoint(code_group, make_code_leaf(ref))
         context_group: Optional[Dict[str, Any]] = None
         for ref in relation_endpoint_refs(node_id, link_id, code_refs):
-            group_kind = "code_group" if ref.get("kind") == "code" else "context_group"
-            group_name = "Mapped code" if group_kind == "code_group" else "Relation endpoints"
-            if group_kind == "code_group":
-                if code_group is None:
-                    code_group = endpoint_group(leaf, link_id, group_name, group_kind)
-                append_endpoint(code_group, ref)
-            else:
-                if context_group is None:
-                    context_group = endpoint_group(leaf, link_id, group_name, group_kind)
-                append_endpoint(context_group, ref)
+            if context_group is None:
+                context_group = endpoint_group(leaf, link_id, "Relation endpoints", "context_group")
+            append_endpoint(context_group, ref)
         _append_hierarchy_leaf(parent, leaf)
-
-    root_code_group: Optional[Dict[str, Any]] = None
-    for code in code_nodes:
-        code_id = str(code.get("node_id") or code.get("dep_node_id") or "")
-        if not code_id:
-            continue
-        leaf = make_code_leaf({"node_id": code_id, "link_id": code.get("link_id")})
-        if str(leaf.get("id") or "") in attached_endpoint_ids:
-            continue
-        if root_code_group is None:
-            root_code_group = endpoint_group(root, "unassigned", "Additional code context", "code_group")
-        append_endpoint(root_code_group, leaf)
 
     root_context_group: Optional[Dict[str, Any]] = None
     for edge in edges:
@@ -929,7 +907,7 @@ def _focused_graph_default_focus(
             endpoint_link_ids.append(node_id)
             if link_id in semantic_link_set:
                 continue
-            if link_id in code_links or str(node_id or "") in code_link_by_node_id:
+            if link_id in code_links:
                 continue
             context_link_ids.append(link_id)
             context_path_base = None
@@ -951,7 +929,7 @@ def _focused_graph_default_focus(
         if node.get("changed") or node.get("changed_files") or node.get("diff_anchor"):
             changed_code_links.append(link_id)
             changed_feature_links.extend(_listify(node.get("mapped_rpg_link_ids")) + code_to_feature_links.get(link_id, []))
-    node_link_ids = _ordered_unique(focused_semantic_links + changed_feature_links + changed_code_links)
+    node_link_ids = _ordered_unique(focused_semantic_links + changed_feature_links + context_link_ids)
 
     expanded_node_ids: List[Any] = ["focused-graph-root"]
     focused_path_node_ids: List[Any] = []
@@ -982,7 +960,7 @@ def _focused_graph_default_focus(
     expanded_node_ids = _ordered_unique(expanded_node_ids)
     focused_path_node_ids = _ordered_unique(focused_path_node_ids)
     focused_tree_node_ids = _ordered_unique(focused_tree_node_ids)
-    focused_code_link_ids = _ordered_unique(changed_code_links + [link_id for link_id in node_link_ids if link_id in code_links])
+    focused_code_link_ids = _ordered_unique([link_id for link_id in node_link_ids if link_id in code_links])
     return {
         "node_link_ids": node_link_ids,
         "focused_node_ids": node_link_ids,
@@ -1185,12 +1163,12 @@ def _build_nodes_view(
             "link_id": _node_link_id("edge", f"{source_id}-{relation}-{target_id}"),
             "source_node_id": source_id,
             "target_node_id": target_id,
-            "source_link_id": _edge_endpoint_link_id(source_id, rpg_by_id, code_by_id),
-            "target_link_id": _edge_endpoint_link_id(target_id, rpg_by_id, code_by_id),
+            "source_link_id": edge.get("source_link_id") or _edge_endpoint_link_id(source_id, rpg_by_id, code_by_id),
+            "target_link_id": edge.get("target_link_id") or _edge_endpoint_link_id(target_id, rpg_by_id, code_by_id),
             "relation": relation,
             "state": edge.get("status") or "visible",
         }
-        for key in ("direction", "source", "source_graph", "edge_source", "relation_source", "path", "reason", "rpg_node_id", "neighbor_node_id", "name"):
+        for key in ("direction", "source", "source_graph", "edge_source", "relation_source", "path", "reason", "rpg_node_id", "neighbor_node_id", "name", "source_path", "target_path", "source_name", "target_name"):
             _set_if_present(row, key, edge.get(key))
         edge_rows.append(row)
 
@@ -1524,7 +1502,7 @@ def _feature_evidence_groups(
     code_result = artifacts.get("code_result") if isinstance(artifacts.get("code_result"), dict) else {}
     apply_result = artifacts.get("apply_result") if isinstance(artifacts.get("apply_result"), dict) else {}
     impact_results = _impact_results(artifacts)
-    current_rpg_nodes, current_dep_nodes, current_rpg_edges, current_dep_edges, current_rpg_to_dep, _, graph_warnings = _current_rpg_context()
+    current_rpg_nodes, current_dep_nodes, current_rpg_edges, current_dep_edges, current_rpg_to_dep, current_dep_to_rpg, graph_warnings = _current_rpg_context()
     current_graph_available = bool(current_rpg_nodes or current_dep_nodes)
     locate_ids = {str(row.get("node_id")) for row in locate.get("results") or [] if isinstance(row, dict) and row.get("node_id")}
     applied_by_id = {
@@ -1605,9 +1583,90 @@ def _feature_evidence_groups(
     neighbor_specs = [
         ("callers", "caller", "upstream", "total_callers"),
         ("callees", "callee", "downstream", "total_callees"),
-        ("imports", "import", "downstream", "total_imports"),
-        ("inheritance", "inheritance", "downstream", "total_inheritance"),
+        ("imports", "imports", "downstream", "total_imports"),
+        ("inheritance", "inherits", "downstream", "total_inheritance"),
     ]
+    edge_keys: set[tuple[str, str, str]] = set()
+
+    def mapped_feature_id(dep_id: Any) -> Optional[str]:
+        dep_text = str(dep_id or "")
+        if not dep_text:
+            return None
+        mapped_ids = _ordered_unique(_listify(current_dep_to_rpg.get(dep_text)) + _listify(current_dep_nodes.get(dep_text, {}).get("rpg_nodes")))
+        return str(mapped_ids[0]) if mapped_ids else None
+
+    def neighbor_id_from(item: Any, impact_key: str) -> str:
+        if isinstance(item, dict):
+            side_keys = {
+                "callers": ("source_node_id", "caller_node_id", "caller", "from", "src"),
+                "callees": ("target_node_id", "callee_node_id", "callee", "to", "dst"),
+                "imports": ("target_node_id", "import_node_id", "imported_node_id", "import", "to", "dst"),
+                "inheritance": ("target_node_id", "parent_node_id", "base_node_id", "inherits", "to", "dst"),
+            }
+            for key in side_keys.get(impact_key, ()):
+                value = item.get(key)
+                if value not in (None, ""):
+                    return str(value)
+            for key in ("rpg_node_id", "feature_node_id", "node_id", "dep_node_id", "code_node_id", "id", "path", "file"):
+                value = item.get(key)
+                if value not in (None, ""):
+                    return str(value)
+            return ""
+        if item not in (None, ""):
+            return str(item)
+        return ""
+
+    def neighbor_metadata(item: Any, neighbor_id: str) -> Dict[str, Any]:
+        if isinstance(item, dict):
+            row = dict(item)
+        else:
+            row = {}
+        dep = current_dep_nodes.get(neighbor_id, {})
+        rpg = current_rpg_nodes.get(neighbor_id, {})
+        path = row.get("path") or row.get("file") or dep.get("path") or dep.get("file") or dep.get("module") or rpg.get("path")
+        name = row.get("name") or row.get("symbol") or dep.get("name") or dep.get("symbol") or rpg.get("name") or rpg.get("symbol")
+        return {"path": path, "name": name}
+
+    def add_impact_edges(node_id: str, impact: Dict[str, Any], focus_reason: str) -> None:
+        for impact_key, relation, direction, _total_key in neighbor_specs:
+            for item in _listify(impact.get(impact_key)):
+                raw_neighbor_id = neighbor_id_from(item, impact_key)
+                if not raw_neighbor_id:
+                    continue
+                neighbor_id = mapped_feature_id(raw_neighbor_id) or raw_neighbor_id
+                if neighbor_id == node_id:
+                    continue
+                if impact_key == "callers":
+                    source_id, target_id = neighbor_id, node_id
+                else:
+                    source_id, target_id = node_id, neighbor_id
+                key = (str(source_id), str(target_id), relation)
+                if key in edge_keys:
+                    continue
+                edge_keys.add(key)
+                metadata = neighbor_metadata(item, raw_neighbor_id)
+                edge_row: Dict[str, Any] = {
+                    "source_node_id": source_id,
+                    "target_node_id": target_id,
+                    "relation": relation,
+                    "direction": direction,
+                    "source": "impact",
+                    "source_graph": "impact",
+                    "edge_source": "impact",
+                    "relation_source": impact_key,
+                    "rpg_node_id": node_id,
+                    "neighbor_node_id": neighbor_id,
+                    "reason": focus_reason or f"impact {impact_key}",
+                }
+                if neighbor_id not in current_rpg_nodes:
+                    side = "source" if impact_key == "callers" else "target"
+                    edge_row[f"{side}_link_id"] = _node_link_id("context", raw_neighbor_id)
+                _set_if_present(edge_row, "path", metadata.get("path"))
+                _set_if_present(edge_row, "name", metadata.get("name"))
+                side = "source" if impact_key == "callers" else "target"
+                _set_if_present(edge_row, f"{side}_path", metadata.get("path"))
+                _set_if_present(edge_row, f"{side}_name", metadata.get("name"))
+                all_edges.append(edge_row)
 
     for candidate in candidates:
         raw_node_id = candidate.get("node_id")
@@ -1648,10 +1707,11 @@ def _feature_evidence_groups(
         for impact_key, _relation, _direction, total_key in neighbor_specs:
             items = _listify(impact.get(impact_key))
             total = count_value(impact_summary.get(total_key), len(items))
-            hidden = max(0, total)
+            hidden = max(0, total - len(items))
             if hidden:
                 node_hidden_counts[impact_key] = hidden
                 impact_hidden_counts[impact_key] = impact_hidden_counts.get(impact_key, 0) + hidden
+        add_impact_edges(node_id, impact, focus_reason)
 
         apply_row = applied_by_id.get(node_id, {})
         rpg_row: Dict[str, Any] = dict(current_node) if current_node else {"node_id": node_id, "link_id": _node_link_id("rpg", node_id)}

@@ -150,7 +150,9 @@ def test_review_publish_report_returns_report_path(tmp_path: Path, monkeypatch) 
                     "name": "Node",
                     "dep_nodes": ["a.py:f"],
                     "affected_files": ["a.py"],
-                    "impact_summary": {"total_callers": 1, "affected_file_count": 1},
+                    "callers": [{"node_id": "tests/test_a.py:test_f", "name": "test_f", "path": "tests/test_a.py"}],
+                    "callees": [{"node_id": "helpers.py:g", "name": "g", "path": "helpers.py"}],
+                    "impact_summary": {"total_callers": 1, "total_callees": 1, "affected_file_count": 1},
                 },
                 "n2": {
                     "name": "Missing Node",
@@ -322,7 +324,6 @@ def test_review_publish_report_returns_report_path(tmp_path: Path, monkeypatch) 
         assert focused["primary_rpg_nodes"][0]["node_id"] == "n1"
         assert focused["primary_rpg_nodes"][0]["mapping_status"] == "mapped"
         assert focused["primary_rpg_nodes"][0]["changed_files"] == ["a.py"]
-        assert focused["primary_rpg_nodes"][0]["hidden_counts"]["callers"] == 1
         assert focused["primary_code_nodes"][0]["node_id"] == "a.py:f"
         assert focused["primary_code_nodes"][0]["path"] == "a.py"
         mapping_statuses = {row["status"] for row in focused["mappings"]}
@@ -339,7 +340,6 @@ def test_review_publish_report_returns_report_path(tmp_path: Path, monkeypatch) 
         assert semantic_by_id["n1"]["mapping_status"] == "mapped"
         assert semantic_by_id["n1"]["selected"] is True
         assert semantic_by_id["n1"]["changed_files"] == [{"path": "a.py", "diff_anchor": "diff-a.py"}]
-        assert semantic_by_id["n1"]["hidden_counts"]["callers"] == 1
         assert semantic_by_id["n2"]["breadcrumb_path"] == "Node / Missing Node"
         assert semantic_by_id["n2"]["state"] == "missing_mapping"
         assert semantic_by_id["n2"]["mapping_status"] == "missing"
@@ -356,15 +356,27 @@ def test_review_publish_report_returns_report_path(tmp_path: Path, monkeypatch) 
         assert bridge_by_rpg["n1"]["status"] == "mapped"
         assert bridge_by_rpg["n1"]["changed_files"] == [{"path": "a.py", "diff_anchor": "diff-a.py"}]
         assert bridge_by_rpg["n2"]["state"] == "missing_mapping"
-        assert nodes_view["hidden_counts"]["callers"] == 1
+        assert nodes_view["hidden_counts"] == {}
+        assert nodes_view["summary"]["edges"] == 2
+        assert focused["summary"]["edges"] == 2
+        edges_by_relation = {row["relation"]: row for row in nodes_view["edges"]}
+        assert edges_by_relation["caller"]["source_node_id"] == "tests/test_a.py:test_f"
+        assert edges_by_relation["caller"]["target_node_id"] == "n1"
+        assert edges_by_relation["caller"]["source_link_id"] == "context-tests-test_a.py-test_f"
+        assert edges_by_relation["callee"]["source_node_id"] == "n1"
+        assert edges_by_relation["callee"]["target_node_id"] == "helpers.py:g"
+        assert edges_by_relation["callee"]["target_link_id"] == "context-helpers.py-g"
         assert any(row["type"] == "missing_mapping" and row["node_id"] == "n2" for row in nodes_view["warnings"])
         assert nodes_view["hierarchy"]["id"] == "focused-graph-root"
         hierarchy_text = json.dumps(nodes_view["hierarchy"], ensure_ascii=False)
         assert "rpg-n3" not in hierarchy_text
         assert "Node / Context Node" not in hierarchy_text
         assert '"feature_path": "context.py"' not in hierarchy_text
+        assert "Mapped code" not in hierarchy_text
+        assert "Additional code context" not in hierarchy_text
         default_node_link_ids = nodes_view["default_focus"]["node_link_ids"]
-        assert default_node_link_ids == ["rpg-n1", "code-a.py-f"]
+        assert default_node_link_ids == ["rpg-n1", "context-tests-test_a.py-test_f", "context-helpers.py-g"]
+        assert "code-a.py-f" not in default_node_link_ids
         assert "rpg-n2" not in default_node_link_ids
         assert "rpg-n3" not in default_node_link_ids
         focused_tree_node_ids = nodes_view["default_focus"]["focused_tree_node_ids"]
@@ -435,7 +447,18 @@ def test_review_report_reconstructs_affected_node_evidence_from_impact(tmp_path:
     locate_path.write_text(json.dumps({"type": "candidates", "results": [{"node_id": "other", "name": "Other"}]}), encoding="utf-8")
     plan_path.write_text(json.dumps({"affected_nodes": ["planned"], "code_changes": [{"file_path": "scripts/common/run_report.py"}]}), encoding="utf-8")
     impact_path.write_text(
-        json.dumps({"type": "impact", "results": {"planned": {"name": "Planned Node", "dep_nodes": [dep_id], "affected_files": ["scripts/common/run_report.py"]}}}),
+        json.dumps({
+            "type": "impact",
+            "results": {
+                "planned": {
+                    "name": "Planned Node",
+                    "dep_nodes": [dep_id],
+                    "affected_files": ["scripts/common/run_report.py"],
+                    "callers": [{"node_id": "tests/test_report.py:test_render_artifacts", "name": "test_render_artifacts", "path": "tests/test_report.py"}],
+                    "impact_summary": {"total_callers": 1},
+                }
+            },
+        }),
         encoding="utf-8",
     )
     code_path.write_text(json.dumps({"success": True, "commit_sha": "def456", "files_modified": ["scripts/common/run_report.py"], "last_status": "complete"}), encoding="utf-8")
@@ -474,7 +497,10 @@ def test_review_report_reconstructs_affected_node_evidence_from_impact(tmp_path:
             },
             "edges": [],
             "dep_graph": {
-                "nodes": {dep_id: {"name": "_render_artifacts", "type": "function", "module": "scripts/common/run_report.py", "line_start": 537, "line_end": 564, "rpg_nodes": ["planned"]}},
+                "nodes": {
+                    dep_id: {"name": "_render_artifacts", "type": "function", "module": "scripts/common/run_report.py", "line_start": 537, "line_end": 564, "rpg_nodes": ["planned"]},
+                    "tests/test_report.py:test_render_artifacts": {"name": "test_render_artifacts", "type": "function", "module": "tests/test_report.py", "line_start": 20, "line_end": 40},
+                },
                 "edges": [],
             },
             "_dep_to_rpg_map": {dep_id: ["planned"]},
@@ -610,14 +636,25 @@ def test_review_report_reconstructs_affected_node_evidence_from_impact(tmp_path:
         bridge = nodes_view["mappings"][0]
         assert bridge["status"] == "mapped"
         assert bridge["changed_files"] == [{"path": "scripts/common/run_report.py", "diff_anchor": "diff-scripts_common_run_report.py"}]
+        assert nodes_view["summary"]["edges"] == 1
+        assert focused["summary"]["edges"] == 1
+        edge = nodes_view["edges"][0]
+        assert edge["relation"] == "caller"
+        assert edge["source_node_id"] == "tests/test_report.py:test_render_artifacts"
+        assert edge["target_node_id"] == "planned"
+        assert edge["source_link_id"] == "context-tests-test_report.py-test_render_artifacts"
+        assert edge["target_link_id"] == "rpg-planned"
         assert any(row["type"] == "missing_reason" and row["node_id"] == "planned" for row in nodes_view["warnings"])
         assert nodes_view["hierarchy"]["id"] == "focused-graph-root"
         hierarchy_text = json.dumps(nodes_view["hierarchy"], ensure_ascii=False)
         assert "rpg-background" not in hierarchy_text
         assert '"feature_path": "Planned Node"' in hierarchy_text
         assert '"feature_path": "scripts/common/run_report.py"' not in hierarchy_text
+        assert "Mapped code" not in hierarchy_text
+        assert "Additional code context" not in hierarchy_text
         default_node_link_ids = nodes_view["default_focus"]["node_link_ids"]
-        assert default_node_link_ids == ["rpg-planned", "code-scripts-common-run_report.py-_render_artifacts"]
+        assert default_node_link_ids == ["rpg-planned", "context-tests-test_report.py-test_render_artifacts"]
+        assert "code-scripts-common-run_report.py-_render_artifacts" not in default_node_link_ids
         assert "rpg-background" not in default_node_link_ids
         assert "rpg-background" not in nodes_view["default_focus"]["focused_tree_node_ids"]
         assert nodes_view["default_focus"]["edge_depth"] == 1
