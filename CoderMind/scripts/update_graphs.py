@@ -637,6 +637,11 @@ def _focused_graph_default_focus(
     warnings: list[dict[str, Any]],
 ) -> dict[str, Any]:
     semantic_links = [str(node.get("link_id") or _node_link_id("rpg", node.get("node_id"))) for node in semantic_nodes]
+    focused_semantic_links = [
+        str(node.get("link_id") or _node_link_id("rpg", node.get("node_id")))
+        for node in semantic_nodes
+        if node.get("changed") or node.get("changed_files") or node.get("diff_anchor") or node.get("change")
+    ]
     code_links = [str(node.get("link_id") or _node_link_id("code", node.get("node_id") or node.get("dep_node_id"))) for node in code_nodes]
     rpg_link_by_node_id = {
         str(node.get("node_id")): str(node.get("link_id") or _node_link_id("rpg", node.get("node_id")))
@@ -729,12 +734,7 @@ def _focused_graph_default_focus(
         if node.get("changed") or node.get("changed_files") or node.get("diff_anchor"):
             changed_code_links.append(link_id)
             changed_feature_links.extend(_listify(node.get("mapped_rpg_link_ids")) + code_to_feature_links.get(link_id, []))
-    warning_links: list[Any] = []
-    for warning in warnings:
-        warning_links.extend(_listify(warning.get("node_link_id")) + _listify(warning.get("code_link_id")))
-    node_link_ids = _ordered_unique_text(semantic_links + changed_feature_links + changed_code_links + warning_links)
-    if not node_link_ids:
-        node_link_ids = _ordered_unique_text(semantic_links + code_links)
+    node_link_ids = _ordered_unique_text(focused_semantic_links + changed_feature_links + changed_code_links)
 
     expanded_node_ids: list[Any] = ["focused-graph-root"]
     focused_path_node_ids: list[Any] = []
