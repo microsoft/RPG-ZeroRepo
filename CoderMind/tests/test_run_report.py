@@ -38,20 +38,32 @@ def test_common_run_report_run_report_exposes_current_impact_renderers_only() ->
 
 def test_common_run_report_write_command_report_escapes_content_and_writes_sections(tmp_path: Path) -> None:
     report = write_command_report(
-        CommandRun(
-            command="rpg/edit <script>alert(1)</script>",
-            title="Title <unsafe>",
-            status="ok <bad>",
-            summary=[
+        {
+            "command": "rpg/edit <script>alert(1)</script>",
+            "title": "Title <unsafe>",
+            "status": "ok <bad>",
+            "summary": [
                 {"label": "node", "value": "<script>alert(1)</script>"},
                 {"label": "count", "value": 3},
             ],
-            steps=[StepEvent(name="locate <x>", status="done", reason="score > 1")],
-            rpg_deltas=[RPGDeltaEvent(node_id="feature<script>", name="Explain", path="a.py")],
-            dep_graph_deltas=[DepGraphDeltaEvent(dep_node_id="a.py:f", path="a.py")],
-            artifacts=[ArtifactEvent(label="plan", path=tmp_path / "plan.json")],
-            verification=[VerificationEvent(name="pytest", status="passed")],
-            user_decisions=[
+            "steps": [StepEvent(name="locate <x>", status="done", reason="score > 1")],
+            "rpg_deltas": [RPGDeltaEvent(node_id="feature<script>", name="Explain", path="a.py")],
+            "dep_graph_deltas": [DepGraphDeltaEvent(dep_node_id="a.py:f", path="a.py")],
+            "code_deltas": [CodeDeltaEvent(file="a.py", change_type="modify", diff="+safe")],
+            "focused_view": {
+                "nodes_view": {
+                    "summary": {"semantic_nodes": 1, "code_nodes": 0, "mappings": 0, "edges": 0, "warnings": 0},
+                    "semantic_nodes": [{"node_id": "feature<script>", "link_id": "rpg-feature-script", "name": "Explain"}],
+                    "code_nodes": [],
+                    "mappings": [],
+                    "edges": [],
+                    "hidden_counts": {},
+                    "warnings": [],
+                }
+            },
+            "artifacts": [ArtifactEvent(label="plan", path=tmp_path / "plan.json")],
+            "verification": [VerificationEvent(name="pytest", status="passed")],
+            "user_decisions": [
                 UserDecisionEvent(
                     decision="apply <unsafe>",
                     branch="rpg-edit/<branch>",
@@ -62,9 +74,9 @@ def test_common_run_report_write_command_report_escapes_content_and_writes_secti
                     test_status="passed <ok>",
                 )
             ],
-            evidence={"raw": "<script>evil()</script>"},
-            timestamp="2026-06-30T12:34:56Z",
-        ),
+            "evidence": {"raw": "<script>evil()</script>"},
+            "timestamp": "2026-06-30T12:34:56Z",
+        },
         report_dir=tmp_path,
     )
 
@@ -73,10 +85,10 @@ def test_common_run_report_write_command_report_escapes_content_and_writes_secti
     html = report.read_text(encoding="utf-8")
     section_order = [
         "Summary",
-        "Stage timeline",
-        "Safety boundary",
         "Focused graph",
         "What changed?",
+        "Stage timeline",
+        "Safety boundary",
         "Artifact links",
         "Evidence JSON",
     ]
@@ -467,6 +479,8 @@ def test_common_run_report_write_command_report_renders_retrievals_code_deltas_a
     assert "a.py:f&lt;script&gt;" in html
     assert "a.py&lt;script&gt;" in html
     assert "maps because &lt;reason&gt;" in html
+    assert "<details><summary>Warnings</summary>" in html
+    assert "<details open><summary>Warnings</summary>" not in html
     assert "Missing &lt;mapping&gt;" in html
     assert "missing_mapping" in html
     assert "missing_reason" in html
