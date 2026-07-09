@@ -415,6 +415,9 @@ def test_common_run_report_write_command_report_renders_retrievals_code_deltas_a
     assert "dblclick" in html
     assert "focused-graph-layer" in html
     assert "focused-graph-node.selected" in html
+    assert ".focused-graph-node.non-focused circle { fill:#cbd5e1; }" in html
+    assert ".focused-graph-node.non-focused text { fill:#94a3b8; }" in html
+    assert ".focused-graph-node.selected circle, .focused-graph-node.active circle, .focused-graph-node.focused circle" in html
     assert "focused-graph-node.hidden" in html
     assert "focused-graph-link.active" in html
     assert "focused-graph-link.dimmed" in html
@@ -535,6 +538,12 @@ def test_common_run_report_write_command_report_renders_retrievals_code_deltas_a
     assert "focused-graph-root" in default_focus["default_expanded_node_ids"]
     assert "rpg-n1-script" in default_focus["focused_path_node_ids"]
     assert "context-callee-script" not in default_focus["default_expanded_node_ids"]
+    assert "const isDefaultFocused = d =>" in html
+    assert "${isDefaultFocused(d) ? ' focused' : ' non-focused'}" in html
+    assert "focusedNodeIds.has(id) || focusedCodeLinkIds.has(id)" in html
+    assert "focusedNodeIds.has(d.id) || focusedCodeLinkIds.has(d.id)" not in html
+    assert "rpg-background" not in default_focus["focused_tree_node_ids"]
+    assert "context-callee-script" not in default_focus["focused_tree_node_ids"]
     assert graph_payload["hidden_counts"] == {"callers": 3}
     inspector_json = html.split("<summary>Inspector JSON</summary><pre>", 1)[1].split("</pre>", 1)[0]
     assert "focused_graph" in inspector_json

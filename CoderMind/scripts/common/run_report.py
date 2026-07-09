@@ -423,6 +423,8 @@ details summary {{ cursor:pointer; color:var(--accent); font-weight:600; }}
 .focused-graph-link.source-dep-graph {{ stroke-dasharray:5 3; }}
 .focused-graph-node {{ cursor:pointer; transition:opacity .15s ease; }}
 .focused-graph-node circle {{ fill:#3b82f6; stroke:#e2e8f0; stroke-width:2; transition:stroke .15s ease, stroke-width .15s ease; }}
+.focused-graph-node.non-focused circle {{ fill:#cbd5e1; }}
+.focused-graph-node.non-focused text {{ fill:#94a3b8; }}
 .focused-graph-node.selected circle, .focused-graph-node.active circle, .focused-graph-node.focused circle {{ stroke:#f8fafc; stroke-width:3; }}
 .focused-graph-node.search-match circle {{ stroke:#f59e0b; stroke-width:3; }}
 .focused-graph-node.dimmed {{ opacity:.18; }}
@@ -1377,6 +1379,13 @@ def _focused_graph_runtime() -> str:
   const expandedNodeIds = new Set(list(defaultFocus.default_expanded_node_ids || defaultFocus.expanded_node_ids).map(text).filter(Boolean));
   const focusedPathNodeIds = new Set(list(defaultFocus.focused_path_node_ids).map(text).filter(Boolean));
   const defaultExpandedIds = new Set([rootHierarchyId, ...expandedNodeIds]);
+  const isDefaultFocused = d => {
+    const data = d?.data || {};
+    return [d?.id, data.id, data.link_id, data.node_id, data.dep_node_id]
+      .map(text)
+      .filter(Boolean)
+      .some(id => focusedNodeIds.has(id) || focusedCodeLinkIds.has(id));
+  };
   let showEdges = defaultShowEdges;
   let query = '';
   let selectedId = null;
@@ -1775,7 +1784,7 @@ def _focused_graph_runtime() -> str:
     const nodeUpdate = nodeEnter.merge(node);
     nodeUpdate.transition().duration(250).attr('transform', d => `translate(${d.y},${d.x})`);
     nodeUpdate
-      .attr('class', d => `focused-graph-node${d.id === selectedId ? ' selected' : ''}${focusedNodeIds.has(d.id) || focusedCodeLinkIds.has(d.id) ? ' focused' : ''}${nodeMatches(d) ? ' search-match' : ''}${selectedId && d.id !== selectedId && !currentRelationEdges.some(edge => edge._source.id === d.id || edge._target.id === d.id) ? ' dimmed' : ''}`);
+      .attr('class', d => `focused-graph-node${d.id === selectedId ? ' selected' : ''}${isDefaultFocused(d) ? ' focused' : ' non-focused'}${nodeMatches(d) ? ' search-match' : ''}${selectedId && d.id !== selectedId && !currentRelationEdges.some(edge => edge._source.id === d.id || edge._target.id === d.id) ? ' dimmed' : ''}`);
     nodeUpdate.select('circle').attr('r', d => d._children ? 6 : (d.children ? 5 : 4));
     nodeUpdate.select('text')
       .attr('x', d => d.children || d._children ? -10 : 10)
