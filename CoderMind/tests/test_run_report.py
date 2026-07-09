@@ -255,6 +255,16 @@ def test_common_run_report_write_command_report_renders_retrievals_code_deltas_a
                         },
                     ],
                     "hidden_counts": {"callers": 3},
+                    "hidden_context_nodes": [
+                        {
+                            "node_id": "hidden<script>",
+                            "link_id": "rpg-hidden-script",
+                            "name": "Hidden <unsafe>",
+                            "path": "hidden.py<script>",
+                            "mapping_status": "mapped",
+                            "hidden_reason": "selected by plan/impact, hidden because no modified mapped code <reason>",
+                        }
+                    ],
                     "warnings": [
                         {"type": "missing_mapping", "message": "Missing <mapping>", "node_id": "n2", "node_link_id": "rpg-n2"},
                         {"type": "missing_reason", "message": "Missing <reason>", "node_id": "n3"},
@@ -508,6 +518,13 @@ def test_common_run_report_write_command_report_renders_retrievals_code_deltas_a
     assert "too_many_neighbors" not in html
     assert "stale_graph" in html
     assert "Hidden 3 additional caller neighbors." in html
+    assert "Hidden context nodes" in html
+    assert "hidden&lt;script&gt;" in html
+    assert "Hidden &lt;unsafe&gt;" in html
+    assert "hidden.py&lt;script&gt;" in html
+    assert "selected by plan/impact, hidden because no modified mapped code &lt;reason&gt;" in html
+    assert "Hidden <unsafe>" not in html
+    assert "hidden.py<script>" not in html
     assert '"edges": 1' not in html
     assert html.count("+line 0 &lt;script&gt;alert(0)&lt;/script&gt;") == 1
     assert "+line 0 <script>alert(0)</script>" not in html
@@ -524,9 +541,14 @@ def test_common_run_report_write_command_report_renders_retrievals_code_deltas_a
     assert graph_payload["summary"]["relation_edges"] == 3
     assert graph_payload["summary"]["context_edges"] == 3
     assert any(node.get("id") == "rpg-background" for node in graph_payload["hierarchy"]["children"])
+    assert graph_payload["hidden_context_nodes"][0]["node_id"] == "hidden<script>"
+    assert graph_payload["hidden_context_nodes"][0]["hidden_reason"] == "selected by plan/impact, hidden because no modified mapped code <reason>"
     relation_links = [link for link in graph_payload["links"] if link.get("relation") != "contains"]
     assert len(relation_links) == 3
     nodes_by_id = {node["id"]: node for node in graph_payload["nodes"]}
+    assert "rpg-hidden-script" not in nodes_by_id
+    assert not any(link.get("source") == "rpg-hidden-script" or link.get("target") == "rpg-hidden-script" for link in graph_payload["links"])
+    assert "rpg-hidden-script" not in graph_payload["node_aliases"]
     assert nodes_by_id["rpg-n1-script"]["symbol"] == "NodeSymbol <unsafe>"
     assert nodes_by_id["rpg-n1-script"]["reason"] == "selected <reason>"
     assert len(nodes_by_id["rpg-n1-script"]["mapped_code"]) == 2
@@ -562,6 +584,8 @@ def test_common_run_report_write_command_report_renders_retrievals_code_deltas_a
     assert "focusedNodeIds.has(d.id) || focusedCodeLinkIds.has(d.id)" not in html
     assert "rpg-background" not in default_focus["focused_tree_node_ids"]
     assert "context-callee-script" not in default_focus["focused_tree_node_ids"]
+    assert "rpg-hidden-script" not in default_focus["node_link_ids"]
+    assert "rpg-hidden-script" not in default_focus["focused_tree_node_ids"]
     assert graph_payload["hidden_counts"] == {"callers": 3}
     inspector_json = html.split("<summary>Inspector JSON</summary><pre>", 1)[1].split("</pre>", 1)[0]
     assert "focused_graph" in inspector_json
@@ -569,6 +593,9 @@ def test_common_run_report_write_command_report_renders_retrievals_code_deltas_a
     assert "semantic_nodes" in inspector_json
     assert "hierarchy" in inspector_json
     assert "default_focus" in inspector_json
+    assert "hidden_context_nodes" in inspector_json
+    assert "hidden&lt;script&gt;" in inspector_json
+    assert "selected by plan/impact, hidden because no modified mapped code &lt;reason&gt;" in inspector_json
     assert "primary_rpg_nodes" not in inspector_json
     assert "primary_code_nodes" not in inspector_json
     assert "caps" not in inspector_json
