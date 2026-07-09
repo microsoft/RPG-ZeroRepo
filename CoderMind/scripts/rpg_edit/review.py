@@ -1635,7 +1635,11 @@ def _feature_evidence_groups(
             + [current_dep_nodes.get(dep_id, {}).get("path") for dep_id in mapped_dep_ids]
         )
         affected_files = _ordered_unique(_listify(impact.get("affected_files")) + relation_paths)
-        relevant_files = set(affected_files or relation_paths or changed_files)
+        relevant_files = set(_ordered_unique(affected_files + [
+            candidate.get("path"),
+            candidate.get("meta_path"),
+            current_node.get("path"),
+        ]))
         relevant_deltas = [delta for delta in code_deltas if _code_delta_file(delta) in relevant_files]
         changed_for_node = _ordered_unique([_code_delta_file(delta) for delta in relevant_deltas])
         focus_reason = _focus_reason(candidate, impact)
