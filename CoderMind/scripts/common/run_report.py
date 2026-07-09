@@ -1175,6 +1175,7 @@ def _focused_graph_payload(focused_view: Mapping[str, Any], file_anchors: Mappin
 
     hierarchy_ids: set[str] = set()
     collect_hierarchy_ids(hierarchy, hierarchy_ids)
+    code_link_values = set(code_link_by_node.values())
     for edge in context_edges:
         for side in ("source", "target"):
             link_id = endpoint_link_id(edge, side)
@@ -1182,11 +1183,11 @@ def _focused_graph_payload(focused_view: Mapping[str, Any], file_anchors: Mappin
                 continue
             node_id = edge.get(f"{side}_node_id")
             node_text = str(node_id or link_id)
-            is_code = node_text in code_link_by_node or link_id in set(code_link_by_node.values())
+            is_code = link_id in code_link_values
             leaf: dict[str, Any] = {
                 "id": link_id,
                 "node_id": node_text,
-                "name": edge.get("name") or edge.get("path") or node_text,
+                "name": edge.get(f"{side}_name") or edge.get("name") or edge.get(f"{side}_path") or edge.get("path") or node_text,
                 "kind": "code" if is_code else "context",
                 "state": "mapped" if is_code else "context",
                 "aliases": _ordered_texts([node_text, link_id]),
@@ -1197,9 +1198,12 @@ def _focused_graph_payload(focused_view: Mapping[str, Any], file_anchors: Mappin
                     if isinstance(code, Mapping) and code.get(key) not in (None, ""):
                         leaf[key] = code.get(key)
             else:
-                for key in ("relation", "direction", "path", "reason", "source", "source_graph", "edge_source", "relation_source"):
+                for key in ("relation", "direction", "reason", "source", "source_graph", "edge_source", "relation_source"):
                     if edge.get(key) not in (None, ""):
                         leaf[key] = edge.get(key)
+                path = edge.get(f"{side}_path") or edge.get("path")
+                if path not in (None, ""):
+                    leaf["path"] = path
             endpoint_group().setdefault("children", []).append(leaf)
             hierarchy_ids.add(link_id)
 
@@ -1842,7 +1846,10 @@ def _render_focused_graph(focused_view: dict[str, Any], file_anchors: Mapping[st
     hidden_html = _hidden_context_html(hidden_counts if isinstance(hidden_counts, Mapping) else {})
     warnings = [warning for warning in _as_sequence(nodes_view.get("warnings") or focused_view.get("warnings")) if isinstance(warning, Mapping)]
     warnings_html = f"<details><summary>Warnings</summary>{_chain_warning_html(warnings)}</details>" if warnings else ""
-    relation_edge_total = len(_as_sequence(graph_payload.get("relation_edges") or graph_payload.get("edges") or graph_payload.get("links")))
+    relation_edges_value = graph_payload.get("relation_edges")
+    if relation_edges_value is None:
+        relation_edges_value = graph_payload.get("edges")
+    relation_edge_total = len(_as_sequence(relation_edges_value))
     graph_json = _json_for_script(graph_payload)
     d3_js = _inline_d3()
     fallback_hidden = " hidden" if d3_js else ""

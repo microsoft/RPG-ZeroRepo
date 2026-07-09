@@ -608,29 +608,10 @@ def _focused_graph_hierarchy(
             "mapped_code_count",
         ):
             _set_if_present(leaf, key, node.get(key))
-        code_group: Optional[dict[str, Any]] = None
-        for ref in _listify(node.get("mapped_code")):
-            if not isinstance(ref, dict):
-                continue
-            if code_group is None:
-                code_group = endpoint_group(leaf, link_id, "Mapped code", "code_group")
-            append_endpoint(code_group, make_code_leaf(ref))
         _append_hierarchy_leaf(parent, leaf)
 
-    root_code_group: Optional[dict[str, Any]] = None
-    for code in code_nodes:
-        code_id = str(code.get("node_id") or code.get("dep_node_id") or "")
-        if not code_id:
-            continue
-        leaf = make_code_leaf({"node_id": code_id, "link_id": code.get("link_id")})
-        if str(leaf.get("id") or "") in attached_endpoint_ids:
-            continue
-        if root_code_group is None:
-            root_code_group = endpoint_group(root, "unassigned", "Additional code context", "code_group")
-        append_endpoint(root_code_group, leaf)
-
     root_context_group: Optional[dict[str, Any]] = None
-    known_links = {str(node.get("link_id") or "") for node in semantic_nodes + code_nodes}
+    known_links = {str(node.get("link_id") or "") for node in semantic_nodes}
     for edge in edges:
         for side in ("source", "target"):
             link_id = str(edge.get(f"{side}_link_id") or "")
@@ -640,14 +621,16 @@ def _focused_graph_hierarchy(
             leaf = {
                 "id": link_id,
                 "node_id": node_id,
-                "name": edge.get("name") or edge.get("path") or node_id or "context",
+                "name": edge.get(f"{side}_name") or edge.get("name") or edge.get(f"{side}_path") or edge.get("path") or node_id or "context",
                 "kind": "context",
                 "state": "context",
                 "relation": edge.get("relation"),
                 "source": edge.get("source") or edge.get("source_graph") or edge.get("edge_source"),
                 "aliases": _ordered_unique_text([node_id, link_id]),
             }
-            for key in ("path", "reason", "source_graph", "edge_source", "relation_source"):
+            path = edge.get(f"{side}_path") or edge.get("path")
+            _set_if_present(leaf, "path", path)
+            for key in ("reason", "source_graph", "edge_source", "relation_source"):
                 _set_if_present(leaf, key, edge.get(key))
             if root_context_group is None:
                 root_context_group = endpoint_group(root, "unassigned", "Additional relation endpoints", "context_group")
@@ -746,7 +729,7 @@ def _focused_graph_default_focus(
                 continue
             endpoint_link_ids.append(link_id)
             endpoint_link_ids.append(node_id)
-            if link_id in semantic_link_set or link_id in code_link_set or str(node_id or "") in code_link_by_node_id:
+            if link_id in semantic_link_set or link_id in code_link_set:
                 continue
             context_link_ids.append(link_id)
             context_path = ["focused-graph-root", _node_link_id("context_group", "unassigned"), link_id]
@@ -760,7 +743,7 @@ def _focused_graph_default_focus(
         if node.get("changed") or node.get("changed_files") or node.get("diff_anchor"):
             changed_code_links.append(link_id)
             changed_feature_links.extend(_listify(node.get("mapped_rpg_link_ids")) + code_to_feature_links.get(link_id, []))
-    node_link_ids = _ordered_unique_text(focused_semantic_links + changed_feature_links + changed_code_links)
+    node_link_ids = _ordered_unique_text(focused_semantic_links + changed_feature_links + context_link_ids)
 
     expanded_node_ids: list[Any] = ["focused-graph-root"]
     focused_path_node_ids: list[Any] = []
@@ -777,7 +760,7 @@ def _focused_graph_default_focus(
         "node_link_ids": node_link_ids,
         "focused_node_ids": node_link_ids,
         "focused_tree_node_ids": _ordered_unique_text(focused_tree_node_ids),
-        "focused_code_link_ids": _ordered_unique_text(changed_code_links + [link_id for link_id in node_link_ids if link_id in code_link_set]),
+        "focused_code_link_ids": _ordered_unique_text([link_id for link_id in node_link_ids if link_id in code_link_set]),
         "expanded_node_ids": _ordered_unique_text(expanded_node_ids),
         "default_expanded_node_ids": _ordered_unique_text(expanded_node_ids),
         "focused_path_node_ids": _ordered_unique_text(focused_path_node_ids),
@@ -968,12 +951,12 @@ def _build_nodes_view(
             "link_id": _node_link_id("edge", f"{source_id}-{relation}-{target_id}"),
             "source_node_id": source_id,
             "target_node_id": target_id,
-            "source_link_id": _edge_endpoint_link_id(source_id, rpg_by_id, code_by_id),
-            "target_link_id": _edge_endpoint_link_id(target_id, rpg_by_id, code_by_id),
+            "source_link_id": edge.get("source_link_id") or _edge_endpoint_link_id(source_id, rpg_by_id, code_by_id),
+            "target_link_id": edge.get("target_link_id") or _edge_endpoint_link_id(target_id, rpg_by_id, code_by_id),
             "relation": relation,
             "state": edge.get("status") or "visible",
         }
-        for key in ("direction", "source", "source_graph", "edge_source", "relation_source", "path", "reason", "rpg_node_id", "neighbor_node_id", "name"):
+        for key in ("direction", "source", "source_graph", "edge_source", "relation_source", "path", "reason", "rpg_node_id", "neighbor_node_id", "name", "source_path", "target_path", "source_name", "target_name"):
             _set_if_present(row, key, edge.get(key))
         edge_rows.append(row)
 
@@ -1061,25 +1044,29 @@ def _edge_rows(dep_edges: Any, code_ids: set[str]) -> list[dict[str, Any]]:
     if not isinstance(dep_edges, list):
         return rows
     changed_states = {"added", "changed", "deleted", "modified", "renamed"}
+    containment_relations = {"contains", "containment", "composes"}
     for edge in dep_edges:
         if not isinstance(edge, dict):
             continue
         attrs = edge.get("attrs") if isinstance(edge.get("attrs"), dict) else {}
-        change = str(edge.get("change") or edge.get("change_type") or edge.get("status") or attrs.get("change") or attrs.get("change_type") or "").lower()
-        if change not in changed_states:
+        relation = edge.get("relation") or edge.get("type") or attrs.get("relation") or attrs.get("type") or "dependency"
+        if str(relation).lower() in containment_relations:
             continue
         source = edge.get("src") or edge.get("source") or edge.get("from")
         target = edge.get("dst") or edge.get("target") or edge.get("to")
-        if source not in code_ids or target not in code_ids:
+        if source not in code_ids and target not in code_ids:
+            continue
+        change = str(edge.get("change") or edge.get("change_type") or edge.get("status") or attrs.get("change") or attrs.get("change_type") or "").lower()
+        if change and change not in changed_states:
             continue
         rows.append({
             "source_node_id": source,
             "target_node_id": target,
-            "relation": edge.get("relation") or edge.get("type") or attrs.get("type") or "dependency",
+            "relation": relation,
             "source_graph": "dep_graph",
             "edge_source": "dep_graph",
-            "reason": "edge changed",
-            "status": change,
+            "reason": "edge incident to modified dep node" if not change else "edge changed",
+            "status": change or "affected",
         })
     return rows[:50]
 
@@ -1137,8 +1124,26 @@ def _build_update_focus(result: dict, code_deltas: list[dict[str, Any]], semanti
                 "path": changed_file,
             })
 
+    dep_edge_rows = _edge_rows(dep_graph.get("edges") if isinstance(dep_graph, dict) else [], matched_dep_ids)
+    for edge in dep_edge_rows:
+        for side in ("source", "target"):
+            dep_id = str(edge.get(f"{side}_node_id") or "")
+            dep_attrs = dep_graph.get("nodes", {}).get(dep_id, {}) if isinstance(dep_graph.get("nodes"), dict) else {}
+            mapped_rpg_ids = _ordered_unique_text(_listify(edge.get(f"{side}_rpg_nodes")) + _listify(dep_attrs.get("rpg_nodes")) + _listify(dep_to_rpg.get(dep_id)))
+            if mapped_rpg_ids:
+                rpg_id = mapped_rpg_ids[0]
+                node = rpg_nodes.get(rpg_id)
+                if isinstance(node, dict):
+                    semantic_by_id.setdefault(rpg_id, _rpg_node_row(rpg_id, node, rpg_paths, _listify(dep_attrs.get("path"))))
+                edge[f"{side}_node_id"] = rpg_id
+                edge[f"{side}_link_id"] = _node_link_id("rpg", rpg_id)
+                continue
+            if dep_id in matched_dep_ids:
+                edge[f"{side}_link_id"] = _node_link_id("context", dep_id)
+            _set_if_present(edge, f"{side}_path", _dep_node_path(dep_id, dep_attrs))
+            _set_if_present(edge, f"{side}_name", dep_attrs.get("name") or dep_attrs.get("symbol"))
     semantic_nodes = list(semantic_by_id.values())
-    dep_edges = _edge_rows(dep_graph.get("edges") if isinstance(dep_graph, dict) else [], matched_dep_ids)
+    dep_edges = dep_edge_rows
     unmatched_files = set(changed_files)
     for node in code_nodes:
         unmatched_files.difference_update(str(path) for path in _listify(node.get("changed_files")))
