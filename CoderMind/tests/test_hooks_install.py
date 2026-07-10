@@ -476,6 +476,43 @@ def test_update_graphs_status_text_on_corrupt_rpg_says_unavailable(project):
     assert "/cmind.encode" in text
 
 
+def test_update_graphs_status_diverged_branch_survives_non_ascii_guidance(project):
+    """Regression: the diverged-branch guidance line contains "->" (U+2192).
+
+    On Windows, a subprocess whose stdout is piped (exactly what happens
+    here via `subprocess.run(..., capture_output=True)`, and what the real
+    SessionStart hook / `cmind script` wrapper do too) makes CPython fall
+    back to a legacy code page for stdio instead of UTF-8. Printing this
+    guidance line used to raise UnicodeEncodeError and crash the whole
+    script instead of completing — this test pins that it no longer does.
+    """
+    subprocess.run(["git", "init", "-q", "-b", "new-branch"], cwd=project, check=True)
+    subprocess.run(["git", "config", "user.email", "test@example.com"], cwd=project, check=True)
+    subprocess.run(["git", "config", "user.name", "Test"], cwd=project, check=True)
+    (project / "README.md").write_text("hello\n")
+    subprocess.run(["git", "add", "README.md"], cwd=project, check=True)
+    subprocess.run(["git", "commit", "-q", "-m", "init"], cwd=project, check=True)
+
+    data_dir = project / ".cmind" / "data"
+    data_dir.mkdir(parents=True)
+    (data_dir / "rpg.json").write_text(json.dumps({
+        "repo_name": "demo",
+        "edges": [],
+        "root": {"id": "root", "children": []},
+        "meta": {"git": {
+            "head_commit": "0" * 40,
+            "head_short": "0000000",
+            "head_branch": "old-branch",
+        }},
+    }))
+
+    result = _run_status(project)
+    assert result.returncode == 0, f"stdout={result.stdout!r} stderr={result.stderr!r}"
+    assert "UnicodeEncodeError" not in result.stderr
+    assert "branch changed: 'old-branch'" in result.stdout
+    assert "'new-branch'" in result.stdout
+
+
 # ---------------------------------------------------------------------------
 # _setup_gitignore — unified .gitignore management
 # ---------------------------------------------------------------------------

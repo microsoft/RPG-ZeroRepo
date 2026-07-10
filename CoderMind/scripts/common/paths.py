@@ -38,7 +38,29 @@ both refer to the same directory.
 """
 
 import os
+import sys
 from pathlib import Path
+
+# Every bundled script imports this module near the top, which makes it
+# the natural single choke point to fix a Windows-only crash: when a
+# script's stdout/stderr is not a real console (piped by `cmind script`,
+# captured by a Claude Code hook, redirected in a test, ...), CPython
+# falls back to `locale.getpreferredencoding()` for stdio instead of
+# UTF-8. That's a legacy code page (cp1252, cp936, ...) on most Windows
+# installs, so a bare `print()` of any non-ASCII character (e.g. the
+# "->" arrow in update_graphs.py's status-guidance text) raises
+# UnicodeEncodeError and kills the whole script instead of completing.
+# Reconfiguring here, at import time, protects every script uniformly
+# regardless of how it ends up being invoked.
+for _stream in (sys.stdout, sys.stderr):
+    try:
+        _stream.reconfigure(encoding="utf-8", errors="replace")
+    except (AttributeError, ValueError):
+        # AttributeError: stream has no reconfigure (e.g. replaced by a
+        # test harness / io.StringIO). ValueError: stream is detached.
+        # Either way, this is best-effort — never block script startup.
+        pass
+del _stream
 
 # Import the home-storage helpers.  cmind_cli is always installed in
 # the same Python environment as the scripts (the wheel ships the

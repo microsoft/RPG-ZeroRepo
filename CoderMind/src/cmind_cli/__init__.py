@@ -2020,13 +2020,23 @@ def _run_initial_encode(project_path: Path) -> bool:
         console.print(f"[yellow]Could not open log file {log_path}: {exc}[/yellow]")
         return False
 
+    # Force UTF-8 stdio in the encoder subprocess — see the matching
+    # comment in the `script()` command for why this is required on
+    # Windows (non-tty stdout/stderr fall back to a legacy code page).
+    encoder_env = os.environ.copy()
+    encoder_env.setdefault("PYTHONIOENCODING", "utf-8:replace")
+    encoder_env.setdefault("PYTHONUTF8", "1")
+
     try:
         proc = subprocess.Popen(
             [sys.executable, str(encoder), "--json"],
             cwd=str(project_path),
+            env=encoder_env,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
             text=True,
+            encoding="utf-8",
+            errors="replace",
             bufsize=1,  # line-buffered so the reader thread sees lines promptly
         )
     except Exception as exc:  # noqa: BLE001
@@ -4691,6 +4701,17 @@ def script(
     # tool-venv install dir doesn't accumulate __pycache__ noise.
     env = os.environ.copy()
     env.setdefault("PYTHONDONTWRITEBYTECODE", "1")
+    # Force UTF-8 stdio in the child regardless of the host's locale.  On
+    # Windows, a non-tty stdout (always true here: we either pipe it or it's
+    # inherited into another pipe/redirect) makes CPython fall back to
+    # locale.getpreferredencoding(), which is a legacy code page (cp1252,
+    # cp936, ...) on most Windows installs. Any bundled script that prints
+    # a non-ASCII character (e.g. update_graphs.py's "branch changed: 'a' →
+    # 'b'") then raises UnicodeEncodeError and crashes outright instead of
+    # completing. errors="replace" additionally protects the reverse
+    # direction (decoding non-UTF-8 bytes on stdin) from crashing.
+    env.setdefault("PYTHONIOENCODING", "utf-8:replace")
+    env.setdefault("PYTHONUTF8", "1")
 
     # Tee stdout to a per-stage log file so the workspace has a persistent
     # record of every script invocation.  The log path is resolved from

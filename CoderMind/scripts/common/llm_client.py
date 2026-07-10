@@ -419,11 +419,22 @@ class LLMClient:
                         stdout=subprocess.PIPE,
                         stderr=subprocess.PIPE,
                         text=True,
+                        encoding="utf-8",
+                        errors="replace",
                         env=trace_ctx.env,
                         cwd=_REPO_DIR,
                     )
                     if _IS_WINDOWS:
                         popen_kwargs["creationflags"] = subprocess.CREATE_NEW_PROCESS_GROUP
+                        # Also force UTF-8 stdio inside the CLI subprocess
+                        # itself (e.g. Claude/Codex CLI is often a Python
+                        # or Node entrypoint). Without this, a non-tty
+                        # stdout on Windows falls back to the legacy code
+                        # page and the *child* can crash before its output
+                        # ever reaches the `encoding="utf-8"` decode above.
+                        popen_kwargs["env"] = dict(trace_ctx.env or {})
+                        popen_kwargs["env"].setdefault("PYTHONIOENCODING", "utf-8:replace")
+                        popen_kwargs["env"].setdefault("PYTHONUTF8", "1")
                     else:
                         popen_kwargs["start_new_session"] = True
                         popen_kwargs["preexec_fn"] = _set_pdeathsig
