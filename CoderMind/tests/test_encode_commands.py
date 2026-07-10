@@ -771,6 +771,15 @@ class TestTemplates:
         assert "check_encode.py" in content
         assert "run_encode.py" in content
 
+    def test_encode_template_recovers_from_corrupt_rpg(self):
+        encode_md = os.path.join(self._template_dir, "encode.md")
+        with open(encode_md, "r", encoding="utf-8") as f:
+            content = f.read()
+        assert "Delete this file and run a full /cmind.encode now?" in content
+        assert "rm -- \"<rpg_file>\"" in content
+        assert "proceed to Step 2" in content
+        assert "Quit without deleting anything" in content
+
     def test_update_rpg_template_references_check_script(self):
         update_md = os.path.join(self._template_dir, "update_rpg.md")
         with open(update_md, "r", encoding="utf-8") as f:
