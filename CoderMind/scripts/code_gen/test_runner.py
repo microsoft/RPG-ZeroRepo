@@ -10,7 +10,6 @@ Provides utilities for:
 
 import os
 import re
-import signal
 import subprocess
 import sys
 import shutil
@@ -22,6 +21,7 @@ from dataclasses import dataclass
 from .test_output_parser import TestOutputAnalysis, _parse_stats, _SUMMARY_RE
 from .test_output_parser import analyze_test_output
 from common.llm_client import LLMClient
+from common.llm_client import _IS_WINDOWS, _kill_process_tree, _set_pdeathsig
 import json as _json
 from common.import_normalizer import normalize_files
 from common.paths import FEATURE_SPEC_FILE, REPO_RPG_FILE
@@ -35,13 +35,6 @@ from decoder_lang import (
 )
 
 
-def _set_pdeathsig() -> None:
-    """Preexec hook: ask the kernel to send SIGTERM to this child when its parent dies (including SIGKILL).  Called after fork() but before exec() so it runs in the child's address space.  Silently ignored on non-Linux."""
-    try:
-        import ctypes, signal as _s
-        ctypes.CDLL("libc.so.6").prctl(1, _s.SIGTERM)  # PR_SET_PDEATHSIG = 1
-    except Exception:
-        pass
 
 
 # ============================================================================
@@ -416,25 +409,26 @@ def run_pytest(
     if env:
         run_env.update(env)
     
+    popen_kwargs: Dict[str, Any] = dict(
+        cwd=repo_root,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+        env=run_env,
+    )
+    if _IS_WINDOWS:
+        popen_kwargs["creationflags"] = subprocess.CREATE_NEW_PROCESS_GROUP
+    else:
+        popen_kwargs["start_new_session"] = True   # own process group → killpg kills pytest + children
+        popen_kwargs["preexec_fn"] = _set_pdeathsig # PR_SET_PDEATHSIG: killed even when parent SIGKILL'd
+
     try:
-        proc = subprocess.Popen(
-            cmd,
-            cwd=repo_root,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            text=True,
-            env=run_env,
-            start_new_session=True,   # own process group → killpg kills pytest + children
-            preexec_fn=_set_pdeathsig, # PR_SET_PDEATHSIG: killed even when parent SIGKILL'd
-        )
+        proc = subprocess.Popen(cmd, **popen_kwargs)
         try:
             stdout_data, stderr_data = proc.communicate(timeout=timeout)
         except BaseException:
-            # Kill the entire pytest process group (covers forked workers, etc.)
-            try:
-                os.killpg(os.getpgid(proc.pid), signal.SIGTERM)
-            except Exception:
-                proc.kill()
+            # Kill the entire pytest process tree (covers forked workers, etc.)
+            _kill_process_tree(proc)
             proc.wait()
             raise
 
@@ -558,24 +552,25 @@ def run_project_tests(
     if env:
         run_env.update(env)
 
+    popen_kwargs: Dict[str, Any] = dict(
+        cwd=repo_root,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+        env=run_env,
+    )
+    if _IS_WINDOWS:
+        popen_kwargs["creationflags"] = subprocess.CREATE_NEW_PROCESS_GROUP
+    else:
+        popen_kwargs["start_new_session"] = True
+        popen_kwargs["preexec_fn"] = _set_pdeathsig
+
     try:
-        proc = subprocess.Popen(
-            cmd,
-            cwd=repo_root,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            text=True,
-            env=run_env,
-            start_new_session=True,
-            preexec_fn=_set_pdeathsig,
-        )
+        proc = subprocess.Popen(cmd, **popen_kwargs)
         try:
             stdout_data, stderr_data = proc.communicate(timeout=timeout)
         except BaseException:
-            try:
-                os.killpg(os.getpgid(proc.pid), signal.SIGTERM)
-            except Exception:
-                proc.kill()
+            _kill_process_tree(proc)
             proc.wait()
             raise
 

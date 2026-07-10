@@ -9,6 +9,7 @@ a trajectory instance is provided.
 import json
 import logging
 import os as _os
+import platform as _platform
 import re
 import shlex
 import signal as _signal
@@ -25,14 +26,43 @@ from common.session_manager import create_session_manager
 from . import paths as _paths
 from .paths import REPO_DIR as _REPO_DIR, WORKSPACE_ROOT as _WORKSPACE_ROOT
 
+_IS_WINDOWS = _platform.system() == "Windows"
+
 
 def _set_pdeathsig() -> None:
-    """Preexec hook: ask the kernel to send SIGTERM to this child when its parent dies (including SIGKILL).  Called after fork() but before exec() so it runs in the child's address space.  Silently ignored on non-Linux."""
+    """Preexec hook: ask the kernel to send SIGTERM to this child when its parent dies (including SIGKILL).  Called after fork() but before exec() so it runs in the child's address space.  Silently ignored on non-Linux.  Only ever passed as ``preexec_fn`` on POSIX (see ``generate``); Windows never touches this."""
     try:
         import ctypes, signal as _s
         ctypes.CDLL("libc.so.6").prctl(1, _s.SIGTERM)  # PR_SET_PDEATHSIG = 1
     except Exception:
         pass
+
+
+def _kill_process_tree(proc: subprocess.Popen) -> None:
+    """Kill *proc* and its full descendant tree, cross-platform.
+
+    POSIX: the child was launched via ``start_new_session=True`` so it
+    leads its own process group; killpg reaches every descendant.
+    Windows: the child was launched with ``CREATE_NEW_PROCESS_GROUP``
+    (``preexec_fn``/``killpg`` don't exist there); ``taskkill /T`` walks
+    the process tree by PID instead.
+    """
+    if _IS_WINDOWS:
+        try:
+            res = subprocess.run(
+                ["taskkill", "/PID", str(proc.pid), "/T", "/F"],
+                capture_output=True,
+                check=False,
+            )
+            if res.returncode != 0:
+                proc.kill()
+        except Exception:
+            proc.kill()
+    else:
+        try:
+            _os.killpg(_os.getpgid(proc.pid), _signal.SIGTERM)
+        except Exception:
+            proc.kill()
 
 
 # ----------------------------------------------------------------------------
@@ -377,29 +407,32 @@ class LLMClient:
                     cmd = shlex.split(self.tool) + trace_ctx.extra_args
 
                     # Sub-agent runs in the project repo directory.
-                    # start_new_session=True puts the child in its own process
-                    # group so killpg kills the whole tree on parent exit.
-                    # preexec_fn=_set_pdeathsig handles the SIGKILL case via
-                    # PR_SET_PDEATHSIG (kernel sends SIGTERM to child on parent death).
-                    proc = subprocess.Popen(
-                        cmd,
+                    # POSIX: start_new_session=True puts the child in its own
+                    # process group so killpg kills the whole tree on parent
+                    # exit; preexec_fn=_set_pdeathsig handles the SIGKILL case
+                    # via PR_SET_PDEATHSIG (kernel sends SIGTERM to child on
+                    # parent death). Neither is supported on Windows, where
+                    # CREATE_NEW_PROCESS_GROUP + taskkill /T (see
+                    # _kill_process_tree) plays the same role.
+                    popen_kwargs: Dict[str, Any] = dict(
                         stdin=trace_ctx.stdin,
                         stdout=subprocess.PIPE,
                         stderr=subprocess.PIPE,
                         text=True,
                         env=trace_ctx.env,
                         cwd=_REPO_DIR,
-                        start_new_session=True,
-                        preexec_fn=_set_pdeathsig,
                     )
+                    if _IS_WINDOWS:
+                        popen_kwargs["creationflags"] = subprocess.CREATE_NEW_PROCESS_GROUP
+                    else:
+                        popen_kwargs["start_new_session"] = True
+                        popen_kwargs["preexec_fn"] = _set_pdeathsig
+                    proc = subprocess.Popen(cmd, **popen_kwargs)
                     try:
                         stdout, stderr = proc.communicate(timeout=timeout)
                     except BaseException:
-                        # Kill the entire process group (agent + any pytest children)
-                        try:
-                            _os.killpg(_os.getpgid(proc.pid), _signal.SIGTERM)
-                        except Exception:
-                            proc.kill()
+                        # Kill the entire process tree (agent + any pytest children)
+                        _kill_process_tree(proc)
                         proc.wait()
                         raise
                     result = subprocess.CompletedProcess(
