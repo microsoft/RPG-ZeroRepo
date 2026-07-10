@@ -49,11 +49,13 @@ def _kill_process_tree(proc: subprocess.Popen) -> None:
     """
     if _IS_WINDOWS:
         try:
-            subprocess.run(
+            res = subprocess.run(
                 ["taskkill", "/PID", str(proc.pid), "/T", "/F"],
                 capture_output=True,
                 check=False,
             )
+            if res.returncode != 0:
+                proc.kill()
         except Exception:
             proc.kill()
     else:
