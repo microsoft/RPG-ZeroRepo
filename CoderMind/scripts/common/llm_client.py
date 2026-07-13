@@ -168,8 +168,24 @@ def detect_agent_type(cmd: Optional[str] = None) -> str:
     if not cmd or cmd == _PLACEHOLDER_LITERAL:
         return "unknown"
 
-    first_token = cmd.strip().split()[0]
-    return _CLI_TO_AGENT.get(first_token, "unknown")
+    try:
+        first_token = shlex.split(cmd, posix=False)[0]
+    except (IndexError, ValueError):
+        parts = cmd.strip().split(maxsplit=1)
+        if not parts:
+            return "unknown"
+        first_token = parts[0]
+
+    # On Windows, cmd may be a quoted, backslash-separated path with an
+    # executable suffix (e.g. "C:\tools\claude.cmd" or claude.exe) instead of
+    # the bare "claude" that _CLI_TO_AGENT is keyed on.
+    executable_name = first_token.strip("\"'").replace("\\", "/").rsplit("/", 1)[-1].lower()
+    for suffix in (".cmd", ".exe", ".bat", ".ps1"):
+        if executable_name.endswith(suffix):
+            executable_name = executable_name[: -len(suffix)]
+            break
+
+    return _CLI_TO_AGENT.get(executable_name, "unknown")
 
 
 # ============================================================================
