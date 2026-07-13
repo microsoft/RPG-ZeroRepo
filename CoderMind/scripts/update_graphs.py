@@ -533,6 +533,71 @@ def _focused_graph_hierarchy(
                 return " / ".join(parts)
         return " / ".join(group_parts + ([feature_name] if feature_name else []))
 
+    def semantic_tree_kind(node: dict[str, Any]) -> str:
+        node_type = str(node.get("node_type") or node.get("type") or "").lower()
+        if node_type in {"feature_group", "category", "functional_area", "root"}:
+            return node_type
+        return "feature"
+
+    def semantic_full_path_parts(node: dict[str, Any], group_parts: list[str], feature_name: str) -> list[str]:
+        return _hierarchy_segments(feature_path_text(node, group_parts, feature_name))
+
+    semantic_node_by_path: dict[str, dict[str, Any]] = {}
+    for semantic_node in semantic_nodes:
+        semantic_name = str(semantic_node.get("name") or semantic_node.get("symbol") or semantic_node.get("node_id") or "")
+        semantic_parts = semantic_full_path_parts(semantic_node, _semantic_hierarchy_parts(semantic_node), semantic_name)
+        if semantic_parts:
+            semantic_node_by_path.setdefault(" / ".join(semantic_parts), semantic_node)
+
+    def merge_semantic_metadata(row: dict[str, Any], node: dict[str, Any], feature_name: str, feature_path: str) -> None:
+        node_id = str(node.get("node_id") or "")
+        link_id = str(node.get("link_id") or _node_link_id("rpg", node_id))
+        row["name"] = feature_name
+        row["feature_name"] = feature_name
+        row["feature_path"] = feature_path
+        row["kind"] = semantic_tree_kind(node)
+        if node_id:
+            row["node_id"] = node_id
+        row["aliases"] = _ordered_unique_text(_listify(row.get("aliases")) + [node_id, link_id, _node_link_id("feature-path", feature_path)])
+        _set_if_present(row, "state", node.get("state"))
+        _set_if_present(row, "mapping_status", node.get("mapping_status"))
+        for key in (
+            "type",
+            "node_type",
+            "path",
+            "breadcrumb",
+            "breadcrumb_path",
+            "changed_files",
+            "hidden_counts",
+            "warning_types",
+            "source",
+            "mapped_code",
+            "mapped_code_node_ids",
+            "mapped_code_link_ids",
+            "mapped_code_paths",
+            "mapped_code_symbols",
+            "mapped_code_path",
+            "mapped_code_symbol",
+            "mapped_code_count",
+        ):
+            _set_if_present(row, key, node.get(key))
+
+    def append_or_merge_hierarchy_leaf(parent: dict[str, Any], leaf: dict[str, Any]) -> None:
+        children = parent.setdefault("children", [])
+        leaf_id = leaf.get("id")
+        for child in children:
+            if not isinstance(child, dict) or child.get("id") != leaf_id:
+                continue
+            incoming_children = [item for item in _listify(leaf.get("children")) if isinstance(item, dict)]
+            for key, value in leaf.items():
+                if key == "children" or value in (None, ""):
+                    continue
+                child[key] = value
+            for grandchild in incoming_children:
+                _append_hierarchy_leaf(child, grandchild)
+            return
+        children.append(leaf)
+
     def endpoint_group(parent: dict[str, Any], owner_id: str, name: str, kind: str) -> dict[str, Any]:
         return _hierarchy_child(parent, _node_link_id(kind, owner_id), name, kind)
 
@@ -574,19 +639,28 @@ def _focused_graph_hierarchy(
         trail: list[str] = []
         for part in group_parts:
             trail.append(part)
-            group = _hierarchy_child(parent, _node_link_id("feature-path", "/".join(trail)), part, "feature_group")
-            group["feature_name"] = part
-            group["feature_path"] = " / ".join(trail)
+            group_path = " / ".join(trail)
+            group_node = semantic_node_by_path.get(group_path)
+            if group_node:
+                group_node_id = str(group_node.get("node_id") or "")
+                group = _hierarchy_child(parent, str(group_node.get("link_id") or _node_link_id("rpg", group_node_id)), part, semantic_tree_kind(group_node))
+                merge_semantic_metadata(group, group_node, part, group_path)
+            else:
+                group = _hierarchy_child(parent, _node_link_id("feature-path", "/".join(trail)), part, "feature_group")
+                group["feature_name"] = part
+                group["feature_path"] = group_path
             parent = group
+        leaf_feature_path = feature_path_text(node, group_parts, feature_name)
         leaf: dict[str, Any] = {
             "id": link_id,
             "node_id": node_id,
             "name": feature_name,
             "feature_name": feature_name,
-            "feature_path": feature_path_text(node, group_parts, feature_name),
-            "kind": "feature",
+            "feature_path": leaf_feature_path,
+            "kind": semantic_tree_kind(node),
             "state": node.get("state"),
             "mapping_status": node.get("mapping_status"),
+            "aliases": _ordered_unique_text([node_id, link_id, _node_link_id("feature-path", leaf_feature_path)]),
         }
         for key in (
             "type",
@@ -608,7 +682,7 @@ def _focused_graph_hierarchy(
             "mapped_code_count",
         ):
             _set_if_present(leaf, key, node.get(key))
-        _append_hierarchy_leaf(parent, leaf)
+        append_or_merge_hierarchy_leaf(parent, leaf)
 
     root_context_group: Optional[dict[str, Any]] = None
     known_links = {str(node.get("link_id") or "") for node in semantic_nodes}
@@ -678,6 +752,20 @@ def _focused_graph_default_focus(
             return
         hierarchy_paths_by_link.setdefault(str(alias), path_ids)
 
+    semantic_link_by_path: dict[str, str] = {}
+    for node in semantic_nodes:
+        link_id = str(node.get("link_id") or _node_link_id("rpg", node.get("node_id")))
+        feature_name = str(node.get("name") or node.get("symbol") or node.get("node_id") or "")
+        full_parts: list[str] = []
+        for key in ("feature_path", "breadcrumb_path", "breadcrumb", "path"):
+            full_parts = _hierarchy_segments(node.get(key))
+            if full_parts:
+                break
+        if not full_parts:
+            full_parts = _semantic_hierarchy_parts(node) + ([feature_name] if feature_name else [])
+        if full_parts:
+            semantic_link_by_path.setdefault(" / ".join(full_parts), link_id)
+
     semantic_path_ids_by_link: dict[str, list[str]] = {}
     for node in semantic_nodes:
         link_id = str(node.get("link_id") or _node_link_id("rpg", node.get("node_id")))
@@ -685,7 +773,8 @@ def _focused_graph_default_focus(
         path_ids: list[str] = ["focused-graph-root"]
         for part in _semantic_hierarchy_parts(node):
             trail.append(part)
-            path_ids.append(_node_link_id("feature-path", "/".join(trail)))
+            group_path = " / ".join(trail)
+            path_ids.append(semantic_link_by_path.get(group_path) or _node_link_id("feature-path", "/".join(trail)))
         path_ids.append(link_id)
         semantic_path_ids_by_link[link_id] = path_ids
         remember_path(link_id, path_ids)

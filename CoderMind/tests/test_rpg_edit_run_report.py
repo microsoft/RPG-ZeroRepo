@@ -49,6 +49,57 @@ def test_code_result_is_persisted(tmp_path: Path, monkeypatch) -> None:
     assert data == {"success": True, "commit_sha": "abc123"}
 
 
+def test_focused_graph_merges_semantic_group_container() -> None:
+    review = _load_script("rpg_edit_review_hierarchy_test", _SCRIPTS / "rpg_edit" / "review.py")
+    semantic_nodes = [
+        {
+            "node_id": "review edit impact_a8151bb7",
+            "link_id": "rpg-review-edit-impact_a8151bb7",
+            "name": "verify change impact",
+            "type": "feature_group",
+            "node_type": "feature_group",
+            "feature_path": "CoderMind / GraphNavigationAndEditing / analyze edit impact / assess change scope / verify change impact",
+            "state": "mapped",
+        },
+        {
+            "node_id": "collect review suggestions_2e3ac816",
+            "link_id": "rpg-collect-review-suggestions_2e3ac816",
+            "name": "publish embedded adaptive focused graph report",
+            "type": "feature",
+            "feature_path": "CoderMind / GraphNavigationAndEditing / analyze edit impact / assess change scope / verify change impact / publish embedded adaptive focused graph report",
+            "state": "mapped",
+            "changed_files": [{"path": "scripts/rpg_edit/review.py", "diff_anchor": "diff-review"}],
+        },
+    ]
+
+    hierarchy = review._focused_graph_hierarchy(semantic_nodes, [], [], [], {}, [])
+    rows = []
+
+    def walk(row):
+        if isinstance(row, dict):
+            rows.append(row)
+            for child in row.get("children") or []:
+                walk(child)
+
+    walk(hierarchy)
+    verify_nodes = [row for row in rows if row.get("name") == "verify change impact"]
+    old_placeholder = review._node_link_id(
+        "feature-path",
+        "CoderMind / GraphNavigationAndEditing / analyze edit impact / assess change scope / verify change impact",
+    )
+
+    assert len(verify_nodes) == 1
+    assert verify_nodes[0]["id"] == "rpg-review-edit-impact_a8151bb7"
+    assert verify_nodes[0]["node_id"] == "review edit impact_a8151bb7"
+    assert verify_nodes[0]["kind"] == "feature_group"
+    assert any(child.get("id") == "rpg-collect-review-suggestions_2e3ac816" for child in verify_nodes[0]["children"])
+    assert old_placeholder not in {row.get("id") for row in rows}
+
+    default_focus = review._focused_graph_default_focus(semantic_nodes, [], [], [], [])
+    assert "rpg-review-edit-impact_a8151bb7" in default_focus["focused_path_node_ids"]
+    assert old_placeholder not in default_focus["focused_path_node_ids"]
+
+
 def test_apply_result_preserves_rpg_metadata_when_dep_refresh_reuses_backup_ts(tmp_path: Path, monkeypatch) -> None:
     apply = _load_script("rpg_edit_apply_persist_test", _SCRIPTS / "rpg_edit" / "apply.py")
 
@@ -697,7 +748,7 @@ def test_review_report_reconstructs_affected_node_evidence_from_impact(tmp_path:
         assert nodes_view["caps"] == {"primary_rpg_nodes": 20, "primary_code_nodes": 50, "edges": 80}
         assert nodes_view["graph_context"]["current_graph_available"] is True
         assert nodes_view["graph_context"]["current_rpg_nodes"] == 2
-        assert nodes_view["graph_context"]["current_dep_nodes"] == 2
+        assert nodes_view["graph_context"]["current_dep_nodes"] == 3
         assert focused["apply"]["status"] == "dep_refreshed"
         return report_path
 
