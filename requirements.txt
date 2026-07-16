@@ -90,7 +90,7 @@ typing-extensions>=4.15.0
 ollama>=0.5.1
 
 # MCP (Model Context Protocol)
-mcp==1.12.2
+mcp==1.28.1
 
 # Optional evaluation dependencies
 datasets>=3.6.0
