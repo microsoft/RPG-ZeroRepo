@@ -113,6 +113,15 @@ def test_cpp_codegen_prompt_aligns_cmake_command_with_post_verify(monkeypatch, t
     (tmp_path / "CMakeLists.txt").write_text("cmake_minimum_required(VERSION 3.16)\n")
     task = _task("src/tasklite_cli/task.cpp")
 
+    def fake_which(name: str) -> str | None:
+        return {
+            "c++": "/usr/bin/c++",
+            "cmake": "/usr/bin/cmake",
+            "ctest": "/usr/bin/ctest",
+        }.get(name)
+
+    monkeypatch.setattr("decoder_lang.cpp_backend.shutil.which", fake_which)
+
     prompt = batch_prompts.build_tdd_prompt(_state(task), task, tmp_path)
 
     assert "cmake -S . -B build" in prompt

@@ -15,7 +15,7 @@ import os
 import json
 import logging
 from typing import List, Optional, Dict, Any
-from abc import abstractmethod
+from abc import ABC, abstractmethod
 from pathlib import PurePosixPath
 
 from rpg.code_unit import CodeUnit, ParsedFile
@@ -36,7 +36,7 @@ def normalize_path(path: str) -> str:
     return posix_path
 
 
-class RepoNode:
+class RepoNode(ABC):
     """Base class for repository nodes."""
 
     def __init__(self, name: str, path: str):

@@ -1,15 +1,16 @@
 """Tests for the decoder backend registry and Python backend contract.
 
 These tests focus on invariants relied on by code paths that already
-route through :mod:`decoder_lang`. Unsupported methods are asserted to
-raise ``NotImplementedError`` so accidental partial implementations are
-visible.
+route through :mod:`decoder_lang`, including Python-specific environment
+and pytest result handling.
 """
 from __future__ import annotations
 
 import sys
+import types
 import unittest
 from pathlib import Path
+from unittest.mock import Mock, patch
 
 # Make ``scripts/`` importable when these tests are run directly.
 _SCRIPTS_DIR = Path(__file__).resolve().parents[2]
@@ -200,35 +201,133 @@ class CodeStructureTests(unittest.TestCase):
         self.assertIn("SyntaxError", err or "")
 
 
-class StubbedMethodsTests(unittest.TestCase):
-    """Unsupported methods must raise instead of returning bad data."""
+class BackendRuntimeTests(unittest.TestCase):
+    """Python backend build/test environment and pytest parsing."""
 
     def setUp(self) -> None:
         self.backend = get_backend("python")
 
-    def test_detect_env_stub(self) -> None:
-        with self.assertRaises(NotImplementedError):
-            self.backend.detect_env(Path("."))
+    def _fake_test_runner(
+        self,
+        *,
+        python: str | None = "/repo/.cmind-dev-venv/bin/python",
+        venv: Path = Path("/repo/.cmind-dev-venv"),
+        pip_cmd: list[str] | None = None,
+    ) -> types.ModuleType:
+        runner = types.ModuleType("code_gen.test_runner")
+        runner.get_dev_python = Mock(return_value=python)
+        runner.get_dev_venv_path = Mock(return_value=venv)
+        runner.ensure_dev_venv = Mock(return_value=(python is None, venv))
+        runner._build_pip_cmd = Mock(return_value=pip_cmd or ["pip", "install"])
+        return runner
 
-    def test_ensure_env_stub(self) -> None:
-        with self.assertRaises(NotImplementedError):
-            self.backend.ensure_env(Path("."))
+    def test_detect_env_returns_none_without_existing_dev_python(self) -> None:
+        repo_root = Path("/repo")
+        runner = self._fake_test_runner(python=None)
 
-    def test_test_command_stub(self) -> None:
+        with patch.dict(sys.modules, {"code_gen.test_runner": runner}):
+            self.assertIsNone(self.backend.detect_env(repo_root))
+
+        runner.get_dev_python.assert_called_once_with(repo_root.resolve())
+        runner.get_dev_venv_path.assert_not_called()
+
+    def test_detect_env_returns_existing_dev_python_handle(self) -> None:
+        repo_root = Path("/repo")
+        runner = self._fake_test_runner()
+
+        with patch.dict(sys.modules, {"code_gen.test_runner": runner}):
+            env = self.backend.detect_env(repo_root)
+
+        self.assertIsNotNone(env)
+        assert env is not None
+        self.assertEqual(env.project_root, repo_root.resolve())
+        self.assertEqual(env.runtime_executable, "/repo/.cmind-dev-venv/bin/python")
+        self.assertEqual(env.extra["venv"], "/repo/.cmind-dev-venv")
+
+    def test_ensure_env_creates_or_reuses_dev_python_handle(self) -> None:
+        repo_root = Path("/repo")
+        runner = self._fake_test_runner()
+
+        with patch.dict(sys.modules, {"code_gen.test_runner": runner}):
+            env = self.backend.ensure_env(repo_root)
+
+        runner.ensure_dev_venv.assert_called_once_with(repo_root.resolve())
+        runner.get_dev_python.assert_called_once_with(repo_root.resolve())
+        self.assertEqual(env.project_root, repo_root.resolve())
+        self.assertEqual(env.runtime_executable, "/repo/.cmind-dev-venv/bin/python")
+        self.assertEqual(env.extra["venv"], "/repo/.cmind-dev-venv")
+
+    def test_test_command_uses_runtime_and_selectors(self) -> None:
         from decoder_lang.test_result import EnvHandle
-        with self.assertRaises(NotImplementedError):
-            self.backend.test_command(EnvHandle(project_root=Path(".")))
 
-    def test_install_deps_command_stub(self) -> None:
+        env = EnvHandle(project_root=Path("/repo"), runtime_executable="/venv/bin/python")
+        self.assertEqual(
+            self.backend.test_command(env, selectors=["AlphaTests", "test_beta"]),
+            ["/venv/bin/python", "-m", "pytest", "-k", "AlphaTests or test_beta"],
+        )
+
+    def test_test_command_falls_back_to_current_python(self) -> None:
         from decoder_lang.test_result import EnvHandle
-        with self.assertRaises(NotImplementedError):
-            self.backend.install_deps_command(
-                EnvHandle(project_root=Path(".")), deps=["x"],
-            )
 
-    def test_parse_test_output_stub(self) -> None:
-        with self.assertRaises(NotImplementedError):
-            self.backend.parse_test_output("foo", 0)
+        env = EnvHandle(project_root=Path("/repo"))
+        self.assertEqual(self.backend.test_command(env), [sys.executable, "-m", "pytest"])
+
+    def test_install_deps_command_returns_none_for_no_deps(self) -> None:
+        from decoder_lang.test_result import EnvHandle
+
+        env = EnvHandle(project_root=Path("/repo"))
+        self.assertIsNone(self.backend.install_deps_command(env, deps=[]))
+
+    def test_install_deps_command_delegates_to_test_runner(self) -> None:
+        from decoder_lang.test_result import EnvHandle
+
+        repo_root = Path("/repo")
+        runner = self._fake_test_runner(pip_cmd=["uv", "pip", "install", "requests"])
+        env = EnvHandle(project_root=repo_root)
+
+        with patch.dict(sys.modules, {"code_gen.test_runner": runner}):
+            cmd = self.backend.install_deps_command(env, deps=["requests"])
+
+        self.assertEqual(cmd, ["uv", "pip", "install", "requests"])
+        runner._build_pip_cmd.assert_called_once_with(["requests"], repo_root)
+
+    def test_parse_test_output_reports_passing_pytest_output(self) -> None:
+        output = "============================== 3 passed in 0.12s =============================="
+
+        result = self.backend.parse_test_output(output, 0)
+
+        self.assertEqual(result.status, "passed")
+        self.assertEqual(result.exit_code, 0)
+        self.assertEqual(result.passed_count, 3)
+        self.assertEqual(result.failed_count, 0)
+        self.assertEqual(result.error_count, 0)
+        self.assertEqual(result.duration_sec, 0.12)
+        self.assertTrue(result.extra["has_tests_run"])
+
+    def test_parse_test_output_reports_failing_pytest_output(self) -> None:
+        output = (
+            "FAILED tests/test_sample.py::test_bad - AssertionError: no\n"
+            "E   AssertionError: no\n"
+            "========================= 1 failed, 2 passed in 0.50s ========================="
+        )
+
+        result = self.backend.parse_test_output(output, 1)
+
+        self.assertEqual(result.status, "failed")
+        self.assertEqual(result.passed_count, 2)
+        self.assertEqual(result.failed_count, 1)
+        self.assertEqual(result.duration_sec, 0.50)
+        self.assertEqual(result.failures[0].test_id, "tests/test_sample.py")
+        self.assertEqual(result.failures[0].file_path, "tests/test_sample.py")
+        self.assertIn("AssertionError", result.failures[0].long_message)
+
+    def test_parse_test_output_flags_empty_success_as_errored(self) -> None:
+        result = self.backend.parse_test_output("", 0)
+
+        self.assertEqual(result.status, "errored")
+        self.assertEqual(result.error_count, 1)
+        self.assertEqual(result.passed_count, 0)
+        self.assertFalse(result.extra["has_tests_run"])
 
 
 class PromptHintsTests(unittest.TestCase):

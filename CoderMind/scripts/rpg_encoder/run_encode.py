@@ -27,7 +27,51 @@ if str(_script_dir) not in sys.path:
 
 from common.paths import RPG_FILE, RPG_HTML_FILE, WORKSPACE_ROOT, ensure_cmind_dir  # noqa: E402
 from common.rpg_io import atomic_write_rpg  # noqa: E402
+from common.run_events import ArtifactEvent, CommandRun, StepEvent, VerificationEvent  # noqa: E402
+from common.run_report import write_command_report  # noqa: E402
 from common.trajectory import Trajectory  # noqa: E402
+
+
+def _attach_encode_report(result: dict) -> dict:
+    try:
+        dep_summary = []
+        if result.get("dep_nodes") is not None:
+            dep_summary.append(f"nodes={result.get('dep_nodes')}")
+        if result.get("dep_edges") is not None:
+            dep_summary.append(f"edges={result.get('dep_edges')}")
+        if result.get("dep_to_rpg_map_size") is not None:
+            dep_summary.append(f"mapped={result.get('dep_to_rpg_map_size')}")
+        report_path = write_command_report(CommandRun(
+            command="encode",
+            title="CoderMind encode Explain View",
+            status=result.get("status"),
+            summary=[
+                {"label": "repo", "value": result.get("repo_name", "unknown")},
+                {"label": "RPG nodes", "value": result.get("node_count", 0)},
+                {"label": "RPG edges", "value": result.get("edge_count", 0)},
+                {"label": "dep graph", "value": ", ".join(dep_summary) or "not recorded"},
+                {"label": "output", "value": result.get("output_path", "")},
+                {"label": "visualization", "value": result.get("viz_path", result.get("viz_error", ""))},
+                {"label": "trajectory", "value": result.get("trajectory", "")},
+            ],
+            steps=[
+                StepEvent(name="parse_rpg", status="recorded", reason=f"nodes={result.get('node_count', 0)}, edges={result.get('edge_count', 0)}"),
+                StepEvent(name="dep_graph", status="recorded" if dep_summary else "not recorded", reason=", ".join(dep_summary)),
+                StepEvent(name="save_rpg", status="recorded" if result.get("output_path") else "not recorded", reason=result.get("output_path", "")),
+                StepEvent(name="visualize", status="recorded" if result.get("viz_path") else "not recorded", reason=result.get("viz_path") or result.get("viz_error", "")),
+            ],
+            artifacts=[
+                ArtifactEvent(label="rpg_json", path=result.get("output_path")),
+                ArtifactEvent(label="rpg_html", path=result.get("viz_path")),
+                ArtifactEvent(label="trajectory", path=result.get("trajectory")),
+            ],
+            verification=[VerificationEvent(name="encode", status=result.get("status"))],
+            evidence=result,
+        ))
+        result["report_path"] = str(report_path)
+    except Exception as exc:
+        result["report_error"] = str(exc)
+    return result
 
 
 def run_encode(
@@ -54,7 +98,12 @@ def run_encode(
     repo_dir = os.path.abspath(repo_dir)
 
     if not os.path.isdir(repo_dir):
-        return {"status": "error", "error": f"Repository directory not found: {repo_dir}"}
+        return _attach_encode_report({
+            "status": "error",
+            "error": f"Repository directory not found: {repo_dir}",
+            "repo_name": repo_name or os.path.basename(repo_dir) or "unknown",
+            "output_path": output or str(RPG_FILE),
+        })
 
     if repo_name is None:
         repo_name = os.path.basename(repo_dir) or "unknown"
@@ -188,12 +237,18 @@ def run_encode(
         traj.complete(stats)
         stats["trajectory"] = str(traj.trajectory_file)
 
-        return {"status": "success", **stats}
+        return _attach_encode_report({"status": "success", **stats})
 
     except Exception as exc:
         logger.exception("Encoding failed: %s", exc)
         traj.fail(str(exc))
-        return {"status": "error", "error": str(exc), "trajectory": str(traj.trajectory_file)}
+        return _attach_encode_report({
+            "status": "error",
+            "error": str(exc),
+            "repo_name": repo_name,
+            "output_path": output,
+            "trajectory": str(traj.trajectory_file),
+        })
 
 
 def main():

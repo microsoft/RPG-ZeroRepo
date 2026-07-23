@@ -15,10 +15,37 @@ Usage:
 """
 
 import argparse
+import html
 import json
 import sys
 from pathlib import Path
 from typing import Any, Dict, List
+
+
+_D3_ASSET = Path(__file__).resolve().parent / "common" / "assets" / "d3.v7.min.js"
+
+
+def _html_escape(value: Any) -> str:
+    return html.escape(str(value), quote=True)
+
+
+def _json_for_script(value: Any) -> str:
+    data = json.dumps(value, ensure_ascii=False)
+    return (
+        data.replace("&", "\\u0026")
+        .replace("<", "\\u003c")
+        .replace(">", "\\u003e")
+        .replace(" ", "\\u2028")
+        .replace(" ", "\\u2029")
+    )
+
+
+def _inline_d3() -> str:
+    try:
+        source = _D3_ASSET.read_text(encoding="utf-8").strip()
+    except OSError:
+        return ""
+    return source.replace("</script", "<\\/script")
 
 
 def load_json(path: str | Path) -> dict:
@@ -227,13 +254,197 @@ def build_dep_tree(data: dict) -> dict:
             "children": [to_tree(r) for r in sorted(roots)]}
 
 
+def _id_set(values) -> set:
+    if values is None:
+        return set()
+    if isinstance(values, (str, bytes)):
+        values = [values]
+    return {str(value) for value in values if value not in (None, "")}
+
+
+def _collect_tree_ids(node: dict) -> set:
+    ids = set()
+    node_id = node.get("id")
+    if node_id not in (None, ""):
+        ids.add(str(node_id))
+    for child in node.get("children", []) or []:
+        ids.update(_collect_tree_ids(child))
+    return ids
+
+
+def _filter_tree(node: dict, keep_ids: set, *, keep_root: bool = True) -> dict | None:
+    children = [
+        child
+        for child in (_filter_tree(child, keep_ids, keep_root=False) for child in node.get("children", []) or [])
+        if child is not None
+    ]
+    node_id = str(node.get("id", ""))
+    if keep_root or node_id in keep_ids or children:
+        filtered = dict(node)
+        filtered["children"] = children
+        return filtered
+    return None
+
+
+def _expand_rpg_focus(data: dict, rpg_ids: set, dep_ids: set, include_neighbors: bool) -> set:
+    focus = set(rpg_ids)
+    dep_to_rpg = data.get("_dep_to_rpg_map", {}) if isinstance(data.get("_dep_to_rpg_map"), dict) else {}
+    for dep_id, mapped_rpg_ids in dep_to_rpg.items():
+        mapped = _id_set(mapped_rpg_ids)
+        if dep_id in dep_ids:
+            focus.update(mapped)
+        if focus.intersection(mapped):
+            dep_ids.add(str(dep_id))
+
+    if include_neighbors:
+        for edge in get_semantic_edges(data):
+            src = str(edge.get("src", ""))
+            dst = str(edge.get("dst", ""))
+            if src in focus or dst in focus:
+                focus.update([src, dst])
+    return focus
+
+
+def _dep_parent_map(dep_graph: dict) -> Dict[str, str]:
+    parent: Dict[str, str] = {}
+    for edge in dep_graph.get("edges", []) or []:
+        if edge.get("attrs", {}).get("type", "") in ("contains", "CONTAINS"):
+            parent[str(edge.get("dst", ""))] = str(edge.get("src", ""))
+    return {child: par for child, par in parent.items() if child and par}
+
+
+def _expand_dep_focus(data: dict, rpg_ids: set, dep_ids: set, include_neighbors: bool) -> set:
+    dep_graph = data.get("dep_graph", {}) if isinstance(data.get("dep_graph"), dict) else {}
+    raw_nodes = dep_graph.get("nodes", {}) if isinstance(dep_graph.get("nodes"), dict) else {}
+    focus = set(dep_ids)
+    dep_to_rpg = data.get("_dep_to_rpg_map", {}) if isinstance(data.get("_dep_to_rpg_map"), dict) else {}
+    for dep_id, mapped_rpg_ids in dep_to_rpg.items():
+        if rpg_ids.intersection(_id_set(mapped_rpg_ids)):
+            focus.add(str(dep_id))
+    for dep_id, attrs in raw_nodes.items():
+        if not isinstance(attrs, dict):
+            continue
+        mapped = _id_set(attrs.get("rpg_nodes"))
+        if mapped.intersection(rpg_ids):
+            focus.add(str(dep_id))
+        if str(dep_id) in focus:
+            rpg_ids.update(mapped)
+
+    if include_neighbors:
+        for edge in dep_graph.get("edges", []) or []:
+            edge_type = edge.get("attrs", {}).get("type", "")
+            if edge_type in ("contains", "CONTAINS"):
+                continue
+            src = str(edge.get("src", ""))
+            dst = str(edge.get("dst", ""))
+            if src in focus or dst in focus:
+                focus.update([src, dst])
+
+    parent = _dep_parent_map(dep_graph)
+    for dep_id in list(focus):
+        cur = dep_id
+        while cur in parent:
+            cur = parent[cur]
+            focus.add(cur)
+    for dep_id in list(focus):
+        attrs = raw_nodes.get(dep_id)
+        if isinstance(attrs, dict):
+            rpg_ids.update(_id_set(attrs.get("rpg_nodes")))
+        rpg_ids.update(_id_set(dep_to_rpg.get(dep_id)))
+    return focus
+
+
+def build_focused_graph_data(
+    data: dict,
+    *,
+    rpg_node_ids: List[str] | None = None,
+    dep_node_ids: List[str] | None = None,
+    include_neighbors: bool = True,
+) -> dict:
+    selected_rpg = _id_set(rpg_node_ids)
+    selected_dep = _id_set(dep_node_ids)
+    if not selected_rpg and not selected_dep:
+        return dict(data)
+
+    rpg_focus = _expand_rpg_focus(data, set(selected_rpg), set(selected_dep), include_neighbors)
+    dep_focus = _expand_dep_focus(data, rpg_focus, set(selected_dep), include_neighbors)
+    rpg_focus = _expand_rpg_focus(data, rpg_focus, dep_focus, include_neighbors=False)
+
+    tree = normalize_to_tree(data)
+    filtered_tree = _filter_tree(tree, rpg_focus) or {"id": "__root__", "name": "Focused graph", "children": []}
+    tree_ids = _collect_tree_ids(filtered_tree)
+    matched_rpg = sorted(selected_rpg.intersection(tree_ids))
+
+    semantic_edges = [
+        edge for edge in get_semantic_edges(data)
+        if str(edge.get("src", "")) in tree_ids and str(edge.get("dst", "")) in tree_ids
+    ]
+
+    dep_graph = data.get("dep_graph", {}) if isinstance(data.get("dep_graph"), dict) else {}
+    raw_nodes = dep_graph.get("nodes", {}) if isinstance(dep_graph.get("nodes"), dict) else {}
+    raw_edges = dep_graph.get("edges", []) if isinstance(dep_graph.get("edges"), list) else []
+    filtered_dep_nodes = {dep_id: attrs for dep_id, attrs in raw_nodes.items() if str(dep_id) in dep_focus}
+    filtered_dep_edges = [
+        edge for edge in raw_edges
+        if str(edge.get("src", "")) in dep_focus and str(edge.get("dst", "")) in dep_focus
+    ]
+    dep_ids = {str(dep_id) for dep_id in filtered_dep_nodes}
+    matched_dep = sorted(selected_dep.intersection(dep_ids))
+
+    dep_to_rpg = data.get("_dep_to_rpg_map", {}) if isinstance(data.get("_dep_to_rpg_map"), dict) else {}
+    filtered_map = {}
+    for dep_id, mapped_rpg_ids in dep_to_rpg.items():
+        if str(dep_id) not in dep_ids:
+            continue
+        mapped = [str(rpg_id) for rpg_id in mapped_rpg_ids if str(rpg_id) in tree_ids]
+        if mapped:
+            filtered_map[str(dep_id)] = mapped
+
+    focused = dict(data)
+    if isinstance(data.get("nodes"), list):
+        focused["nodes"] = [
+            dict(node) for node in data["nodes"]
+            if isinstance(node, dict) and str(node.get("id", "")) in tree_ids
+        ]
+    focused["root"] = filtered_tree
+    focused["edges"] = semantic_edges
+    focused["dep_graph"] = {**dep_graph, "nodes": filtered_dep_nodes, "edges": filtered_dep_edges}
+    focused["_dep_to_rpg_map"] = filtered_map
+    focused["_focused_graph"] = {
+        "selected_rpg_nodes": sorted(selected_rpg),
+        "selected_dep_nodes": sorted(selected_dep),
+        "matched_rpg_nodes": matched_rpg,
+        "matched_dep_nodes": matched_dep,
+        "rpg_node_count": len(tree_ids),
+        "dep_node_count": len(dep_ids),
+        "semantic_edge_count": len(semantic_edges),
+        "dep_edge_count": len(filtered_dep_edges),
+    }
+    return focused
+
+
+def generate_focused_html(
+    data: dict,
+    *,
+    rpg_node_ids: List[str] | None = None,
+    dep_node_ids: List[str] | None = None,
+    include_neighbors: bool = True,
+) -> str:
+    return generate_html(build_focused_graph_data(
+        data,
+        rpg_node_ids=rpg_node_ids,
+        dep_node_ids=dep_node_ids,
+        include_neighbors=include_neighbors,
+    ))
+
+
 def generate_html(data: dict) -> str:
     tree = normalize_to_tree(data)
     semantic_edges = get_semantic_edges(data)
     dep = extract_dep_graph(data)
     dep_tree = build_dep_tree(data)
     dep_to_rpg = data.get("_dep_to_rpg_map", {})
-    repo_name = data.get("repo_name", "Unknown")
+    repo_name_html = _html_escape(data.get("repo_name", "Unknown"))
     feat_node_count = count_nodes(tree)
     feat_edge_count = len(semantic_edges)
 
@@ -242,32 +453,35 @@ def generate_html(data: dict) -> str:
     for e in semantic_edges:
         r = e.get("relation", "unknown")
         edge_types[r] = edge_types.get(r, 0) + 1
-    feat_edge_summary = ", ".join(f"{k}: {v}" for k, v in sorted(edge_types.items()))
+    feat_edge_summary = _html_escape(", ".join(f"{k}: {v}" for k, v in sorted(edge_types.items())))
 
     # Dep stats
     dep_node_count = len(dep["nodes"])
     dep_edge_count = len(dep["edges"])
-    dep_edge_summary = ", ".join(f"{k}: {v}" for k, v in sorted(dep["stats"].items()))
+    dep_edge_summary = _html_escape(", ".join(f"{k}: {v}" for k, v in sorted(dep["stats"].items())))
     has_dep = dep_node_count > 0
 
     map_count = sum(len(v) for v in dep_to_rpg.values())
     has_map = len(dep_to_rpg) > 0
 
-    tree_json = json.dumps(tree)
-    edges_json = json.dumps(semantic_edges)
-    dep_nodes_json = json.dumps(dep["nodes"])
-    dep_edges_json = json.dumps(dep["edges"])
-    dep_parent_json = json.dumps(dep["parent_map"])
-    dep_tree_json = json.dumps(dep_tree)
-    dep_to_rpg_json = json.dumps(dep_to_rpg)
+    tree_json = _json_for_script(tree)
+    edges_json = _json_for_script(semantic_edges)
+    dep_nodes_json = _json_for_script(dep["nodes"])
+    dep_edges_json = _json_for_script(dep["edges"])
+    dep_parent_json = _json_for_script(dep["parent_map"])
+    dep_tree_json = _json_for_script(dep_tree)
+    dep_to_rpg_json = _json_for_script(dep_to_rpg)
+    d3_js = _inline_d3()
 
     return f"""<!DOCTYPE html>
 <html lang="en">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>RPG: {repo_name}</title>
-<script src="https://d3js.org/d3.v7.min.js"></script>
+<title>RPG: {repo_name_html}</title>
+<script>
+{d3_js}
+</script>
 <style>
 * {{ margin: 0; padding: 0; box-sizing: border-box; }}
 body {{ background: #0d1117; color: #c9d1d9; font-family: -apple-system, BlinkMacSystemFont,
@@ -353,7 +567,7 @@ svg {{ width: 100vw; height: 100vh; }}
 </head>
 <body>
 <div id="header">
-  <h1>RPG: {repo_name}</h1>
+  <h1>RPG: {repo_name_html}</h1>
   <div id="tabs">
     <button id="tab-feat" class="active" onclick="switchTab('feat')">Feat Graph</button>
     <button id="tab-dep" onclick="switchTab('dep')">Dep Graph</button>
@@ -454,6 +668,17 @@ const depEdgeClassMap = {{
   imports: 'dep-link-imports', invokes: 'dep-link-invokes',
   inherits: 'dep-link-inherits',
 }};
+
+const htmlEscapes = {{
+  '&': '&amp;',
+  '<': '&lt;',
+  '>': '&gt;',
+  '"': '&quot;',
+  "'": '&#39;',
+}};
+function escapeHtml(value) {{
+  return String(value ?? '').replace(/[&<>"']/g, ch => htmlEscapes[ch]);
+}}
 
 const margin = {{ top: 50, right: 200, bottom: 20, left: 80 }};
 const svg = d3.select('#canvas');
@@ -636,17 +861,21 @@ function showTooltipFeat(event, d) {{
   const path = meta.path || '';
   const desc = meta.description || '';
   const connected = semanticEdges.filter(e => e.src === d.data.id || e.dst === d.data.id);
+  const relations = [...new Set(connected.map(e => e.relation || 'unknown'))]
+    .map(escapeHtml).join(', ');
   const edgeInfo = connected.length > 0
-    ? `<div class="tt-edges">${{connected.length}} edge(s): ${{
-        [...new Set(connected.map(e => e.relation))].join(', ')
-      }}</div>` : '';
+    ? `<div class="tt-edges">${{connected.length}} edge(s): ${{relations}}</div>` : '';
+  const typeInfo = tn ? `<div class="tt-type">${{escapeHtml(tn)}}</div>` : '';
+  const pathInfo = path && path !== '.' ? `<div class="tt-path">${{escapeHtml(path)}}</div>` : '';
+  const descInfo = desc ? `<div style="color:#8b949e;font-size:11px;margin-top:2px">${{escapeHtml(desc.slice(0, 200))}}</div>` : '';
+  const collapsedInfo = d._children ? `<div style="color:#1f6feb;font-size:11px">${{d._children.length}} children (collapsed)</div>` : '';
   tip.innerHTML = `
-    <div class="tt-name">${{d.data.name || d.data.id}}</div>
-    ${{tn ? `<div class="tt-type">${{tn}}</div>` : ''}}
-    ${{path && path !== '.' ? `<div class="tt-path">${{path}}</div>` : ''}}
-    ${{desc ? `<div style="color:#8b949e;font-size:11px;margin-top:2px">${{desc.slice(0, 200)}}</div>` : ''}}
+    <div class="tt-name">${{escapeHtml(d.data.name || d.data.id)}}</div>
+    ${{typeInfo}}
+    ${{pathInfo}}
+    ${{descInfo}}
     ${{edgeInfo}}
-    ${{d._children ? `<div style="color:#1f6feb;font-size:11px">${{d._children.length}} children (collapsed)</div>` : ''}}
+    ${{collapsedInfo}}
   `;
   tip.style.display = 'block';
   tip.style.left = (event.clientX + 12) + 'px';
@@ -1290,8 +1519,8 @@ function depDrawHulls() {{
       const tip = document.getElementById('tooltip');
       const descCount = (depAllDescendants[d.id] || new Set()).size;
       tip.innerHTML = `
-        <div class="tt-name">${{d.name || d.id}}</div>
-        <div class="tt-type">${{d.type}}</div>
+        <div class="tt-name">${{escapeHtml(d.name || d.id)}}</div>
+        <div class="tt-type">${{escapeHtml(d.type)}}</div>
         <div style="color:#8b949e;font-size:11px">Click to select · Double-click to collapse (${{descCount}} nodes)</div>
       `;
       tip.style.display = 'block';
@@ -1329,19 +1558,20 @@ function depDrawHulls() {{
 function showTooltipDep(event, d) {{
   const tip = document.getElementById('tooltip');
   const rpgInfo = d.rpg_nodes && d.rpg_nodes.length > 0
-    ? `<div style="color:#79c0ff;font-size:11px;margin-top:2px">RPG nodes: ${{d.rpg_nodes.join(', ')}}</div>` : '';
+    ? `<div style="color:#79c0ff;font-size:11px;margin-top:2px">RPG nodes: ${{d.rpg_nodes.map(escapeHtml).join(', ')}}</div>` : '';
 
   const descCount = d.isCollapsed ? (depAllDescendants[d.id] || new Set()).size : 0;
   const collapseInfo = d.isCollapsed
     ? `<div style="color:#1f6feb;font-size:11px">${{descCount}} nodes collapsed (double-click to expand)</div>` : '';
   const expandInfo = d.hasChildren && !d.isCollapsed
     ? `<div style="color:#8b949e;font-size:11px">Double-click to collapse</div>` : '';
+  const moduleInfo = d.module ? `<div style="color:#8b949e;font-size:11px">${{escapeHtml(d.module)}}</div>` : '';
 
   tip.innerHTML = `
-    <div class="tt-name">${{d.name || d.id}}</div>
-    <div class="tt-type">${{d.type}}</div>
-    <div class="tt-path">${{d.id}}</div>
-    ${{d.module ? `<div style="color:#8b949e;font-size:11px">${{d.module}}</div>` : ''}}
+    <div class="tt-name">${{escapeHtml(d.name || d.id)}}</div>
+    <div class="tt-type">${{escapeHtml(d.type)}}</div>
+    <div class="tt-path">${{escapeHtml(d.id)}}</div>
+    ${{moduleInfo}}
     ${{collapseInfo}}
     ${{expandInfo}}
     ${{rpgInfo}}
@@ -1620,7 +1850,7 @@ function mapHighlight(nodeId, side, event) {{
   const connected = mapEdges.filter(e => side === 'feat' ? e.feat_id === nodeId : e.dep_id === nodeId);
   if (connected.length === 0) {{
     const tip = document.getElementById('tooltip');
-    tip.innerHTML = `<div class="tt-name">${{nodeId}}</div><div class="tt-type" style="color:#484f58">No mapping</div>`;
+    tip.innerHTML = `<div class="tt-name">${{escapeHtml(nodeId)}}</div><div class="tt-type" style="color:#484f58">No mapping</div>`;
     tip.style.display = 'block';
     tip.style.left = (event.clientX + 12) + 'px';
     tip.style.top = (event.clientY - 10) + 'px';
@@ -1651,9 +1881,9 @@ function mapHighlight(nodeId, side, event) {{
 
   const tip = document.getElementById('tooltip');
   const names = side === 'feat'
-    ? connected.map(e => e.dep_id).join('<br>')
-    : connected.map(e => e.feat_id).join('<br>');
-  tip.innerHTML = `<div class="tt-name">${{nodeId}}</div>
+    ? connected.map(e => escapeHtml(e.dep_id)).join('<br>')
+    : connected.map(e => escapeHtml(e.feat_id)).join('<br>');
+  tip.innerHTML = `<div class="tt-name">${{escapeHtml(nodeId)}}</div>
     <div class="tt-type">${{connected.length}} mapping(s)</div>
     <div class="tt-path">${{names}}</div>`;
   tip.style.display = 'block';

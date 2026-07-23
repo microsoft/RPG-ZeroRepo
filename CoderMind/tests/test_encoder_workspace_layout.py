@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import importlib
 import os
+import subprocess
 import sys
 from pathlib import Path
 
@@ -30,6 +31,10 @@ sys.path.insert(0, str(_project_root / "scripts"))
 # ---------------------------------------------------------------------------
 # Fixtures — reload ``common.paths`` against an arbitrary workspace
 # ---------------------------------------------------------------------------
+
+def _git(cwd: Path, *args: str) -> None:
+    subprocess.run(["git", *args], cwd=cwd, check=True, capture_output=True)
+
 
 def _reload_paths_against(workspace: Path):
     """Import / reload ``common.paths`` with ``workspace`` as cwd.
@@ -75,6 +80,30 @@ def workspace_with_repo_subdir(tmp_path, monkeypatch):
     monkeypatch.chdir(ws)
     monkeypatch.delenv("CMIND_WORKSPACE", raising=False)
     return ws
+
+
+@pytest.fixture
+def workspace_inside_git_repo(tmp_path, monkeypatch):
+    git_root = tmp_path / "gitroot"
+    workspace = git_root / "subproject"
+    src = workspace / "src"
+    src.mkdir(parents=True)
+    (workspace / ".cmind").mkdir()
+    (src / "module.py").write_text("def value():\n    return 1\n")
+
+    _git(git_root, "init", "-q", "-b", "main")
+    _git(git_root, "config", "user.email", "test@example.com")
+    _git(git_root, "config", "user.name", "Test User")
+    _git(git_root, "add", ".")
+    _git(git_root, "commit", "-q", "-m", "initial")
+
+    (src / "module.py").write_text("def value():\n    return 2\n")
+    _git(git_root, "add", ".")
+    _git(git_root, "commit", "-q", "-m", "update module")
+
+    monkeypatch.chdir(workspace)
+    monkeypatch.delenv("CMIND_WORKSPACE", raising=False)
+    return git_root, workspace
 
 
 # ---------------------------------------------------------------------------
@@ -229,3 +258,65 @@ def test_update_graphs_auto_detect_ignores_present_repo_subdir(
     assert result == str(workspace_with_repo_subdir)
     # Critically NOT the repo/ subdir
     assert result != str(workspace_with_repo_subdir / "repo")
+
+
+def test_git_workspace_prefix_handles_workspace_inside_git_repo(
+    workspace_inside_git_repo,
+):
+    git_root, workspace = workspace_inside_git_repo
+    _reload_paths_against(workspace)
+    from common.git_utils import git_workspace_prefix
+
+    assert git_workspace_prefix(workspace) == "subproject"
+    assert git_workspace_prefix(git_root) == ""
+
+
+def test_cmd_update_rpg_passes_subdir_adjusted_last_repo_dir(
+    workspace_inside_git_repo,
+    monkeypatch,
+):
+    _, workspace = workspace_inside_git_repo
+    _reload_paths_against(workspace)
+
+    import update_graphs
+    importlib.reload(update_graphs)
+    import rpg_encoder.run_update_rpg as run_update_mod
+
+    data_dir = workspace / ".cmind" / "data"
+    data_dir.mkdir(parents=True)
+    rpg_path = data_dir / "rpg.json"
+    dep_graph_path = data_dir / "dep_graph.json"
+    rpg_path.write_text("{}")
+
+    captured = {}
+
+    def fake_run_update_rpg(*, rpg_file, last_repo_dir, cur_repo_dir, dep_graph_path):
+        last_repo = Path(last_repo_dir)
+        captured["rpg_file"] = rpg_file
+        captured["last_repo_dir"] = last_repo.as_posix()
+        captured["cur_repo_dir"] = cur_repo_dir
+        captured["dep_graph_path"] = dep_graph_path
+        captured["old_file_at_workspace_root"] = (
+            last_repo / "src" / "module.py"
+        ).is_file()
+        captured["nested_subproject_exists"] = (
+            last_repo / "subproject"
+        ).exists()
+        return {"status": "success", "repo_name": "subproject"}
+
+    monkeypatch.setattr(run_update_mod, "run_update_rpg", fake_run_update_rpg)
+    monkeypatch.setattr(update_graphs, "_refresh_rpg_html", lambda _rpg_path: {})
+    monkeypatch.setattr(update_graphs, "_attach_update_report", lambda result: result)
+    monkeypatch.setattr(update_graphs, "_log_hook_call", lambda *_args, **_kwargs: None)
+
+    result = update_graphs.cmd_update_rpg(
+        rpg_path=rpg_path,
+        dep_graph_path=dep_graph_path,
+        workspace_root=str(workspace),
+    )
+
+    assert result["status"] == "success"
+    assert captured["last_repo_dir"].endswith("/subproject")
+    assert captured["cur_repo_dir"] == str(workspace)
+    assert captured["old_file_at_workspace_root"] is True
+    assert captured["nested_subproject_exists"] is False
