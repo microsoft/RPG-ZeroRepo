@@ -27,14 +27,17 @@ if str(_script_dir) not in sys.path:
 
 from common.paths import RPG_FILE, RPG_HTML_FILE, WORKSPACE_ROOT, ensure_cmind_dir  # noqa: E402
 from common.rpg_io import atomic_write_rpg  # noqa: E402
+from common.run_events import record_run, record_stage  # noqa: E402
 from common.trajectory import Trajectory  # noqa: E402
 
 
-def run_encode(
+def _run_encode(
     repo_dir: str | None = None,
     repo_name: str | None = None,
     output: str | None = None,
     max_exclude_votes: int = 1,
+    *,
+    run_id: str,
 ) -> dict:
     """Run full RPG encode and return result dict.
 
@@ -69,7 +72,12 @@ def run_encode(
 
     # Initialize trajectory
     traj = Trajectory("encode", base_dir=Path(repo_dir))
-    traj.start({"repo_dir": repo_dir, "repo_name": repo_name, "output_path": output})
+    traj.start({
+        "run_id": run_id,
+        "repo_dir": repo_dir,
+        "repo_name": repo_name,
+        "output_path": output,
+    })
 
     try:
         from rpg_encoder.rpg_encoding import RPGParser
@@ -78,88 +86,101 @@ def run_encode(
         step_parse = traj.add_step("parse_rpg", "Parse RPG from repository (repo info, exclude files, parse features, refactor)")
         traj.start_step(step_parse.step_id)
 
-        parser = RPGParser(
-            repo_dir=repo_dir,
-            repo_name=repo_name,
-        )
+        with record_stage(run_id, "encode", "parse_rpg", phase="encoder") as stage_event:
+            parser = RPGParser(
+                repo_dir=repo_dir,
+                repo_name=repo_name,
+            )
 
-        # Pass trajectory to parser's LLM client for recording LLM calls
-        parser.llm_client.set_trajectory(traj, step_parse.step_id)
+            # Pass trajectory to parser's LLM client for recording LLM calls
+            parser.llm_client.set_trajectory(traj, step_parse.step_id)
 
-        rpg, feature_tree, skeleton_info = parser.parse_rpg_from_repo(
-            save_path=output,
-            max_exclude_votes=max_exclude_votes,
-        )
+            rpg, feature_tree, skeleton_info = parser.parse_rpg_from_repo(
+                save_path=output,
+                max_exclude_votes=max_exclude_votes,
+            )
 
-        traj.complete_step(step_parse.step_id, {
-            "node_count": len(rpg.nodes),
-            "edge_count": len(rpg.edges),
-        })
+            parse_stats = {
+                "node_count": len(rpg.nodes),
+                "edge_count": len(rpg.edges),
+            }
+            traj.complete_step(step_parse.step_id, parse_stats)
+            stage_event.note(**parse_stats)
 
         # Step 2: Build dependency graph
         step_dep = traj.add_step("dep_graph", "Build AST-level dependency graph")
         traj.start_step(step_dep.step_id)
 
         dep_graph_stats = {}
-        try:
-            rpg.parse_dep_graph(repo_dir)
-            if rpg.dep_graph:
-                # The dep_graph is embedded in rpg.json by ``rpg.to_dict()``
-                # (the default is ``include_dep_graph=True``), so we no
-                # longer write a standalone ``dep_graph.json``. Single
-                # source of truth eliminates the encoder-vs-hook drift
-                # that used to bite ``RPGService.load`` when the two files
-                # disagreed.  Legacy on-disk ``dep_graph.json`` files keep
-                # loading via ``RPGService.load``'s compat path.
-                dep_graph_stats = {
-                    "dep_nodes": rpg.dep_graph.G.number_of_nodes(),
-                    "dep_edges": rpg.dep_graph.G.number_of_edges(),
-                    "dep_to_rpg_map_size": len(rpg._dep_to_rpg_map),
-                }
-            traj.complete_step(step_dep.step_id, dep_graph_stats)
-        except Exception as exc:
-            logger.warning("Failed to update dependency graph: %s", exc)
-            traj.fail_step(step_dep.step_id, str(exc))
+        with record_stage(run_id, "encode", "dep_graph", phase="encoder") as stage_event:
+            try:
+                rpg.parse_dep_graph(repo_dir)
+                if rpg.dep_graph:
+                    # The dep_graph is embedded in rpg.json by ``rpg.to_dict()``
+                    # (the default is ``include_dep_graph=True``), so we no
+                    # longer write a standalone ``dep_graph.json``. Single
+                    # source of truth eliminates the encoder-vs-hook drift
+                    # that used to bite ``RPGService.load`` when the two files
+                    # disagreed.  Legacy on-disk ``dep_graph.json`` files keep
+                    # loading via ``RPGService.load``'s compat path.
+                    dep_graph_stats = {
+                        "dep_nodes": rpg.dep_graph.G.number_of_nodes(),
+                        "dep_edges": rpg.dep_graph.G.number_of_edges(),
+                        "dep_to_rpg_map_size": len(rpg._dep_to_rpg_map),
+                    }
+                traj.complete_step(step_dep.step_id, dep_graph_stats)
+                stage_event.note(**dep_graph_stats)
+            except Exception as exc:
+                logger.warning("Failed to update dependency graph: %s", exc)
+                traj.fail_step(step_dep.step_id, str(exc))
+                stage_event.status = "failed"
+                stage_event.error = {"type": type(exc).__name__, "message": str(exc)}
 
         # Step 3: Save RPG to disk
         step_save = traj.add_step("save_rpg", "Save RPG to disk")
         traj.start_step(step_save.step_id)
 
-        result_data = rpg.to_dict()
+        with record_stage(run_id, "encode", "save_rpg", phase="encoder") as stage_event:
+            result_data = rpg.to_dict()
 
-        # Atomic write of the central pipeline artefact. A killed
-        # encode used to truncate rpg.json and brick downstream
-        # stages (skeleton / func_design / code_gen all read it);
-        # now the previous good rpg.json survives any interrupted
-        # write.
-        atomic_write_rpg(output, result_data, indent=2, ensure_ascii=False)
+            # Atomic write of the central pipeline artefact. A killed
+            # encode used to truncate rpg.json and brick downstream
+            # stages (skeleton / func_design / code_gen all read it);
+            # now the previous good rpg.json survives any interrupted
+            # write.
+            atomic_write_rpg(output, result_data, indent=2, ensure_ascii=False)
 
-        output_size = os.path.getsize(output)
-        traj.complete_step(step_save.step_id, {
-            "output_path": output,
-            "output_size_bytes": output_size,
-        })
+            output_size = os.path.getsize(output)
+            traj.complete_step(step_save.step_id, {
+                "output_path": output,
+                "output_size_bytes": output_size,
+            })
+            stage_event.note(output_size_bytes=output_size)
 
         # Step 4: Generate visualization HTML
         step_viz = traj.add_step("visualize", "Generate interactive visualization HTML")
         traj.start_step(step_viz.step_id)
 
         viz_output = None
-        try:
-            from rpg_visualize import load_rpg, generate_html
+        with record_stage(run_id, "encode", "visualize", phase="encoder") as stage_event:
+            try:
+                from rpg_visualize import load_rpg, generate_html
 
-            viz_data = load_rpg(output)
-            html_content = generate_html(viz_data)
-            # rpg.html is a user-facing artefact: keep it in the
-            # workspace's .cmind/reports/ rather than next to the
-            # machine-side rpg.json under ~/.cmind/workspaces/<workspace-id>/.
-            RPG_HTML_FILE.parent.mkdir(parents=True, exist_ok=True)
-            viz_output = str(RPG_HTML_FILE)
-            RPG_HTML_FILE.write_text(html_content, encoding="utf-8")
-            traj.complete_step(step_viz.step_id, {"viz_path": viz_output})
-        except Exception as viz_exc:
-            logger.warning("Failed to generate visualization: %s", viz_exc)
-            traj.fail_step(step_viz.step_id, str(viz_exc))
+                viz_data = load_rpg(output)
+                html_content = generate_html(viz_data)
+                # rpg.html is a user-facing artefact: keep it in the
+                # workspace's .cmind/reports/ rather than next to the
+                # machine-side rpg.json under ~/.cmind/workspaces/<workspace-id>/.
+                RPG_HTML_FILE.parent.mkdir(parents=True, exist_ok=True)
+                viz_output = str(RPG_HTML_FILE)
+                RPG_HTML_FILE.write_text(html_content, encoding="utf-8")
+                traj.complete_step(step_viz.step_id, {"viz_path": viz_output})
+                stage_event.note(viz_path=viz_output)
+            except Exception as viz_exc:
+                logger.warning("Failed to generate visualization: %s", viz_exc)
+                traj.fail_step(step_viz.step_id, str(viz_exc))
+                stage_event.status = "failed"
+                stage_event.error = {"type": type(viz_exc).__name__, "message": str(viz_exc)}
 
         serialized_edges = result_data.get("edges", [])
         edge_count = len(serialized_edges) if isinstance(serialized_edges, list) else 0
@@ -194,6 +215,36 @@ def run_encode(
         logger.exception("Encoding failed: %s", exc)
         traj.fail(str(exc))
         return {"status": "error", "error": str(exc), "trajectory": str(traj.trajectory_file)}
+
+
+def run_encode(
+    repo_dir: str | None = None,
+    repo_name: str | None = None,
+    output: str | None = None,
+    max_exclude_votes: int = 1,
+) -> dict:
+    """Run a full encode while recording its run and stage lifecycle."""
+    with record_run("encode", trigger="script") as run_event:
+        result = _run_encode(
+            repo_dir=repo_dir,
+            repo_name=repo_name,
+            output=output,
+            max_exclude_votes=max_exclude_votes,
+            run_id=run_event.run_id,
+        )
+        if result.get("status") != "success":
+            run_event.status = "failed"
+            run_event.error = {
+                "type": "EncodeError",
+                "message": str(result.get("error", "Encoding failed")),
+            }
+        else:
+            run_event.note(
+                node_count=result.get("node_count", 0),
+                edge_count=result.get("edge_count", 0),
+            )
+        result["run_id"] = run_event.run_id
+        return result
 
 
 def main():

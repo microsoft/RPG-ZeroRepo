@@ -59,11 +59,14 @@ def _log_tool_call(tool_name: str, params: dict, result_summary: dict, duration_
         MCP_CALLS_LOG.parent.mkdir(parents=True, exist_ok=True)
         record = {
             "ts": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+            "run_id": os.environ.get("CMIND_RUN_ID"),
+            "stage_id": os.environ.get("CMIND_STAGE_ID"),
             "tool": tool_name,
             "params": params,
             **result_summary,
             "duration_ms": duration_ms,
         }
+        record = {key: value for key, value in record.items() if value is not None}
         with open(MCP_CALLS_LOG, "a", encoding="utf-8") as f:
             f.write(json.dumps(record, ensure_ascii=False) + "\n")
     except Exception:

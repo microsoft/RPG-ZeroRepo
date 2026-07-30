@@ -20,7 +20,12 @@ SCRIPTS_DIR = Path(__file__).resolve().parent.parent
 if str(SCRIPTS_DIR) not in sys.path:
     sys.path.insert(0, str(SCRIPTS_DIR))
 
-from common.paths import REPO_RPG_FILE  # noqa: E402
+from common.paths import REPO_RPG_FILE, RPG_EDIT_LOCATE_FILE  # noqa: E402
+from common.rpg_io import atomic_write_rpg  # noqa: E402
+
+
+def _write_locate_result(result: dict) -> None:
+    atomic_write_rpg(RPG_EDIT_LOCATE_FILE, result, indent=2, ensure_ascii=False)
 
 
 def _build_tree_summary(svc, max_depth: int = 3, max_lines: int = 150) -> List[str]:
@@ -198,6 +203,7 @@ def main():
     # when search results are poor (e.g. editing features that don't exist yet).
     tree_lines = _build_tree_summary(svc)
     output["tree_summary"] = tree_lines
+    _write_locate_result(output)
 
     if args.json:
         print(json.dumps(output, indent=2, ensure_ascii=False))

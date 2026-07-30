@@ -12,7 +12,16 @@ SCRIPTS_DIR = Path(__file__).resolve().parent.parent
 if str(SCRIPTS_DIR) not in sys.path:
     sys.path.insert(0, str(SCRIPTS_DIR))
 
-from common.paths import REPO_RPG_FILE, DEP_GRAPH_FILE  # noqa: E402
+from common.paths import (  # noqa: E402
+    DEP_GRAPH_FILE,
+    REPO_RPG_FILE,
+    RPG_EDIT_VALIDATE_FILE,
+)
+from common.rpg_io import atomic_write_rpg  # noqa: E402
+
+
+def _write_validate_result(result: dict) -> None:
+    atomic_write_rpg(RPG_EDIT_VALIDATE_FILE, result, indent=2, ensure_ascii=False)
 
 
 def main():
@@ -31,6 +40,7 @@ def main():
     if not args.rpg.exists():
         result = {"type": "error", "error_code": "rpg_not_found",
                   "message": f"RPG file not found: {args.rpg}"}
+        _write_validate_result(result)
         print(json.dumps(result) if args.json else f"Error: {result['message']}")
         return 1
 
@@ -40,6 +50,7 @@ def main():
     except Exception as e:
         result = {"type": "error", "error_code": "rpg_load_failed",
                   "message": f"Failed to load RPG: {e}"}
+        _write_validate_result(result)
         print(json.dumps(result) if args.json else f"Error: {result['message']}")
         return 1
 
@@ -52,6 +63,7 @@ def main():
                       "Run /cmind.encode to (re)build it; the embedded "
                       "dep_graph rides inside rpg.json."
                   )}
+        _write_validate_result(result)
         print(json.dumps(result) if args.json else f"Error: {result['message']}")
         return 1
 
@@ -64,6 +76,7 @@ def main():
         "dep_to_rpg": len(svc.rpg._dep_to_rpg_map),
         "feature_to_dep": len(svc.rpg._feature_to_dep_map),
     }
+    _write_validate_result(result)
     print(json.dumps(result, indent=2) if args.json else
           f"Ready: {result['nodes']} nodes, dep_graph={'yes' if has_dep_graph else 'no'}")
     return 0

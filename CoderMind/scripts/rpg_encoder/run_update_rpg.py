@@ -32,6 +32,7 @@ from common.paths import (  # noqa: E402
     WORKSPACE_ROOT,
 )
 from common.rpg_io import atomic_write_rpg  # noqa: E402
+from common.run_events import record_run, record_stage  # noqa: E402
 
 
 def _count_serialized_items(value: Any) -> int:
@@ -100,13 +101,15 @@ def _serialized_dep_to_rpg_map_size(data: dict[str, Any]) -> int:
     return 0
 
 
-def run_update_rpg(
+def _run_update_rpg(
     rpg_file: str,
     last_repo_dir: str,
     cur_repo_dir: str | None = None,
     output: str | None = None,
     dep_graph_path: str | None = None,
     max_exclude_votes: int = 1,
+    *,
+    run_id: str,
 ) -> dict:
     """Run incremental RPG update and return result dict.
 
@@ -154,33 +157,41 @@ def run_update_rpg(
         from rpg_encoder.rpg_evolution import RPGEvolution
         from common.git_utils import read_head
 
-        # Load existing RPG
-        with open(rpg_file, "r", encoding="utf-8") as fh:
-            data = json.load(fh)
+        with record_stage(run_id, "update_rpg", "load_rpg", phase="encoder") as stage_event:
+            # Load existing RPG
+            with open(rpg_file, "r", encoding="utf-8") as fh:
+                data = json.load(fh)
 
-        repo_name = data.get("repo_name", "unknown")
-        repo_info = data.get("repo_info", "")
+            repo_name = data.get("repo_name", "unknown")
+            repo_info = data.get("repo_info", "")
 
-        # Parse RPG from saved data -- handle tree, flat, and nested formats
-        rpg_data = data.get("rpg", {})
-        if isinstance(rpg_data, dict) and "structure" in rpg_data:
-            rpg = RPG.from_dict(rpg_data["structure"])
-            feature_tree = rpg_data.get("feature_tree", [])
-        elif "root" in data or "nodes" in data:
-            rpg = RPG.from_dict(data)
-            feature_tree = rpg.get_functionality_graph() if rpg else []
-        else:
-            return {"status": "error", "error": "Invalid RPG file format."}
+            # Parse RPG from saved data -- handle tree, flat, and nested formats
+            rpg_data = data.get("rpg", {})
+            if isinstance(rpg_data, dict) and "structure" in rpg_data:
+                rpg = RPG.from_dict(rpg_data["structure"])
+                feature_tree = rpg_data.get("feature_tree", [])
+            elif "root" in data or "nodes" in data:
+                rpg = RPG.from_dict(data)
+                feature_tree = rpg.get_functionality_graph() if rpg else []
+            else:
+                raise ValueError("Invalid RPG file format.")
 
-        rpg.repo_info = repo_info
-        rpg.excluded_files = data.get("excluded_files", [])
+            rpg.repo_info = repo_info
+            rpg.excluded_files = data.get("excluded_files", [])
 
-        # Record pre-update stats + previous git meta so we can report
-        # how the sync baseline advanced.
-        pre_nodes = len(rpg.nodes)
-        pre_edges = _serialized_feature_edges(data)
-        pre_dep_stats = _serialized_dep_stats(data)
-        pre_commit = (rpg.git_meta or {}).get("head_commit")
+            # Record pre-update stats + previous git meta so we can report
+            # how the sync baseline advanced.
+            pre_nodes = len(rpg.nodes)
+            pre_edges = _serialized_feature_edges(data)
+            pre_dep_stats = _serialized_dep_stats(data)
+            pre_commit = (rpg.git_meta or {}).get("head_commit")
+            stage_event.note(
+                node_count=pre_nodes,
+                edge_count=pre_edges,
+                dep_nodes=pre_dep_stats["nodes"],
+                dep_edges=pre_dep_stats["edges"],
+                previous_commit=pre_commit,
+            )
 
         # === Step 1: LLM-driven feature graph refactor ===
         # ``dep_graph_save_path=None``: the dep_graph rides inside
@@ -188,17 +199,19 @@ def run_update_rpg(
         # ``RPG.to_dict`` and persisted by the ``atomic_write_rpg`` below).
         # The legacy standalone ``dep_graph.json`` is no longer produced;
         # readers tolerate its absence and use the embedded copy.
-        updated_rpg = RPGEvolution.process_diff(
-            repo_name=repo_name,
-            repo_info=repo_info,
-            save_path="",  # Don't save inside process_diff; we save below in unified format
-            last_repo_dir=last_repo_dir,
-            cur_repo_dir=cur_repo_dir,
-            last_rpg=rpg,
-            last_feature_tree=feature_tree,
-            update_dep_graph=True,
-            max_exclude_votes=max_exclude_votes,
-        )
+        with record_stage(run_id, "update_rpg", "process_diff", phase="encoder") as stage_event:
+            updated_rpg = RPGEvolution.process_diff(
+                repo_name=repo_name,
+                repo_info=repo_info,
+                save_path="",  # Don't save inside process_diff; we save below in unified format
+                last_repo_dir=last_repo_dir,
+                cur_repo_dir=cur_repo_dir,
+                last_rpg=rpg,
+                last_feature_tree=feature_tree,
+                update_dep_graph=True,
+                max_exclude_votes=max_exclude_votes,
+            )
+            stage_event.note(node_count=len(updated_rpg.nodes), edge_count=len(updated_rpg.edges))
 
         # === Step 2: Align meta.path on freshly-added feature nodes ===
         # process_diff generates feature nodes via LLM; the LLM emits
@@ -209,17 +222,21 @@ def run_update_rpg(
         # the difference between "feature nodes are present" and
         # "feature nodes are queryable via the rpg-tools MCP server".
         enrich_stats: dict = {}
-        try:
-            svc = RPGService(updated_rpg)
-            # _rpg_dir is needed by enrich_from_code for relative path math.
-            svc._rpg_dir = Path(rpg_file).parent.resolve()
-            enrich_stats = svc.enrich_from_code(
-                code_dir=cur_repo_dir,
-                align_only=True,
-                skip_dep_rebuild=True,  # dep_graph already fresh from process_diff
-            )
-        except Exception as exc:
-            logger.warning("enrich_from_code(align_only=True) failed: %s", exc)
+        with record_stage(run_id, "update_rpg", "align_paths", phase="encoder") as stage_event:
+            try:
+                svc = RPGService(updated_rpg)
+                # _rpg_dir is needed by enrich_from_code for relative path math.
+                svc._rpg_dir = Path(rpg_file).parent.resolve()
+                enrich_stats = svc.enrich_from_code(
+                    code_dir=cur_repo_dir,
+                    align_only=True,
+                    skip_dep_rebuild=True,  # dep_graph already fresh from process_diff
+                )
+                stage_event.note(**enrich_stats)
+            except Exception as exc:
+                logger.warning("enrich_from_code(align_only=True) failed: %s", exc)
+                stage_event.status = "failed"
+                stage_event.error = {"type": type(exc).__name__, "message": str(exc)}
 
         # === Step 3: Advance meta.git to the current workspace HEAD ===
         # The pre-commit hook reads this on the next commit and takes
@@ -227,19 +244,23 @@ def run_update_rpg(
         # this step would force every subsequent commit-hook run back
         # to a full rebuild (rebase / diverged path).
         meta_git_advanced = False
-        try:
-            ws_root = WORKSPACE_ROOT
-            current = read_head(ws_root)
-            if current:
-                updated_rpg.set_git_meta(
-                    head_commit=current["head_commit"],
-                    head_short=current["head_short"],
-                    head_branch=current["head_branch"],
-                    head_timestamp=current["head_timestamp"],
-                )
-                meta_git_advanced = True
-        except Exception as exc:
-            logger.warning("set_git_meta after update_rpg failed: %s", exc)
+        with record_stage(run_id, "update_rpg", "advance_git", phase="encoder") as stage_event:
+            try:
+                ws_root = WORKSPACE_ROOT
+                current = read_head(ws_root)
+                if current:
+                    updated_rpg.set_git_meta(
+                        head_commit=current["head_commit"],
+                        head_short=current["head_short"],
+                        head_branch=current["head_branch"],
+                        head_timestamp=current["head_timestamp"],
+                    )
+                    meta_git_advanced = True
+                stage_event.note(meta_git_advanced=meta_git_advanced)
+            except Exception as exc:
+                logger.warning("set_git_meta after update_rpg failed: %s", exc)
+                stage_event.status = "failed"
+                stage_event.error = {"type": type(exc).__name__, "message": str(exc)}
 
         # Save updated RPG in the same format as run_encode (rpg.to_dict()).
         # Atomic write: a kill mid-update used to leave a half-truncated
@@ -247,8 +268,10 @@ def run_update_rpg(
         # ``atomic_write_rpg`` swaps a fully-written ``<output>.tmp`` into
         # place so readers always see either the previous good rpg.json
         # or the new one.
-        result_data = updated_rpg.to_dict()
-        atomic_write_rpg(output, result_data, indent=2, ensure_ascii=False)
+        with record_stage(run_id, "update_rpg", "save_rpg", phase="encoder") as stage_event:
+            result_data = updated_rpg.to_dict()
+            atomic_write_rpg(output, result_data, indent=2, ensure_ascii=False)
+            stage_event.note(output_size_bytes=os.path.getsize(output))
 
         # Collect stats
         post_nodes = len(updated_rpg.nodes)
@@ -285,6 +308,46 @@ def run_update_rpg(
     except Exception as exc:
         logger.exception("Update failed: %s", exc)
         return {"status": "error", "error": str(exc)}
+
+
+def run_update_rpg(
+    rpg_file: str,
+    last_repo_dir: str,
+    cur_repo_dir: str | None = None,
+    output: str | None = None,
+    dep_graph_path: str | None = None,
+    max_exclude_votes: int = 1,
+) -> dict:
+    """Run an incremental RPG update with lifecycle and change metrics."""
+    with record_run("update_rpg", trigger="script") as run_event:
+        result = _run_update_rpg(
+            rpg_file=rpg_file,
+            last_repo_dir=last_repo_dir,
+            cur_repo_dir=cur_repo_dir,
+            output=output,
+            dep_graph_path=dep_graph_path,
+            max_exclude_votes=max_exclude_votes,
+            run_id=run_event.run_id,
+        )
+        if result.get("status") != "success":
+            run_event.status = "failed"
+            run_event.error = {
+                "type": "UpdateRPGError",
+                "message": str(result.get("error", "RPG update failed")),
+            }
+        else:
+            run_event.note(**{
+                key: result[key]
+                for key in (
+                    "node_count", "edge_count", "nodes_delta", "edges_delta",
+                    "dep_nodes", "dep_edges", "dep_nodes_delta", "dep_edges_delta",
+                    "dep_to_rpg_map_size", "aligned", "groups_pathed", "l1_pathed",
+                    "meta_git_advanced", "previous_commit", "new_commit", "functional_areas",
+                )
+                if result.get(key) is not None
+            })
+        result["run_id"] = run_event.run_id
+        return result
 
 
 def main():

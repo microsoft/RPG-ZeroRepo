@@ -14,6 +14,7 @@ import os
 import sys
 import tempfile
 from pathlib import Path
+from types import ModuleType
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -223,9 +224,13 @@ class TestRunEncode:
         assert result["status"] == "error"
         assert "not found" in result["error"]
 
-    def test_success_with_mock(self, tmp_repo, tmp_path):
+    def test_success_with_mock(self, tmp_repo, tmp_path, monkeypatch):
         """Should succeed with mocked RPGParser."""
         from rpg_encoder.run_encode import run_encode
+        import common.run_events as run_events
+
+        events_file = tmp_path / "run_events.jsonl"
+        monkeypatch.setattr(run_events, "EVENTS_FILE", events_file)
 
         mock_rpg = MagicMock()
         mock_rpg.nodes = {"n1": MagicMock(), "n2": MagicMock()}
@@ -240,10 +245,12 @@ class TestRunEncode:
 
         mock_parser = MagicMock()
         mock_parser.parse_rpg_from_repo.return_value = (mock_rpg, [], {})
+        mock_encoding = ModuleType("rpg_encoder.rpg_encoding")
+        mock_encoding.RPGParser = MagicMock(return_value=mock_parser)
 
         output_file = str(tmp_path / "output" / "rpg.json")
 
-        with patch("rpg_encoder.rpg_encoding.RPGParser", return_value=mock_parser):
+        with patch.dict(sys.modules, {"rpg_encoder.rpg_encoding": mock_encoding}):
             with patch("common.llm_api_client.LLMConfig"):
                 result = run_encode(
                     repo_dir=tmp_repo,
@@ -256,6 +263,21 @@ class TestRunEncode:
         assert result["edge_count"] == 1
         assert result["functional_areas"] == 1
         assert os.path.isfile(output_file)
+
+        events = run_events.load_events(events_file)
+        assert [event["event_type"] for event in events] == [
+            "run_started",
+            "stage_started", "stage_finished",
+            "stage_started", "stage_finished",
+            "stage_started", "stage_finished",
+            "stage_started", "stage_finished",
+            "run_finished",
+        ]
+        assert [
+            event["stage"] for event in events if event["event_type"] == "stage_finished"
+        ] == ["parse_rpg", "dep_graph", "save_rpg", "visualize"]
+        assert result["run_id"] == events[0]["run_id"]
+        assert events[-1]["status"] == "success"
 
 
 # ============================================================================

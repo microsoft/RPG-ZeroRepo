@@ -21,6 +21,7 @@ from typing import Any, Dict, List, Optional, Tuple
 from dataclasses import dataclass, field, asdict
 
 from common.llm_types import Memory
+from common.run_events import event_context_environment, record_llm_call
 from common.session_manager import create_session_manager
 from . import paths as _paths
 from .paths import REPO_DIR as _REPO_DIR, WORKSPACE_ROOT as _WORKSPACE_ROOT
@@ -364,6 +365,7 @@ class LLMClient:
         error = None
 
         with self._session_manager.trace(prompt, purpose=purpose) as trace_ctx:
+            trace_ctx.env.update(event_context_environment())
             for attempt in range(max_retries):
                 try:
                     self.logger.debug(f"Calling LLM (attempt {attempt + 1})")
@@ -448,6 +450,20 @@ class LLMClient:
         
         # Store in history
         self._call_history.append(call_record)
+
+        provider = detect_agent_type(self.tool)
+        record_llm_call(
+            provider=provider,
+            purpose=purpose,
+            success=response is not None,
+            duration_s=duration,
+            token_status=(
+                "available_in_workspace_log"
+                if provider == "copilot" and captured_path is not None
+                else "unavailable_cli"
+            ),
+            log_file=str(captured_path) if captured_path is not None else None,
+        )
         
         # Record interaction completion in trajectory
         if self.trajectory and self.step_id is not None and interaction_id is not None:

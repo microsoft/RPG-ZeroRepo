@@ -440,6 +440,11 @@ class CopilotSessionManager(SessionManager):
         """
         log_dir = COPILOT_LOGS_DIR
         log_dir.mkdir(parents=True, exist_ok=True)
+        self._before_logs = {
+            path.name: path.stat().st_mtime_ns
+            for path in log_dir.glob("*.log")
+            if path.is_file()
+        }
         ctx.extra_args.extend([
             "--log-dir", str(log_dir),
             "--log-level", "all",
@@ -448,8 +453,18 @@ class CopilotSessionManager(SessionManager):
         ])
 
     def after(self, purpose: str) -> Optional[Path]:
-        """No trace capture yet."""
-        return None
+        """Return the workspace-local log created or updated by this call."""
+        candidates: list[Path] = []
+        for path in COPILOT_LOGS_DIR.glob("*.log"):
+            if not path.is_file():
+                continue
+            try:
+                previous_mtime = getattr(self, "_before_logs", {}).get(path.name)
+                if previous_mtime is None or path.stat().st_mtime_ns > previous_mtime:
+                    candidates.append(path)
+            except OSError:
+                continue
+        return max(candidates, key=lambda path: path.stat().st_mtime_ns) if candidates else None
 
 
 # ============================================================================

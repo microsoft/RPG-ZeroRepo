@@ -347,6 +347,10 @@ def update_rpg_workspace(tmp_path):
 def test_run_update_rpg_advances_meta_git_and_runs_align(update_rpg_workspace, monkeypatch):
     """Even on the "no changes" branch, ``run_update_rpg`` must: * embed dep_graph into rpg.json (4b) * advance meta.git to the current HEAD (4c) * run enrich(align_only=True) (4c)."""
     ws, repo, rpg_path, dep_graph_path = update_rpg_workspace
+    import common.run_events as run_events
+
+    events_file = rpg_path.parent / "run_events.jsonl"
+    monkeypatch.setattr(run_events, "EVENTS_FILE", events_file)
 
     # WORKSPACE_ROOT is resolved at import time inside common.paths.
     # The test workspace differs from the package's natural root, so
@@ -397,6 +401,16 @@ def test_run_update_rpg_advances_meta_git_and_runs_align(update_rpg_workspace, m
     assert result["dep_edges"] == len(dep_graph["edges"])
     assert result["dep_nodes_delta"] == 0
     assert result["dep_edges_delta"] == 0
+
+    events = run_events.load_events(events_file)
+    assert [event["stage"] for event in events if event["event_type"] == "stage_finished"] == [
+        "load_rpg", "process_diff", "align_paths", "advance_git", "save_rpg",
+    ]
+    assert result["run_id"] == events[0]["run_id"] == events[-1]["run_id"]
+    assert events[-1]["event_type"] == "run_finished"
+    assert events[-1]["status"] == "success"
+    assert events[-1]["metrics"]["new_commit"] == head
+    assert events[-1]["metrics"]["nodes_delta"] == 0
 
 
 def test_run_update_rpg_dep_graph_path_default_matches_constant(monkeypatch, tmp_path):

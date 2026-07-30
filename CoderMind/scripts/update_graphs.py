@@ -60,6 +60,8 @@ def _log_hook_call(hook_type: str, result: dict) -> None:
         HOOK_CALLS_LOG.parent.mkdir(parents=True, exist_ok=True)
         record = {
             "ts": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+            "run_id": result.get("run_id") or os.environ.get("CMIND_RUN_ID"),
+            "stage_id": result.get("stage_id") or os.environ.get("CMIND_STAGE_ID"),
             "hook": hook_type,
             "mode": result.get("mode", ""),
             "reason": result.get("reason", ""),

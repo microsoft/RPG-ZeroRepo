@@ -8,6 +8,7 @@ tests, and outputs a result JSON. Supports rollback on test failure.
 
 import argparse
 import json
+import shlex
 import shutil
 import subprocess
 import sys
@@ -21,7 +22,72 @@ SCRIPTS_DIR = Path(__file__).resolve().parent.parent
 if str(SCRIPTS_DIR) not in sys.path:
     sys.path.insert(0, str(SCRIPTS_DIR))
 
-from common.paths import REPO_RPG_FILE, DEP_GRAPH_FILE, REPO_DIR, RPG_EDIT_PLAN_FILE  # noqa: E402
+from common.git_utils import read_head  # noqa: E402
+from common.paths import (  # noqa: E402
+    DEP_GRAPH_FILE,
+    REPO_DIR,
+    REPO_RPG_FILE,
+    RPG_EDIT_APPLY_RESULT_FILE,
+    RPG_EDIT_PLAN_FILE,
+    cmd_for,
+)
+from common.rpg_io import atomic_write_rpg  # noqa: E402
+
+
+def _rollback_command(timestamp: str | None, before_state: dict | None) -> str | None:
+    if not timestamp:
+        return None
+    command = f"{cmd_for('rpg_edit/apply.py')} --rollback {shlex.quote(str(timestamp))}"
+    branch = before_state.get("head_branch") if isinstance(before_state, dict) else None
+    if isinstance(branch, str) and branch.startswith("rpg-edit/"):
+        command += f" --rollback-branch {shlex.quote(branch)}"
+    return command
+
+
+def _record_apply_result(
+    result: Dict[str, Any],
+    *,
+    backup_timestamp: str | None = None,
+    backups: Dict[str, str] | None = None,
+    applied_features: list | None = None,
+    dep_graph_refreshed: bool | None = None,
+    before_state: dict | None = None,
+) -> Dict[str, Any]:
+    """Merge split apply phases for one backup timestamp and persist atomically."""
+    preserved: Dict[str, Any] = {}
+    if backup_timestamp is not None and RPG_EDIT_APPLY_RESULT_FILE.exists():
+        try:
+            previous = json.loads(RPG_EDIT_APPLY_RESULT_FILE.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            previous = {}
+        if isinstance(previous, dict) and str(previous.get("backup_timestamp")) == str(backup_timestamp):
+            preserved = previous
+
+    merged = dict(result)
+    for key in (
+        "applied_features",
+        "backups",
+        "before_state",
+        "rollback_command",
+        "rollback_path",
+    ):
+        if merged.get(key) in (None, "", [], {}) and preserved.get(key) not in (None, "", [], {}):
+            merged[key] = preserved[key]
+    resolved_backups = backups or (merged.get("backups") if isinstance(merged.get("backups"), dict) else {})
+    if backup_timestamp is not None:
+        merged.setdefault("backup_timestamp", backup_timestamp)
+        merged.setdefault("rollback_command", _rollback_command(backup_timestamp, before_state))
+    merged.setdefault("backups", resolved_backups)
+    merged.setdefault("applied_features", applied_features or [])
+    if dep_graph_refreshed is not None:
+        merged.setdefault("dep_graph_refreshed", dep_graph_refreshed)
+    rollback_path = resolved_backups.get("rpg") or resolved_backups.get("dep_graph")
+    if rollback_path:
+        merged.setdefault("rollback_path", rollback_path)
+    if before_state is not None:
+        merged.setdefault("before_state", before_state)
+    atomic_write_rpg(RPG_EDIT_APPLY_RESULT_FILE, merged, indent=2, ensure_ascii=False)
+    return merged
 
 
 def _backup(rpg_path: Path, dep_graph_path: Path, ts: str) -> Dict[str, str]:
@@ -144,6 +210,7 @@ def main():
     # Capture log records for post-mortem inspection of rpg_edit issues.
     from common.logging_setup import setup_file_logging
     setup_file_logging("rpg_edit")
+    before_state = read_head(args.repo or args.repo_dir or REPO_DIR)
 
     # Handle rollback
     if args.rollback:
@@ -184,6 +251,11 @@ def main():
                   "timestamp": args.rollback}
         if branch_result:
             result["branch"] = branch_result
+        result = _record_apply_result(
+            result,
+            backup_timestamp=args.rollback,
+            before_state=before_state,
+        )
         print(json.dumps(result, indent=2) if args.json else
               f"Rolled back: {restored}" +
               (f"; branch={branch_result}" if branch_result else ""))
@@ -192,6 +264,7 @@ def main():
     # Load plan
     if not args.plan.exists():
         result = {"type": "error", "message": f"Plan not found: {args.plan}"}
+        result = _record_apply_result(result, before_state=before_state)
         print(json.dumps(result) if args.json else f"Error: {result['message']}")
         return 1
 
@@ -226,6 +299,13 @@ def main():
                 "backup_timestamp": ts,
                 "backups": backups,
             }
+            result = _record_apply_result(
+                result,
+                backup_timestamp=ts,
+                backups=backups,
+                applied_features=applied_features,
+                before_state=before_state,
+            )
             print(json.dumps(result, indent=2) if args.json else
                   f"RPG updated ({len(applied_features)} features). Backup: {ts}")
             return 0
@@ -252,6 +332,14 @@ def main():
                     "message": f"dep_graph refresh failed: {exc}",
                     "backup_timestamp": ts,
                 }
+                result = _record_apply_result(
+                    result,
+                    backup_timestamp=ts,
+                    backups=backups,
+                    applied_features=applied_features,
+                    dep_graph_refreshed=False,
+                    before_state=before_state,
+                )
                 print(json.dumps(result, indent=2) if args.json else
                       f"Error: {result['message']}")
                 return 1
@@ -264,6 +352,14 @@ def main():
                 "dep_graph_refreshed": dep_graph_refreshed,
                 "backup_timestamp": ts,
             }
+            result = _record_apply_result(
+                result,
+                backup_timestamp=ts,
+                backups=backups,
+                applied_features=applied_features,
+                dep_graph_refreshed=dep_graph_refreshed,
+                before_state=before_state,
+            )
             print(json.dumps(result, indent=2) if args.json else
                   f"dep_graph refreshed: {dep_graph_refreshed}. Backup: {ts}")
             return 0
@@ -296,6 +392,14 @@ def main():
                     "rolled_back": True,
                     "backup_timestamp": ts,
                 }
+                result = _record_apply_result(
+                    result,
+                    backup_timestamp=ts,
+                    backups=backups,
+                    applied_features=applied_features,
+                    dep_graph_refreshed=dep_graph_refreshed,
+                    before_state=before_state,
+                )
                 print(json.dumps(result, indent=2) if args.json else
                       f"Tests failed. Rolled back to {ts}.")
                 return 1
@@ -309,6 +413,14 @@ def main():
         "backup_timestamp": ts,
         "backups": backups,
     }
+    result = _record_apply_result(
+        result,
+        backup_timestamp=ts,
+        backups=backups,
+        applied_features=applied_features,
+        dep_graph_refreshed=dep_graph_refreshed,
+        before_state=before_state,
+    )
     print(json.dumps(result, indent=2) if args.json else "EditPlan applied successfully.")
     return 0
 

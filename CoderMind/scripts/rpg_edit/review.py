@@ -34,9 +34,20 @@ SCRIPTS_DIR = Path(__file__).resolve().parent.parent
 if str(SCRIPTS_DIR) not in sys.path:
     sys.path.insert(0, str(SCRIPTS_DIR))
 
-from common.paths import REPO_DIR, cmd_for, RPG_EDIT_PLAN_FILE, RPG_EDIT_IMPACT_FILE  # noqa: E402
+from common.paths import (  # noqa: E402
+    REPO_DIR,
+    RPG_EDIT_IMPACT_FILE,
+    RPG_EDIT_PLAN_FILE,
+    RPG_EDIT_REVIEW_RESULT_FILE,
+    cmd_for,
+)
+from common.rpg_io import atomic_write_rpg  # noqa: E402
 
 logger = logging.getLogger(__name__)
+
+
+def _write_review_result(result: Dict[str, Any]) -> None:
+    atomic_write_rpg(RPG_EDIT_REVIEW_RESULT_FILE, result, indent=2, ensure_ascii=False)
 
 # ---------------------------------------------------------------------------
 # Review prompt template
@@ -583,6 +594,7 @@ def main():
 
     if not args.plan.exists():
         result = {"type": "error", "message": f"Plan not found: {args.plan}"}
+        _write_review_result(result)
         print(json.dumps(result) if args.json else f"Error: {result['message']}")
         return 1
 
@@ -603,6 +615,7 @@ def main():
                           f"(callers={total_callers}, files={affected_files}). "
                           f"Agent self-review is sufficient.",
             }
+            _write_review_result(result)
             print(json.dumps(result, indent=2) if args.json else
                   f"Skipped: {result['reason']}")
             return 0
@@ -614,6 +627,7 @@ def main():
         max_iterations=args.max_iterations,
         timeout=args.timeout,
     )
+    _write_review_result(result)
 
     print(json.dumps(result, indent=2) if args.json else
           f"Review {'PASSED' if result['success'] else 'FAILED'} "

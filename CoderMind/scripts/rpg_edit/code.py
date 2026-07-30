@@ -42,14 +42,20 @@ if str(SCRIPTS_DIR) not in sys.path:
 from common.paths import (  # noqa: E402
     RPG_FILE,
     REPO_DIR,
+    RPG_EDIT_CODE_RESULT_FILE,
     RPG_EDIT_PLAN_FILE,
     DATA_DIR,
     WORKSPACE_ROOT,
     cmd_for,
 )
 from common.logging_setup import setup_file_logging  # noqa: E402
+from common.rpg_io import atomic_write_rpg  # noqa: E402
 
 logger = logging.getLogger(__name__)
+
+
+def _write_code_result(result: Dict[str, Any]) -> None:
+    atomic_write_rpg(RPG_EDIT_CODE_RESULT_FILE, result, indent=2, ensure_ascii=False)
 
 
 # ---------------------------------------------------------------------------
@@ -684,6 +690,7 @@ def main() -> int:
         max_iterations=args.max_iterations,
         timeout=args.timeout,
     )
+    _write_code_result(result)
 
     if args.json:
         print(json.dumps(result, indent=2, ensure_ascii=False))

@@ -49,6 +49,7 @@ from common.llm_types import (
     ToolCall,
     ToolResult,
 )
+from common.run_events import record_llm_call
 
 logger = logging.getLogger(__name__)
 
@@ -952,12 +953,33 @@ class APILLMClient:
     # Core call
     # ----------------------------------------------------------------
 
-    def _call(self, messages: List[LLMMessage]) -> Optional[str]:
+    def _call(self, messages: List[LLMMessage], *, purpose: str = "api_call") -> Optional[str]:
         """Call provider with LLMMessage list, return text."""
-        response: LLMResponse = self.client.chat(
-            messages, reuse_history=False
-        )
+        start = time.perf_counter()
+        try:
+            response: LLMResponse = self.client.chat(
+                messages, reuse_history=False
+            )
+        except Exception:
+            record_llm_call(
+                provider=self.provider_name,
+                model=self.model,
+                purpose=purpose,
+                success=False,
+                duration_s=time.perf_counter() - start,
+                token_status="unavailable_error",
+            )
+            raise
         self._last_response = response
+        record_llm_call(
+            provider=self.provider_name,
+            model=response.model or self.model,
+            purpose=purpose,
+            success=True,
+            duration_s=time.perf_counter() - start,
+            tokens=response.usage.to_dict() if response.usage else None,
+            token_status="measured" if response.usage else "unavailable_provider",
+        )
         return response.content.strip() if response.content else None
 
     # ----------------------------------------------------------------
@@ -986,7 +1008,7 @@ class APILLMClient:
 
         while retries < max_retries:
             try:
-                result = self._call(messages)
+                result = self._call(messages, purpose="generate")
 
                 if self.config.log:
                     duration = round(time.time() - start, 2)
@@ -1119,7 +1141,7 @@ class APILLMClient:
 
         while retries < max_retries:
             try:
-                raw_response = self._call(messages)
+                raw_response = self._call(messages, purpose="structured_output")
 
                 if not raw_response:
                     raise ValueError("Empty response from model")
