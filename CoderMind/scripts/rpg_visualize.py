@@ -227,7 +227,7 @@ def build_dep_tree(data: dict) -> dict:
             "children": [to_tree(r) for r in sorted(roots)]}
 
 
-def generate_html(data: dict) -> str:
+def generate_html(data: dict, change_data: dict | None = None) -> str:
     tree = normalize_to_tree(data)
     semantic_edges = get_semantic_edges(data)
     dep = extract_dep_graph(data)
@@ -250,6 +250,11 @@ def generate_html(data: dict) -> str:
     dep_edge_summary = ", ".join(f"{k}: {v}" for k, v in sorted(dep["stats"].items()))
     has_dep = dep_node_count > 0
 
+    raw_dep_graph = data.get("dep_graph") or {}
+    raw_dep_nodes = raw_dep_graph.get("nodes") or {}
+    raw_dep_node_count = len(raw_dep_nodes) if isinstance(raw_dep_nodes, (dict, list)) else 0
+    raw_dep_edge_count = len(raw_dep_graph.get("edges") or [])
+
     map_count = sum(len(v) for v in dep_to_rpg.values())
     has_map = len(dep_to_rpg) > 0
 
@@ -261,15 +266,32 @@ def generate_html(data: dict) -> str:
     dep_tree_json = json.dumps(dep_tree)
     dep_to_rpg_json = json.dumps(dep_to_rpg)
 
+    change_json = json.dumps(change_data or {})
+    has_change = 'true' if (change_data and change_data.get("available")) else 'false'
+
     return f"""<!DOCTYPE html>
 <html lang="en">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>RPG: {repo_name}</title>
+<script>
+(function() {{
+  var theme = 'dark';
+  try {{ theme = localStorage.getItem('cmind-report-theme') || theme; }} catch (e) {{}}
+  document.documentElement.setAttribute('data-theme', theme === 'light' ? 'light' : 'dark');
+}})();
+</script>
 <script src="https://d3js.org/d3.v7.min.js"></script>
+<script>document.documentElement.classList.toggle('d3-unavailable', !window.d3);</script>
 <style>
 * {{ margin: 0; padding: 0; box-sizing: border-box; }}
+:root {{
+  --change-added: #4ade80; --change-added-strong: #22c55e; --change-added-soft: rgba(34,197,94,.16);
+  --change-removed: #ff6b6b; --change-removed-strong: #ef4444; --change-removed-soft: rgba(239,68,68,.16);
+  --change-modified: #f6c453; --change-modified-strong: #eab308; --change-modified-soft: rgba(234,179,8,.16);
+  --change-focus: #60a5fa; --change-focus-soft: rgba(96,165,250,.22);
+}}
 body {{ background: #0d1117; color: #c9d1d9; font-family: -apple-system, BlinkMacSystemFont,
        'Segoe UI', monospace; overflow: hidden; }}
 
@@ -313,6 +335,8 @@ body {{ background: #0d1117; color: #c9d1d9; font-family: -apple-system, BlinkMa
 #stats-feat, #stats-dep, #stats-map {{ display: flex; gap: 16px; align-items: center; }}
 
 svg {{ width: 100vw; height: 100vh; }}
+#canvas {{ cursor: grab; }}
+#canvas:active {{ cursor: grabbing; }}
 
 .link {{ fill: none; stroke: #21262d; stroke-width: 1; }}
 .node circle {{ stroke: #30363d; stroke-width: 1.5; cursor: pointer; }}
@@ -326,11 +350,12 @@ svg {{ width: 100vw; height: 100vh; }}
 .edge-default {{ stroke: #8b949e; stroke-opacity: 0.3; }}
 
 /* Dep graph specific */
-.dep-link {{ fill: none; stroke-width: 1.2; stroke-opacity: 0.5; }}
+.dep-link {{ fill: none; stroke-width: 1.2; stroke-opacity: 0.5; transition: opacity .14s, stroke-width .14s; }}
 .dep-link-imports {{ stroke: #f0883e; }}
 .dep-link-invokes {{ stroke: #3fb950; }}
 .dep-link-inherits {{ stroke: #a371f7; }}
 .dep-link-default {{ stroke: #8b949e; }}
+.dep-node {{ transition: opacity .14s; }}
 .dep-node circle {{ cursor: pointer; stroke: #30363d; stroke-width: 1.5; }}
 .dep-node text {{ font-size: 10px; fill: #c9d1d9; pointer-events: none; }}
 .dep-node-collapsed circle {{ stroke: #58a6ff; stroke-width: 2; }}
@@ -338,6 +363,82 @@ svg {{ width: 100vw; height: 100vh; }}
 .map-link {{ fill: none; stroke: #f0883e; stroke-opacity: 0.35; stroke-width: 1.2; }}
 .map-link-hover {{ stroke-opacity: 0.9; stroke-width: 2.5; }}
 .map-node-highlight circle {{ stroke: #f0883e !important; stroke-width: 3 !important; }}
+.change-added > circle:not(.change-focus-ring):not(.change-status-dot) {{ stroke: var(--change-added) !important; stroke-width: 3 !important; filter: drop-shadow(0 0 3px var(--change-added-soft)); }}
+.change-added text {{ fill: var(--change-added) !important; font-weight: 700; }}
+.change-modified > circle:not(.change-focus-ring):not(.change-status-dot) {{ stroke: var(--change-modified) !important; stroke-width: 3 !important; filter: drop-shadow(0 0 3px var(--change-modified-soft)); }}
+.change-modified text {{ fill: var(--change-modified) !important; font-weight: 700; }}
+.change-dim {{ opacity: 0.28; }}
+.change-dim > circle:not(.change-focus-ring):not(.change-status-dot) {{ fill: #6e7681 !important; stroke: #484f58 !important; filter: none !important; }}
+.change-dim text {{ fill: #8b949e !important; }}
+.change-status-dot,.change-status-glyph {{ display: none; pointer-events: none; }}
+g.change-added > .change-status-dot {{ display: inline; fill: var(--change-added-strong); stroke: var(--change-added); stroke-width: 2; }}
+g.change-modified > .change-status-dot {{ display: inline; fill: var(--change-modified-strong); stroke: var(--change-modified); stroke-width: 2; }}
+g.change-added > .change-status-glyph,g.change-modified > .change-status-glyph {{ display: block; font-size: 9px; font-weight: 900; text-anchor: middle; fill: #fff !important; }}
+g.change-modified > .change-status-glyph {{ fill: #1f2937 !important; }}
+.change-focused {{ opacity: 1 !important; }}
+.change-focus-ring {{ fill: none !important; stroke: var(--change-focus) !important; stroke-width: 2.5 !important; filter: drop-shadow(0 0 5px var(--change-focus)); pointer-events: none; vector-effect: non-scaling-stroke; }}
+.node.change-focused text:not(.change-status-glyph) {{ fill: #fff !important; font-weight: 800; paint-order: stroke; stroke: #0d1117; stroke-width: 3px; }}
+.dep-node.change-focused text:not(.change-status-glyph) {{ fill: #fff !important; font-weight: 700; }}
+.dep-hull.change-added {{ stroke: var(--change-added) !important; stroke-width: 3 !important; fill: var(--change-added-soft) !important; }}
+.dep-hull.change-modified {{ stroke: var(--change-modified) !important; stroke-width: 3 !important; fill: var(--change-modified-soft) !important; }}
+.dep-hull.change-focused {{ filter: drop-shadow(0 0 5px var(--change-focus)); }}
+.dep-hull-label.change-added {{ fill: var(--change-added) !important; font-weight: 700; }}
+.dep-hull-label.change-modified {{ fill: var(--change-modified) !important; font-weight: 700; }}
+.dep-hull-label.change-focused {{ fill: var(--change-focus) !important; font-weight: 800; }}
+.dep-change-group rect {{ fill: var(--change-modified-soft); stroke: var(--change-modified); stroke-width: 2; rx: 5; cursor: pointer; }}
+.dep-change-group.added rect {{ fill: var(--change-added-soft); stroke: var(--change-added); }}
+.dep-change-group text {{ fill: var(--change-modified); font-size: 10px; font-weight: 700; pointer-events: none; }}
+.dep-change-group.added text {{ fill: var(--change-added); }}
+.dep-change-group.focused rect {{ filter: drop-shadow(0 0 6px var(--change-focus)); }}
+.dep-change-group.focused text {{ fill: #fff; }}
+.feat-ghost-link,.dep-ghost-link {{ fill: none; stroke: var(--change-removed); stroke-opacity: .62; stroke-width: 1.4; stroke-dasharray: 5 4; }}
+.feat-ghost .change-status-dot,.dep-ghost .change-status-dot {{ display: inline; fill: var(--change-removed-strong); stroke: var(--change-removed); stroke-width: 2; cursor: pointer; }}
+.feat-ghost .change-node-label,.dep-ghost .change-node-label {{ fill: var(--change-removed); font-size: 11px; font-weight: 650; cursor: pointer; paint-order: stroke; stroke: #0d1117; stroke-width: 3px; stroke-linejoin: round; }}
+.feat-ghost.branch .change-node-label,.dep-ghost.branch .change-node-label {{ font-weight: 750; text-anchor: middle; }}
+.feat-ghost.leaf .change-node-label,.dep-ghost.leaf .change-node-label {{ text-anchor: start; }}
+.feat-ghost .change-status-glyph,.dep-ghost .change-status-glyph {{ display: block; fill: #fff !important; font-size: 9px; font-weight: 900; text-anchor: middle; pointer-events: none; }}
+.feat-ghost.focused .change-node-label,.dep-ghost.focused .change-node-label {{ fill: var(--change-focus); font-weight: 800; paint-order: stroke; stroke: #0d1117; stroke-width: 3px; }}
+.change-graph-link {{ stroke: #6e7681; stroke-width: 1.1; stroke-opacity: 0.35; transition: stroke-opacity .14s, stroke-width .14s; }}
+.change-graph-link.rel-imports {{ stroke: #f0883e; stroke-opacity: .62; }}
+.change-graph-link.rel-invokes {{ stroke: #3fb950; stroke-opacity: .62; }}
+.change-graph-link.rel-inherits {{ stroke: #a371f7; stroke-opacity: .68; }}
+.change-graph-link.rel-references {{ stroke: #79c0ff; stroke-opacity: .58; }}
+.change-graph-link.rel-contains {{ stroke: #6e7681; stroke-dasharray: 3 4; stroke-opacity: .48; }}
+.change-graph-link.rel-maps-to {{ stroke: #f0883e; stroke-dasharray: 7 3; stroke-opacity: .68; }}
+.change-graph-link.added {{ stroke: #3fb950; stroke-width: 2; stroke-opacity: 0.8; }}
+.change-graph-link.removed {{ stroke: #f85149; stroke-width: 1.8; stroke-dasharray: 5 4; stroke-opacity: 0.75; }}
+.change-graph-link.focus-related {{ stroke-width: 2.6; stroke-opacity: .95; }}
+.change-graph-link.focus-dim {{ stroke-opacity: .06; }}
+.change-graph-node {{ pointer-events: all; cursor: pointer; transition: opacity .14s; }}
+.change-graph-node circle {{ stroke-width: 2; pointer-events: all; cursor: pointer; }}
+.change-graph-node text {{ fill: #c9d1d9; font-size: 11px; pointer-events: none; }}
+.change-graph-node .status-glyph {{ fill: #0d1117; font-size: 10px; font-weight: 800; text-anchor: middle; }}
+.change-graph-node.added circle {{ fill: rgba(63,185,80,.22); stroke: #3fb950; }}
+.change-graph-node.removed circle {{ fill: rgba(248,81,73,.14); stroke: #f85149; stroke-dasharray: 5 3; }}
+.change-graph-node.modified circle {{ fill: rgba(210,153,34,.20); stroke: #d29922; stroke-width: 4; }}
+.change-graph-node.context circle {{ fill: #30363d; stroke: #6e7681; }}
+.change-graph-node.context {{ opacity: .42; }}
+.change-graph-node.focus-neighbor {{ opacity: 1; }}
+.change-graph-node.focus-dim {{ opacity: .16; }}
+.change-graph-node.focused circle {{ stroke: #58a6ff !important; stroke-width: 5 !important; filter: drop-shadow(0 0 7px #58a6ff); }}
+.change-graph-node.focused text {{ fill: #fff; font-weight: 700; }}
+.removed-rail-bg {{ fill: rgba(22,27,34,.92); stroke: #30363d; rx: 7; }}
+.removed-rail-title {{ fill: #f85149; font-size: 12px; font-weight: 700; }}
+.removed-rail-node circle {{ fill: rgba(248,81,73,.14); stroke: #f85149; stroke-width: 2; stroke-dasharray: 4 3; }}
+.removed-rail-node text {{ fill: #c9d1d9; font-size: 10px; }}
+.removed-rail-more {{ fill: #8b949e; font-size: 10px; }}
+
+#change-summary {{
+  position: fixed; top: 58px; right: 12px; z-index: 55; display: flex; gap: 8px;
+  align-items: center; background: rgba(22, 27, 34, 0.9); border: 1px solid #30363d;
+  border-radius: 6px; padding: 7px 10px; color: #8b949e; font-size: 11px;
+  pointer-events: none; backdrop-filter: blur(6px);
+}}
+#change-summary[hidden] {{ display: none; }}
+#change-summary b {{ color: #c9d1d9; }}
+#change-summary .added {{ color: #3fb950; }}
+#change-summary .removed {{ color: #f85149; }}
+#change-summary .modified {{ color: #d29922; }}
 
 .no-data {{ display: flex; align-items: center; justify-content: center;
             height: 80vh; color: #484f58; font-size: 16px; }}
@@ -349,27 +450,235 @@ svg {{ width: 100vw; height: 100vh; }}
 .tooltip .tt-type {{ color: #8b949e; font-size: 11px; }}
 .tooltip .tt-path {{ color: #7ee787; font-size: 11px; }}
 .tooltip .tt-edges {{ color: #f0883e; font-size: 11px; margin-top: 4px; }}
+
+/* ── Self-contained change workbench (two-row header + right panel) ── */
+#header {{ height: 78px; padding: 7px 12px; flex-direction: column; align-items: stretch; gap: 4px; overflow: hidden; }}
+#header-row1 {{ display: grid; grid-template-columns: auto auto minmax(95px,1fr); align-items: center; gap: 9px; min-width: 0; min-height: 31px; }}
+#header-row1 h1 {{ font-size: 14px; }}
+#header-row2 {{ display: flex; align-items: center; gap: 14px; min-height: 29px; padding-top: 4px; padding-right: 450px; border-top: 1px solid #21262d; }}
+#tabs {{ flex-wrap: nowrap; }}
+#tabs button {{ padding: 3px 9px; white-space: nowrap; }}
+#stats-feat, #stats-dep, #stats-map {{ min-width: 0; gap: 8px; overflow: hidden; white-space: nowrap; }}
+#stats-feat .stat, #stats-dep .stat, #stats-map .stat {{ overflow: hidden; text-overflow: ellipsis; font-size: 10.5px; }}
+#controls {{ position: absolute; top: 43px; right: 12px; height: 28px; flex-wrap: nowrap; min-width: 0; gap: 3px; }}
+#controls > span {{ display: inline-flex; flex-wrap: nowrap; gap: 3px; }}
+#controls button {{ padding: 3px 7px; white-space: nowrap; }}
+#search {{ width: 120px; min-width: 80px; }}
+@media (max-width: 600px) {{
+  #controls {{ right: 6px; max-width: calc(100vw - 12px); gap: 2px; }}
+  #controls > span {{ gap: 2px; }}
+  #controls button {{ padding: 3px; font-size: 11px; }}
+  #search {{ width: 62px; min-width: 62px; padding: 4px 5px; }}
+}}
+.hdr-group {{ display: flex; align-items: center; gap: 8px; }}
+.hdr-label {{ color: #6e7681; font-size: 10px; text-transform: uppercase; letter-spacing: .06em; }}
+.seg2 {{ display: inline-flex; gap: 2px; background: #0d1117; border: 1px solid #30363d; border-radius: 6px; padding: 2px; }}
+.seg2 button {{ background: none; border: 0; color: #8b949e; padding: 4px 10px; border-radius: 4px; cursor: pointer; font-size: 12px; }}
+.seg2 button:hover {{ color: #c9d1d9; }}
+.seg2 button.active {{ background: #21262d; color: #58a6ff; }}
+#status-seg button b {{ color: #6e7681; font-weight: 700; margin-left: 3px; }}
+#status-seg button.active b {{ color: #c9d1d9; }}
+#status-seg button[data-status="added"].active {{ color: #3fb950; }}
+#status-seg button[data-status="removed"].active {{ color: #f85149; }}
+#status-seg button[data-status="modified"].active {{ color: #d29922; }}
+.seg2 button:disabled {{ opacity: .4; cursor: default; }}
+#canvas-overlay {{ top: 88px; width: 186px; max-width: 186px; padding: 8px 10px; line-height: 1.45; }}
+#canvas-overlay .legend-item {{ font-size: 10px; }}
+.ov-help {{ margin-top: 7px; border-top: 1px solid #30363d; padding-top: 6px; pointer-events: auto; }}
+.ov-help summary {{ color: #8b949e; cursor: pointer; font-size: 10.5px; font-weight: 600; }}
+.ov-help div {{ margin-top: 5px; }}
+#change-summary {{ display: none !important; }}
+body.cp-open #canvas-overlay {{ left: 12px; }}
+#changes-panel {{ position: fixed; top: 78px; right: 0; bottom: 0; width: clamp(300px, 25vw, 340px); z-index: 90;
+  background: #161b22; border-left: 1px solid #30363d; display: flex; flex-direction: column;
+  padding: 10px; gap: 7px; box-shadow: -12px 0 28px rgba(0,0,0,.18); }}
+.cp-filters {{ flex: none; }}
+.cp-filter-seg {{ display: grid; grid-template-columns: 1fr 1fr; gap: 4px; }}
+.cp-filter-seg button {{ display: flex; align-items: center; justify-content: space-between; gap: 7px; min-height: 40px;
+  background: #0d1117; border: 1px solid #30363d; color: #8b949e; border-radius: 7px; padding: 6px 8px; cursor: pointer; font-size: 11px; transition: border-color .14s, background .14s, box-shadow .14s; }}
+.cp-filter-seg button:hover {{ color: #c9d1d9; border-color: #58a6ff; background: #111a26; }}
+.cp-filter-seg button.active {{ color: #c9d1d9; border-color: #58a6ff; background: rgba(88,166,255,.13); box-shadow: inset 0 0 0 1px rgba(88,166,255,.28); }}
+.cp-filter-main {{ display: flex; align-items: center; gap: 6px; min-width: 0; }}
+.cp-filter-icon {{ width: 20px; height: 20px; display: grid; place-items: center; flex: none; border-radius: 50%; background: #2563eb; color: #fff; font-weight: 900; font-size: 12px; }}
+.cp-filter-seg button[data-status="added"] .cp-filter-icon {{ color: #fff; background: var(--change-added-strong); }}
+.cp-filter-seg button[data-status="removed"] .cp-filter-icon {{ color: #fff; background: var(--change-removed-strong); }}
+.cp-filter-seg button[data-status="modified"] .cp-filter-icon {{ color: #1f2937; background: var(--change-modified-strong); }}
+.cp-filter-seg button b {{ color: #6e7681; font-weight: 700; }}
+.cp-filter-seg button.active b {{ color: #c9d1d9; }}
+.cp-filter-seg button[data-status="added"].active {{ color: var(--change-added); border-color: var(--change-added); background: var(--change-added-soft); box-shadow: inset 0 0 0 1px var(--change-added-soft); }}
+.cp-filter-seg button[data-status="removed"].active {{ color: var(--change-removed); border-color: var(--change-removed); background: var(--change-removed-soft); box-shadow: inset 0 0 0 1px var(--change-removed-soft); }}
+.cp-filter-seg button[data-status="modified"].active {{ color: var(--change-modified); border-color: var(--change-modified); background: var(--change-modified-soft); box-shadow: inset 0 0 0 1px var(--change-modified-soft); }}
+#cp-head {{ display: flex; align-items: center; justify-content: space-between; }}
+#cp-head strong {{ font-size: 13px; color: #c9d1d9; }}
+.cp-count {{ color: #6e7681; font-size: 11px; }}
+#cp-version {{ display: block; max-width: 250px; margin-top: 2px; color: #8b949e; font-size: 9px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }}
+#cp-collapse {{ background: #21262d; border: 1px solid #30363d; color: #8b949e; border-radius: 5px; cursor: pointer; padding: 2px 8px; }}
+#cp-search-wrap {{ display: flex; align-items: center; gap: 6px; min-height: 30px; background: #0d1117; border: 1px solid #30363d; border-radius: 6px; padding: 4px 8px; color: #6e7681; }}
+#cp-search {{ flex: 1; background: none; border: 0; outline: 0; color: #c9d1d9; font-size: 12px; }}
+#cp-list {{ display: flex; flex-direction: column; gap: 4px; overflow: auto; min-height: 0; flex: 1; }}
+.cp-row {{ position: relative; display: grid; grid-template-columns: 19px 1fr; gap: 7px; align-items: center; text-align: left;
+  min-height: 42px; overflow: hidden; background: #0d1117; border: 1px solid #21262d; border-radius: 7px; color: #c9d1d9; padding: 5px 7px 5px 10px; cursor: pointer; transition: border-color .14s, background .14s, box-shadow .14s; }}
+.cp-row::before {{ content: ''; position: absolute; inset: 0 auto 0 0; width: 3px; background: #58a6ff; opacity: .55; }}
+.cp-row.added::before {{ background: var(--change-added); }}
+.cp-row.removed::before {{ background: var(--change-removed); }}
+.cp-row.modified::before {{ background: var(--change-modified); }}
+.cp-row:hover {{ border-color: #58a6ff; background: #101925; }}
+.cp-row:focus-visible {{ outline: 2px solid #58a6ff; outline-offset: -2px; }}
+.cp-row.selected {{ border-color: #58a6ff; background: linear-gradient(90deg, rgba(88,166,255,.20), #132030 72%); box-shadow: inset 0 0 0 1px rgba(88,166,255,.35), 0 0 0 1px rgba(88,166,255,.15); }}
+.cp-row.selected::before {{ width: 4px; opacity: 1; }}
+.cp-row.selected .cp-name {{ color: #fff; font-weight: 800; }}
+.cp-row.selected .cp-path {{ color: #b8c6d8; }}
+.cp-mark {{ width: 19px; height: 19px; display: grid; place-items: center; border-radius: 50%; color: #fff; font-weight: 900; font-size: 12px; }}
+.cp-mark.added {{ background: var(--change-added-strong); }}
+.cp-mark.removed {{ background: var(--change-removed-strong); }}
+.cp-mark.modified {{ color: #1f2937; background: var(--change-modified-strong); }}
+.change-legend-mark {{ width: 15px; height: 15px; display: grid; place-items: center; flex: none; border-radius: 50%; color: #fff; font-size: 9px; font-weight: 900; }}
+.change-legend-mark.added {{ background: var(--change-added-strong); }}
+.change-legend-mark.removed {{ background: var(--change-removed-strong); }}
+.change-legend-mark.modified {{ color: #1f2937; background: var(--change-modified-strong); }}
+.change-legend-mark.context {{ color: #fff; background: #64748b; }}
+.cp-row-main {{ min-width: 0; }}
+.cp-row-main .cp-name {{ display: block; font-size: 11px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }}
+.cp-row-main .cp-path {{ display: block; font-size: 9px; color: #8b949e; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }}
+.cp-detail {{ display: none; flex: none; max-height: 150px; overflow: auto; border: 1px solid #30363d; border-left: 4px solid #58a6ff; border-radius: 7px; padding: 8px 9px; background: #111923; font-size: 10.5px; color: #8b949e; }}
+.cp-detail.selected {{ display: block; }}
+.cp-detail.selected.added {{ border-left-color: #3fb950; }}
+.cp-detail.selected.removed {{ border-left-color: #f85149; }}
+.cp-detail.selected.modified {{ border-left-color: #d29922; }}
+.cp-detail.empty {{ display: none; }}
+.cp-d-title {{ display: flex; align-items: center; gap: 7px; color: #c9d1d9; font-size: 12px; font-weight: 600; margin-bottom: 7px; }}
+.cp-detail dl {{ display: grid; grid-template-columns: 78px 1fr; gap: 4px 8px; margin: 0; }}
+.cp-detail dt {{ color: #6e7681; }}
+.cp-detail dd {{ color: #c9d1d9; word-break: break-word; margin: 0; }}
+
+#btn-theme {{ width: 29px; padding-left: 0 !important; padding-right: 0 !important; }}
+:root[data-theme="light"] {{ color-scheme: light; }}
+:root[data-theme="light"] {{
+  --change-added: #15803d; --change-added-strong: #16a34a; --change-added-soft: rgba(22,163,74,.12);
+  --change-removed: #dc2626; --change-removed-strong: #dc2626; --change-removed-soft: rgba(220,38,38,.11);
+  --change-modified: #a16207; --change-modified-strong: #eab308; --change-modified-soft: rgba(234,179,8,.15);
+  --change-focus: #2563eb; --change-focus-soft: rgba(37,99,235,.18);
+}}
+:root[data-theme="light"] body {{ background: #f6f8fb; color: #1f2937; }}
+:root[data-theme="light"] #header,
+:root[data-theme="light"] #changes-panel {{ background: #ffffff; border-color: #d7dee8; }}
+:root[data-theme="light"] #header-row2 {{ border-color: #e3e8ef; }}
+:root[data-theme="light"] #header h1,
+:root[data-theme="light"] #canvas-overlay .ov-key {{ color: #2563eb; }}
+:root[data-theme="light"] .stat,
+:root[data-theme="light"] .legend-item,
+:root[data-theme="light"] .hdr-label,
+:root[data-theme="light"] .cp-count,
+:root[data-theme="light"] .cp-detail,
+:root[data-theme="light"] .cp-detail dt {{ color: #475569; }}
+:root[data-theme="light"] .stat b,
+:root[data-theme="light"] #canvas-overlay .ov-title,
+:root[data-theme="light"] #cp-head strong,
+:root[data-theme="light"] .cp-detail dd,
+:root[data-theme="light"] .cp-d-title {{ color: #1f2937; }}
+:root[data-theme="light"] #tabs button,
+:root[data-theme="light"] #controls button,
+:root[data-theme="light"] #cp-collapse {{ background: #eef2f7; color: #64748b; border-color: #d7dee8; }}
+:root[data-theme="light"] #tabs button:hover,
+:root[data-theme="light"] #controls button:hover {{ background: #e2e8f0; color: #1f2937; }}
+:root[data-theme="light"] #tabs button.active {{ background: #f6f8fb; color: #2563eb; border-color: #d7dee8; border-bottom-color: #2563eb; }}
+:root[data-theme="light"] #controls button.active {{ background: #2563eb; border-color: #2563eb; color: #fff; }}
+:root[data-theme="light"] #search,
+:root[data-theme="light"] #cp-search-wrap,
+:root[data-theme="light"] .cp-filter-seg button,
+:root[data-theme="light"] .cp-row,
+:root[data-theme="light"] .seg2 {{ background: #f8fafc; border-color: #d7dee8; color: #334155; }}
+:root[data-theme="light"] #search,
+:root[data-theme="light"] #cp-search {{ color: #1f2937; }}
+:root[data-theme="light"] .seg2 button {{ color: #64748b; }}
+:root[data-theme="light"] .seg2 button:hover {{ color: #1f2937; }}
+:root[data-theme="light"] .seg2 button.active {{ background: #e2e8f0; color: #2563eb; }}
+:root[data-theme="light"] .cp-filter-seg button:hover,
+:root[data-theme="light"] .cp-filter-seg button.active,
+:root[data-theme="light"] .cp-row:hover,
+:root[data-theme="light"] .cp-row.selected {{ border-color: #2563eb; background: #eaf1ff; }}
+:root[data-theme="light"] .cp-filter-seg button.active {{ box-shadow: inset 0 0 0 1px rgba(37,99,235,.20); }}
+:root[data-theme="light"] .cp-filter-seg button[data-status="added"].active {{ background: #e9f8ee; border-color: #1a7f37; color: #1a7f37; }}
+:root[data-theme="light"] .cp-filter-seg button[data-status="removed"].active {{ background: #fff0f0; border-color: #cf222e; color: #b42318; }}
+:root[data-theme="light"] .cp-filter-seg button[data-status="modified"].active {{ background: #fff7df; border-color: #9a6700; color: #7a5200; }}
+:root[data-theme="light"] .cp-row {{ color: #1f2937; border-color: #e3e8ef; }}
+:root[data-theme="light"] .cp-row.selected {{ background: linear-gradient(90deg, #dbeafe, #eef5ff 72%); box-shadow: inset 0 0 0 1px rgba(37,99,235,.22); }}
+:root[data-theme="light"] .cp-row.selected .cp-name {{ color: #1e3a8a; }}
+:root[data-theme="light"] .cp-row.selected .cp-path {{ color: #475569; }}
+:root[data-theme="light"] .cp-row-main .cp-path {{ color: #64748b; }}
+:root[data-theme="light"] .cp-detail,
+:root[data-theme="light"] .ov-help {{ border-color: #e3e8ef; }}
+:root[data-theme="light"] #canvas-overlay {{ background: rgba(255,255,255,.94); border-color: #d7dee8; color: #64748b; box-shadow: 0 8px 24px rgba(30,41,59,.10); }}
+:root[data-theme="light"] .ov-help summary {{ color: #475569; }}
+:root[data-theme="light"] .tooltip {{ background: #ffffff; border-color: #d7dee8; color: #1f2937; box-shadow: 0 6px 20px rgba(30,41,59,.16); }}
+:root[data-theme="light"] .tooltip .tt-name {{ color: #2563eb; }}
+:root[data-theme="light"] .tooltip .tt-type {{ color: #64748b; }}
+:root[data-theme="light"] .link {{ stroke: #94a3b8; }}
+:root[data-theme="light"] .node circle,
+:root[data-theme="light"] .dep-node circle {{ stroke: #94a3b8; }}
+:root[data-theme="light"] g.change-added > .change-status-dot {{ fill: var(--change-added-strong); stroke: var(--change-added); }}
+:root[data-theme="light"] g.change-modified > .change-status-dot {{ fill: var(--change-modified-strong); stroke: var(--change-modified); }}
+:root[data-theme="light"] .node text,
+:root[data-theme="light"] .dep-node text,
+:root[data-theme="light"] .map-feat-node text,
+:root[data-theme="light"] .map-dep-node text {{ fill: #334155 !important; }}
+:root[data-theme="light"] .edge-default,
+:root[data-theme="light"] .dep-link-default {{ stroke: #94a3b8; }}
+:root[data-theme="light"] .change-dim {{ opacity: .70; }}
+:root[data-theme="light"] .change-dim > circle:not(.change-focus-ring):not(.change-status-dot) {{ fill: #b8c3d1 !important; stroke: #64748b !important; }}
+:root[data-theme="light"] .change-dim text {{ fill: #334155 !important; }}
+:root[data-theme="light"] .node.change-focused text:not(.change-status-glyph),
+:root[data-theme="light"] .dep-node.change-focused text:not(.change-status-glyph),
+:root[data-theme="light"] .feat-ghost.focused .change-node-label,
+:root[data-theme="light"] .dep-ghost.focused .change-node-label {{ fill: #1d4ed8 !important; stroke: #fff !important; stroke-width: 4px; }}
+:root[data-theme="light"] .feat-ghost .change-node-label,
+:root[data-theme="light"] .dep-ghost .change-node-label {{ stroke: #f6f8fb; stroke-width: 4px; }}
+:root[data-theme="light"] .cp-detail {{ background: #f8fafc; border-color: #cbd5e1; color: #475569; }}
+:root[data-theme="light"] .cp-detail.selected.added {{ border-left-color: #1a7f37; }}
+:root[data-theme="light"] .cp-detail.selected.removed {{ border-left-color: #cf222e; }}
+:root[data-theme="light"] .cp-detail.selected.modified {{ border-left-color: #9a6700; }}
+:root[data-theme="light"] .feat-ghost text,
+:root[data-theme="light"] .dep-ghost text {{ fill: #b42318; }}
+:root[data-theme="light"] .feat-ghost-link,
+:root[data-theme="light"] .dep-ghost-link {{ stroke: #c2413a; stroke-opacity: .68; }}
+:root[data-theme="light"] .feat-ghost .change-status-dot,
+:root[data-theme="light"] .dep-ghost .change-status-dot {{ fill: var(--change-removed-strong); stroke: var(--change-removed); }}
+:root[data-theme="light"] #search::placeholder,
+:root[data-theme="light"] #cp-search::placeholder {{ color: #64748b; opacity: 1; }}
+:root[data-theme="light"] #status-seg button:not(.active),
+:root[data-theme="light"] .cp-filter-seg button:not(.active) {{ color: #475569; }}
+:root[data-theme="light"] .cp-filter-seg button b {{ color: #64748b; }}
+:root[data-theme="light"] .cp-filter-seg button.active b {{ color: #1f2937; }}
+:root[data-theme="light"] .no-data {{ color: #94a3b8; }}
+#d3-offline {{ display: none; position: fixed; inset: 78px 0 0; z-index: 120; place-items: center; padding: 32px; background: #0d1117; color: #c9d1d9; text-align: center; }}
+.d3-unavailable #d3-offline {{ display: grid; }}
+#d3-offline strong {{ display: block; margin-bottom: 8px; font-size: 16px; color: #f0f6fc; }}
+#d3-offline p {{ max-width: 620px; color: #8b949e; line-height: 1.6; }}
+#d3-offline code {{ color: #79c0ff; }}
+:root[data-theme="light"] #d3-offline {{ background: #f6f8fb; color: #1f2937; }}
+:root[data-theme="light"] #d3-offline strong {{ color: #1f2937; }}
+:root[data-theme="light"] #d3-offline p {{ color: #475569; }}
+:root[data-theme="light"] #d3-offline code {{ color: #1d4ed8; }}
 </style>
 </head>
 <body>
 <div id="header">
+  <div id="header-row1">
   <h1>RPG: {repo_name}</h1>
   <div id="tabs">
     <button id="tab-feat" class="active" onclick="switchTab('feat')">Feat Graph</button>
     <button id="tab-dep" onclick="switchTab('dep')">Dep Graph</button>
-    <button id="tab-map" onclick="switchTab('map')">Mapping</button>
+    <button id="tab-map" onclick="openMapping()">Mapping</button>
   </div>
   <div id="stats-feat">
-    <span class="stat">Nodes: <b>{feat_node_count}</b></span>
-    <span class="stat">Edges: <b>{feat_edge_count}</b> ({feat_edge_summary})</span>
+    <span class="stat" title="Non-hierarchy edge types: {feat_edge_summary}"><b>{feat_node_count}</b> tree nodes · <b>{feat_edge_count}</b> semantic edges</span>
   </div>
   <div id="stats-dep" style="display:none">
-    <span class="stat">Nodes: <b>{dep_node_count}</b></span>
-    <span class="stat">Edges: <b>{dep_edge_count}</b> ({dep_edge_summary})</span>
     <span class="stat" id="dep-visible-stat"></span>
+    <span class="stat" title="Connected semantic subgraph. Raw graph including contains edges: {raw_dep_node_count} nodes / {raw_dep_edge_count} edges. Relation types: {dep_edge_summary}">Full: <b>{dep_node_count}</b> nodes · <b>{dep_edge_count}</b> relations</span>
   </div>
   <div id="stats-map" style="display:none">
-    <span class="stat">Mappings: <b>{len(dep_to_rpg)}</b> dep nodes → <b>{map_count}</b> RPG features</span>
+    <span class="stat"><b>{len(dep_to_rpg)}</b> mapped dep nodes · <b>{map_count}</b> mapping relations</span>
   </div>
   <div id="controls">
     <input id="search" type="text" placeholder="Search nodes...">
@@ -398,30 +707,59 @@ svg {{ width: 100vw; height: 100vh; }}
       <button onclick="mapExpandLess()">−</button>
     </span>
     <button id="btn-edges" class="active" onclick="toggleEdges()">Edges</button>
+    <button id="btn-fit" onclick="fitCurrent()">Fit</button>
+    <button id="btn-reset" onclick="resetCurrent()">Reset</button>
+    <button id="btn-theme" onclick="toggleRpgTheme()" title="Toggle light / dark theme" aria-label="Toggle theme">☾</button>
+    <button id="btn-changes-panel" onclick="toggleChangesPanel()" style="display:none">Changes ⟩</button>
   </div>
   <div id="legend">
   </div>
+  </div>
+  <div id="header-row2" style="display:none">
+    <div class="hdr-group"><span class="hdr-label">View</span>
+      <div id="mode-seg" class="seg2">
+        <button id="mode-changes" class="active" onclick="setMode('changes')">Current Changes</button>
+        <button id="mode-full" onclick="setMode('full')">Full Graph</button>
+      </div>
+    </div>
+  </div>
 </div>
+<aside id="changes-panel" style="display:none">
+  <div id="cp-head">
+    <div><div><strong id="cp-title">Changes</strong> <span id="cp-count" class="cp-count">0</span></div><small id="cp-version"></small></div>
+    <button id="cp-collapse" onclick="toggleChangesPanel()" title="Collapse">⟩</button>
+  </div>
+  <div id="status-group" class="cp-filters">
+    <div id="status-seg" class="cp-filter-seg">
+      <button data-status="all" class="active" onclick="setStatusFilter('all')"><span class="cp-filter-main"><span class="cp-filter-icon">Δ</span><span>All changes</span></span><b id="cnt-all">0</b></button>
+      <button data-status="added" onclick="setStatusFilter('added')"><span class="cp-filter-main"><span class="cp-filter-icon">+</span><span>Added</span></span><b id="cnt-added">0</b></button>
+      <button data-status="removed" onclick="setStatusFilter('removed')"><span class="cp-filter-main"><span class="cp-filter-icon">−</span><span>Removed</span></span><b id="cnt-removed">0</b></button>
+      <button data-status="modified" onclick="setStatusFilter('modified')"><span class="cp-filter-main"><span class="cp-filter-icon">~</span><span>Modified</span></span><b id="cnt-modified">0</b></button>
+    </div>
+  </div>
+  <label id="cp-search-wrap"><span>⌕</span><input id="cp-search" type="text" placeholder="Search changed nodes"></label>
+  <div id="cp-detail" class="cp-detail empty">Select a changed node to see what changed.</div>
+  <div id="cp-list"></div>
+</aside>
 <div id="tooltip" class="tooltip" style="display:none"></div>
+<div id="change-summary" hidden></div>
+<div id="d3-offline"><div><strong>Graph library unavailable offline</strong><p>This report opened successfully, but the interactive RPG graph requires a local <code>assets/d3.v7.min.js</code>. No development server is required once that fixed asset is included.</p></div></div>
 <div id="canvas-overlay">
   <div class="ov-title">Legend</div>
   <div class="legend-item"><div class="legend-line" style="background:#f0883e"></div>imports</div>
   <div class="legend-item"><div class="legend-line" style="background:#a371f7"></div>inherits</div>
   <div class="legend-item"><div class="legend-line" style="background:#3fb950"></div>invokes</div>
   <div class="legend-item"><div class="legend-line" style="background:#79c0ff"></div>references</div>
-  <div class="ov-section">
-    <div class="ov-title">Controls</div>
-    <span class="ov-key">Click</span> node/group — select &amp; filter edges<br>
-    <span class="ov-key">Double-click</span> node — expand / collapse<br>
-    <span class="ov-key">Double-click</span> group border — collapse<br>
-    <span class="ov-key">Click</span> background — deselect<br>
-    <span class="ov-key">Drag</span> node — move<br>
-    <span class="ov-key">Scroll</span> — zoom
-  </div>
+  <details class="ov-help"><summary>Controls</summary><div>
+    <span class="ov-key">Click</span> — select / filter<br>
+    <span class="ov-key">Double-click</span> — expand / collapse<br>
+    <span class="ov-key">Drag</span> — move · <span class="ov-key">Scroll</span> — zoom
+  </div></details>
 </div>
 <svg id="canvas"></svg>
 
 <script>
+if (window.d3) {{
 // ── Data ──
 const treeData = {tree_json};
 const semanticEdges = {edges_json};
@@ -432,6 +770,26 @@ const depTreeData = {dep_tree_json};
 const depToRpgMap = {dep_to_rpg_json};
 const hasDep = {'true' if has_dep else 'false'};
 const hasMap = {'true' if has_map else 'false'};
+const changeData = {change_json};
+const hasChangeData = {has_change};
+
+function applyRpgTheme(theme, persist) {{
+  const value = theme === 'light' ? 'light' : 'dark';
+  document.documentElement.setAttribute('data-theme', value);
+  const button = document.getElementById('btn-theme');
+  if (button) button.textContent = value === 'light' ? '☀' : '☾';
+  if (persist) {{
+    try {{ localStorage.setItem('cmind-report-theme', value); }} catch (e) {{}}
+    if (window.parent !== window) window.parent.postMessage({{type: 'cmind:theme-change', theme: value}}, '*');
+  }}
+}}
+function toggleRpgTheme() {{
+  applyRpgTheme(document.documentElement.getAttribute('data-theme') === 'light' ? 'dark' : 'light', true);
+}}
+applyRpgTheme(document.documentElement.getAttribute('data-theme'), false);
+window.addEventListener('storage', event => {{
+  if (event.key === 'cmind-report-theme' && event.newValue) applyRpgTheme(event.newValue, false);
+}});
 
 const nodeTypeColors = {{
   root: '#8b949e', repository: '#8b949e', repo: '#8b949e',
@@ -480,10 +838,36 @@ Object.entries(arrowColors).forEach(([cls, color]) => {{
     .attr('d', 'M0,0 L10,3 L0,6 Z')
     .attr('fill', color);
 }});
+const directedEdgeColors = {{
+  imports: '#f0883e', invokes: '#3fb950', inherits: '#a371f7', references: '#79c0ff',
+  contains: '#8b949e', maps_to: '#f0883e', default: '#8b949e',
+}};
+Object.entries(directedEdgeColors).forEach(([relation, color]) => {{
+  defs.append('marker')
+    .attr('id', 'arrow-rel-' + relation)
+    .attr('viewBox', '0 0 10 6')
+    .attr('refX', 10).attr('refY', 3)
+    .attr('markerWidth', 7).attr('markerHeight', 5)
+    .attr('orient', 'auto')
+    .append('path')
+    .attr('d', 'M0,0 L10,3 L0,6 Z')
+    .attr('fill', color);
+}});
 
 // ── Tab state ──
 let activeTab = 'feat';
 let showEdges = true;
+let externalChanges = {{
+  active: false, mode: 'full', filter: 'all', contextMode: 'context', emphasize: false,
+  feature: {{ added: new Set(), removed: new Set(), modified: new Set(), rows: {{}} }},
+  dependency: {{ added: new Set(), removed: new Set(), modified: new Set(), rows: {{}} }},
+}};
+const originalGraphUi = {{
+  featStats: document.getElementById('stats-feat').innerHTML,
+  depStats: document.getElementById('stats-dep').innerHTML,
+  mapStats: document.getElementById('stats-map').innerHTML,
+  overlay: document.getElementById('canvas-overlay').innerHTML,
+}};
 
 // ══════════════════════════════════════════════
 // FEAT GRAPH (existing tree layout)
@@ -493,8 +877,16 @@ const gFeat = svg.append('g').attr('class', 'feat-group').attr('transform', `tra
 const edgeLayer = gFeat.append('g').attr('class', 'edge-layer');
 const linkLayer = gFeat.append('g').attr('class', 'link-layer');
 const nodeLayer = gFeat.append('g').attr('class', 'node-layer');
+const featGhostLayer = gFeat.append('g').attr('class', 'feat-ghost-layer');
 
 const zoomFeat = d3.zoom().scaleExtent([0.1, 4]).on('zoom', e => gFeat.attr('transform', e.transform));
+
+const gChange = svg.append('g').attr('class', 'change-group').style('display', 'none');
+const changeLinkLayer = gChange.append('g').attr('class', 'change-links');
+const changeNodeLayer = gChange.append('g').attr('class', 'change-nodes');
+const zoomChange = d3.zoom().scaleExtent([0.08, 5]).on('zoom', e => gChange.attr('transform', e.transform));
+let changeSimulation = null;
+const gRemovedRail = svg.append('g').attr('class', 'removed-rail').style('display', 'none');
 
 let featSelectedNode = null;
 const root = d3.hierarchy(treeData, d => d.children);
@@ -528,14 +920,16 @@ function update(source) {{
     .attr('transform', `translate(${{source.y0 || 0}},${{source.x0 || 0}})`)
     .on('click', (event, d) => {{
       event.stopPropagation();
+      const changeKind = externalKind(String(d.data.id), externalChanges.feature);
+      if (changeKind) {{ focusChangeNode(String(d.data.id), 'feature'); return; }}
       // Single click: select/deselect node
-      const circle = d3.select(event.currentTarget).select('circle');
+      const circle = d3.select(event.currentTarget).select('.node-dot');
       if (featSelectedNode === d) {{
         featSelectedNode = null;
-        nodeLayer.selectAll('circle').attr('stroke-width', 1.5).attr('stroke', '#30363d');
+        nodeLayer.selectAll('.node-dot').attr('stroke-width', 1.5).attr('stroke', '#30363d');
       }} else {{
         featSelectedNode = d;
-        nodeLayer.selectAll('circle').attr('stroke-width', 1.5).attr('stroke', '#30363d');
+        nodeLayer.selectAll('.node-dot').attr('stroke-width', 1.5).attr('stroke', '#30363d');
         circle.attr('stroke', '#f0883e').attr('stroke-width', 2.5);
       }}
     }})
@@ -548,10 +942,13 @@ function update(source) {{
     .on('mouseover', showTooltipFeat)
     .on('mouseout', hideTooltip);
 
-  nodeEnter.append('circle')
+  nodeEnter.append('circle').attr('class', 'node-dot')
     .attr('r', d => d._children ? 5 : (d.children ? 4 : 3))
     .attr('fill', getNodeColor);
-  nodeEnter.append('text')
+  nodeEnter.append('circle').attr('class', 'change-status-dot').attr('r', 6);
+  nodeEnter.append('text').attr('class', 'change-status-glyph').attr('dy', 3).text(d => externalChanges.feature.added.has(String(d.data.id)) ? '+' : '~');
+  nodeEnter.append('circle').attr('class', 'change-focus-ring').attr('r', 9).style('display', 'none');
+  nodeEnter.append('text').attr('class', 'node-label')
     .attr('dy', 3.5)
     .attr('x', -10)
     .attr('text-anchor', 'end')
@@ -561,13 +958,17 @@ function update(source) {{
     }});
 
   const nodeUpdate = nodeEnter.merge(node);
+  const featureFocusId = externalChanges.focus?.scope === 'feature' ? String(externalChanges.focus.node_id) : null;
   nodeUpdate.transition().duration(300)
     .attr('transform', d => `translate(${{d.y}},${{d.x}})`)
-    .attr('class', d => 'node' + (d._children ? ' node-collapsed' : ''));
-  nodeUpdate.select('circle')
+    .attr('class', d => 'node' + (d._children ? ' node-collapsed' : '')
+      + (featureFocusId === String(d.data.id) ? ' change-focused' : ''));
+  nodeUpdate.select('.node-dot')
     .attr('r', d => d._children ? 5 : (d.children ? 4 : 3))
     .attr('fill', getNodeColor);
-  nodeUpdate.select('text')
+  nodeUpdate.select('.change-focus-ring').attr('r', 9)
+    .style('display', d => featureFocusId === String(d.data.id) ? null : 'none');
+  nodeUpdate.select('.node-label')
     .attr('x', -10)
     .attr('text-anchor', 'end');
 
@@ -591,6 +992,8 @@ function update(source) {{
     }}).remove();
 
   drawSemanticEdges();
+  applyExternalChangeHighlights();
+  if (externalChanges.active) setTimeout(applyExternalChangeHighlights, 350);
   nodes.forEach(d => {{ d.x0 = d.x; d.y0 = d.y; }});
 }}
 
@@ -601,7 +1004,7 @@ function diagonal(s, d) {{
 // Click background to deselect feat node
 svg.on('click.feat-deselect', () => {{
   featSelectedNode = null;
-  nodeLayer.selectAll('circle').attr('stroke-width', 1.5).attr('stroke', '#30363d');
+  nodeLayer.selectAll('.node-dot').attr('stroke-width', 1.5).attr('stroke', '#30363d');
 }});
 
 function drawSemanticEdges() {{
@@ -710,6 +1113,8 @@ const depHullG = gDep.append('g').attr('class', 'dep-hulls');
 const depLinkG = gDep.append('g').attr('class', 'dep-links');
 const depNodeG = gDep.append('g').attr('class', 'dep-nodes');
 const depLabelG = gDep.append('g').attr('class', 'dep-labels');
+const depChangeGroupG = gDep.append('g').attr('class', 'dep-change-groups');
+const depGhostG = gDep.append('g').attr('class', 'dep-ghosts');
 const zoomDep = d3.zoom().scaleExtent([0.05, 4]).on('zoom', e => gDep.attr('transform', e.transform));
 
 // Arrow markers
@@ -744,6 +1149,7 @@ const hullBorderColors = [
 // ── Dep graph data structures ──
 let depInitialized = false;
 let depSimulation = null;
+let pendingDepFocusId = null;
 
 const depNodeMap = {{}};
 const depChildrenOf = {{}};
@@ -907,9 +1313,6 @@ function depRedraw() {{
   const visIds = visNodes.map(n => n.id);
   const mergedEdges = depGetMergedEdges(visIds);
 
-  const el = document.getElementById('dep-visible-stat');
-  if (el) el.innerHTML = `Visible: <b>${{visNodes.length}}</b> nodes, <b>${{mergedEdges.length}}</b> edges`;
-
   // Identify expanded parent nodes (they become hull labels, not force nodes)
   const expandedParentIds = new Set();
   depNodesRaw.forEach(n => {{
@@ -957,10 +1360,14 @@ function depRedraw() {{
 
   depVisNodeDataMap = {{}};
   forceNodes.forEach(n => {{ depVisNodeDataMap[n.id] = n; }});
+  drawDepChangedGroups();
+  drawDepRemovedGhosts();
 
   // Edges: filter to force-node endpoints only
   // For edges involving expanded parents, remap to the parent's visible rep
   const validEdges = mergedEdges.filter(e => depVisNodeDataMap[e.source] && depVisNodeDataMap[e.target]);
+  const visibleStat = document.getElementById('dep-visible-stat');
+  if (visibleStat) visibleStat.innerHTML = `<b>${{visNodes.length}}</b> visible nodes · <b>${{validEdges.length}}</b> drawn relations`;
 
   if (depSimulation) depSimulation.stop();
 
@@ -970,7 +1377,7 @@ function depRedraw() {{
   linkSel.exit().remove();
   const linkEnter = linkSel.enter().append('line')
     .attr('class', d => 'dep-link ' + (depEdgeClassMap[d.type] || 'dep-link-default'))
-    .attr('marker-end', d => `url(#arrow-${{depEdgeClassMap[d.type] ? d.type : 'default'}})`)
+    .attr('marker-end', d => `url(#arrow-rel-${{directedEdgeColors[d.type] ? d.type : 'default'}})`)
     .style('display', showEdges ? null : 'none');
   const linkAll = linkEnter.merge(linkSel);
 
@@ -991,6 +1398,9 @@ function depRedraw() {{
       }}
       depUpdateEdgeVisibility();
       depUpdateNodeHighlight();
+      const changed = externalKind(String(d.id), externalChanges.dependency);
+      const removed = externalChanges.dependency.removed.has(String(d.id));
+      if (changed || removed) focusChangeNode(String(d.id), 'dependency');
     }})
     .on('dblclick', (event, d) => {{
       event.stopPropagation();
@@ -1022,13 +1432,16 @@ function depRedraw() {{
         d.fx = null; d.fy = null;
       }}));
 
-  nodeEnter.append('circle');
+  nodeEnter.append('circle').attr('class', 'dep-node-dot');
+  nodeEnter.append('circle').attr('class', 'change-status-dot').attr('r', 6);
+  nodeEnter.append('text').attr('class', 'change-status-glyph').attr('dy', 3).text(d => externalChanges.dependency.added.has(String(d.id)) ? '+' : '~');
+  nodeEnter.append('circle').attr('class', 'change-focus-ring').attr('r', 10).style('display', 'none');
   nodeEnter.append('text');
 
   const nodeAll = nodeEnter.merge(nodeSel);
   nodeAll.attr('class', d => 'dep-node' + (d.isCollapsed ? ' dep-node-collapsed' : ''));
 
-  nodeAll.select('circle')
+  nodeAll.select('.dep-node-dot')
     .attr('r', d => {{
       if (d.isCollapsed) {{
         const desc = depAllDescendants[d.id];
@@ -1054,6 +1467,8 @@ function depRedraw() {{
       const label = name + suffix;
       return label.length > 30 ? label.slice(0, 28) + '...' : label;
     }});
+  applyExternalChangeHighlights();
+  if (depSelectedNodes.size > 0) depUpdateNodeHighlight();
 
   // ── Hierarchical cluster force: attraction decays with ancestor distance ──
   // Pre-compute ancestor chains for each force node (up to visible ancestors)
@@ -1142,6 +1557,7 @@ function depRedraw() {{
   }}
 
   // ── Simulation ──
+  let depTickCount = 0;
   depSimulation = d3.forceSimulation(forceNodes)
     .force('link', d3.forceLink(validEdges).id(d => d.id).distance(d => {{
       const sp = depParentMap[typeof d.source === 'object' ? d.source.id : d.source];
@@ -1182,34 +1598,84 @@ function depRedraw() {{
 
       // Update hulls
       depDrawHulls();
+      depTickCount++;
+      if (activeTab === 'dep' && depTickCount % 8 === 0) {{
+        applyExternalChangeHighlights();
+        drawDepChangedGroups();
+        drawDepRemovedGhosts();
+      }}
+    }})
+    .on('end', () => {{
+      if (activeTab !== 'dep') return;
+      applyExternalChangeHighlights();
+      if (depSelectedNodes.size > 0) depUpdateNodeHighlight();
+      drawDepChangedGroups();
+      drawDepRemovedGhosts();
+      if (pendingDepFocusId) {{
+        const id = pendingDepFocusId;
+        pendingDepFocusId = null;
+        focusDepRenderedNode(id);
+      }} else depFitVisible();
     }});
+}}
+
+function depFitVisible() {{
+  const bounds = gDep.node().getBBox();
+  if (!bounds.width || !bounds.height) return;
+  const padding = 100;
+  const rightInset = (typeof cpOpen !== 'undefined' && cpOpen) ? 330 : 20;
+  const usableWidth = Math.max(width - rightInset, 180);
+  const scale = Math.min(
+    usableWidth / (bounds.width + padding),
+    height / (bounds.height + padding),
+    1.15,
+  ) * 0.88;
+  svg.call(
+    zoomDep.transform,
+    d3.zoomIdentity
+      .translate(
+        usableWidth / 2 - (bounds.x + bounds.width / 2) * scale,
+        height / 2 - (bounds.y + bounds.height / 2) * scale,
+      )
+      .scale(scale),
+  );
 }}
 
 // ── Draw hulls for expanded groups ──
 
 // ── Edge visibility based on selection ──
 function depUpdateEdgeVisibility() {{
+  const relatedNodes = new Set(depSelectedNodes);
+  if (depSelectedNodes.size > 0) {{
+    depLinkG.selectAll('line.dep-link').each(function(d) {{
+      const sid = typeof d.source === 'object' ? d.source.id : d.source;
+      const tid = typeof d.target === 'object' ? d.target.id : d.target;
+      if (depSelectedNodes.has(sid) || depSelectedNodes.has(tid)) {{ relatedNodes.add(sid); relatedNodes.add(tid); }}
+    }});
+  }}
   depLinkG.selectAll('line.dep-link').each(function(d) {{
     if (!showEdges) {{
       d3.select(this).style('display', 'none');
       return;
     }}
     if (depSelectedNodes.size === 0) {{
-      d3.select(this).style('display', null).style('opacity', 0.5);
+      d3.select(this).style('display', null).style('opacity', null).style('stroke-width', null);
       return;
     }}
     const sid = typeof d.source === 'object' ? d.source.id : d.source;
     const tid = typeof d.target === 'object' ? d.target.id : d.target;
     if (depSelectedNodes.has(sid) || depSelectedNodes.has(tid)) {{
-      d3.select(this).style('display', null).style('opacity', 0.9);
+      d3.select(this).style('display', null).style('opacity', 0.95).style('stroke-width', 2.6);
     }} else {{
-      d3.select(this).style('display', 'none');
+      d3.select(this).style('display', null).style('opacity', 0.06).style('stroke-width', null);
     }}
   }});
+  return relatedNodes;
 }}
 
 // ── Node highlight based on selection ──
 function depUpdateNodeHighlight() {{
+  const relatedNodes = depUpdateEdgeVisibility();
   depNodeG.selectAll('g.dep-node').each(function(d) {{
     const el = d3.select(this);
     if (depSelectedNodes.size === 0) {{
@@ -1220,9 +1686,12 @@ function depUpdateNodeHighlight() {{
     if (depSelectedNodes.has(d.id)) {{
       el.select('circle').style('stroke', '#58a6ff').style('stroke-width', 3);
       el.style('opacity', 1);
+    }} else if (relatedNodes.has(d.id)) {{
+      el.select('circle').style('stroke', null).style('stroke-width', null);
+      el.style('opacity', 1);
     }} else {{
       el.select('circle').style('stroke', null).style('stroke-width', null);
-      el.style('opacity', 0.4);
+      el.style('opacity', 0.16);
     }}
   }});
 }}
@@ -1592,6 +2061,7 @@ function mapUpdate() {{
 
   // Draw mapping links
   mapDrawLinks();
+  applyExternalChangeHighlights();
 }}
 
 function mapDrawLinks() {{
@@ -1724,6 +2194,7 @@ function mapExpandLess() {{
 // ══════════════════════════════════════════════
 
 function switchTab(tab) {{
+  if (tab !== activeTab && typeof externalChanges === 'object' && externalChanges) externalChanges.focus = null;
   activeTab = tab;
   document.getElementById('tab-feat').classList.toggle('active', tab === 'feat');
   document.getElementById('tab-dep').classList.toggle('active', tab === 'dep');
@@ -1734,6 +2205,14 @@ function switchTab(tab) {{
   document.getElementById('feat-controls').style.display = tab === 'feat' ? 'inline' : 'none';
   document.getElementById('dep-controls').style.display = tab === 'dep' ? 'inline' : 'none';
   document.getElementById('map-controls').style.display = tab === 'map' ? 'inline' : 'none';
+
+  gChange.style('display', 'none');
+  document.getElementById('stats-feat').innerHTML = originalGraphUi.featStats;
+  document.getElementById('stats-dep').innerHTML = originalGraphUi.depStats;
+  document.getElementById('stats-map').innerHTML = originalGraphUi.mapStats;
+  document.getElementById('canvas-overlay').innerHTML = originalGraphUi.overlay;
+  document.getElementById('search').style.display = null;
+  document.getElementById('btn-edges').style.display = null;
 
   gFeat.style('display', tab === 'feat' ? null : 'none');
   gDep.style('display', tab === 'dep' ? null : 'none');
@@ -1748,7 +2227,7 @@ function switchTab(tab) {{
       gDep.append('foreignObject').attr('width', width).attr('height', height)
         .append('xhtml:div').attr('class', 'no-data').text('No dep graph data');
     }} else {{
-      depInit();
+      if (depInitialized) depRedraw(); else depInit();
       if (depSimulation) depSimulation.alpha(0.1).restart();
     }}
     svg.on('.zoom', null).call(zoomDep);
@@ -1775,7 +2254,721 @@ function switchTab(tab) {{
           .scale(scale));
     }}, 350);
   }}
+  if (externalChanges.mode === 'changes' && activeTab === 'dep' && typeof drawChangeGraph === 'function') {{
+    document.getElementById('search').style.display = 'none';
+    document.getElementById('feat-controls').style.display = 'none';
+    document.getElementById('dep-controls').style.display = 'none';
+    document.getElementById('map-controls').style.display = 'none';
+    document.getElementById('btn-edges').style.display = 'none';
+    drawChangeGraph();
+  }} else if (typeof applyChangeEmphasis === 'function') {{
+    applyChangeEmphasis();
+  }}
+  if (typeof syncChangesPanelVisibility === 'function') syncChangesPanelVisibility();
+  if (typeof renderChangesPanel === 'function') renderChangesPanel();
 }}
+
+// ── External change highlighting (dashboard parent → graph iframe) ──
+function externalNodeSets(value) {{
+  const rows = value || {{}};
+  const ids = key => new Set((rows[key] || []).map(item => String(item.node_id || item.id || item)));
+  return {{ added: ids('added'), removed: ids('removed'), modified: ids('modified'), rows }};
+}}
+
+function externalKind(id, sets) {{
+  let kind = null;
+  if (sets.added.has(id)) kind = 'added';
+  else if (sets.modified.has(id)) kind = 'modified';
+  if (externalChanges.filter !== 'all' && externalChanges.filter !== kind) return null;
+  return kind;
+}}
+
+function applyChangeClasses(selection, idOf, sets) {{
+  const hasVisible = externalChanges.filter === 'all'
+    ? sets.added.size + sets.removed.size + sets.modified.size > 0
+    : (sets[externalChanges.filter]?.size || 0) > 0;
+  const dimUnchanged = externalChanges.mode === 'changes' && hasVisible;
+  selection.each(function(d) {{
+    const id = String(idOf(d));
+    const kind = externalKind(id, sets);
+    const element = d3.select(this);
+    element
+      .classed('change-added', kind === 'added')
+      .classed('change-modified', kind === 'modified')
+      .classed('change-dim', dimUnchanged && !kind);
+    element.select('.change-status-glyph').text(kind === 'added' ? '+' : kind === 'modified' ? '~' : '');
+  }});
+}}
+
+function clearGraphFocusVisuals() {{
+  nodeLayer.selectAll('g.node').classed('change-focused', false).select('.change-focus-ring').style('display', 'none');
+  depNodeG.selectAll('g.dep-node').classed('change-focused', false).select('.change-focus-ring').style('display', 'none');
+  depHullG.selectAll('.dep-hull').classed('change-focused', false);
+  depLabelG.selectAll('.dep-hull-label').classed('change-focused', false);
+  depChangeGroupG.selectAll('.dep-change-group').classed('focused', false);
+  featGhostLayer.selectAll('.feat-ghost').classed('focused', false).select('.change-focus-ring').style('display', 'none');
+  depGhostG.selectAll('.dep-ghost').classed('focused', false).select('.change-focus-ring').style('display', 'none');
+}}
+
+function applyExternalChangeHighlights() {{
+  if (!hasChangeData || (externalChanges.mode !== 'changes' && !externalChanges.emphasize)) return;
+  applyChangeClasses(nodeLayer.selectAll('g.node'), d => d.data.id, externalChanges.feature);
+  applyChangeClasses(depNodeG.selectAll('g.dep-node'), d => d.id, externalChanges.dependency);
+  applyChangeClasses(depHullG.selectAll('path.dep-hull'), d => d.id, externalChanges.dependency);
+  applyChangeClasses(depLabelG.selectAll('text.dep-hull-label'), d => d.id, externalChanges.dependency);
+  applyChangeClasses(mapFeatNodeLayer.selectAll('g.map-feat-node'), d => d.data.id, externalChanges.feature);
+  applyChangeClasses(mapDepNodeLayer.selectAll('g.map-dep-node'), d => d.data.id, externalChanges.dependency);
+}}
+
+function clearExternalChangeHighlights() {{
+  [nodeLayer.selectAll('g.node'), depNodeG.selectAll('g.dep-node'), depHullG.selectAll('path.dep-hull'),
+    depLabelG.selectAll('text.dep-hull-label'), mapFeatNodeLayer.selectAll('g.map-feat-node'), mapDepNodeLayer.selectAll('g.map-dep-node')]
+    .forEach(selection => selection.classed('change-added', false).classed('change-modified', false).classed('change-dim', false));
+  depSelectedNodes.clear();
+  depUpdateEdgeVisibility();
+  depUpdateNodeHighlight();
+}}
+
+function expandFeatureChangePaths(ids) {{
+  function visit(node) {{
+    const children = node.children || node._children || [];
+    let contains = ids.has(String(node.data.id));
+    children.forEach(child => {{ if (visit(child)) contains = true; }});
+    if (contains && node._children) {{ node.children = node._children; node._children = null; }}
+    return contains;
+  }}
+  visit(root);
+}}
+
+function expandDependencyChangePaths(ids) {{
+  ids.forEach(id => {{
+    let current = id;
+    while (current) {{
+      depCollapsed.delete(current);
+      current = depParentMap[current];
+    }}
+  }});
+}}
+
+function applyChangeEmphasis() {{
+  featGhostLayer.selectAll('*').remove();
+  document.getElementById('canvas-overlay').innerHTML = originalGraphUi.overlay;
+  if (!hasChangeData || (externalChanges.mode !== 'changes' && !externalChanges.emphasize)) {{
+    clearExternalChangeHighlights();
+    clearGraphFocusVisuals();
+    return;
+  }}
+  if (!externalChanges.focus) clearGraphFocusVisuals();
+  const focusMode = externalChanges.mode === 'changes';
+  if (activeTab === 'feat') {{
+    if (focusMode) {{
+      const vis = new Set([...externalChanges.feature.added, ...externalChanges.feature.modified]);
+      (externalChanges.feature.rows?.removed || []).forEach(n => {{ if (n.parent_id) vis.add(String(n.parent_id)); }});
+      if (vis.size) {{ expandFeatureChangePaths(vis); update(root); }}
+    }}
+    applyExternalChangeHighlights();
+    drawFeatRemovedGhosts();
+    if (focusMode) requestAnimationFrame(fitFeatEmphasis);
+  }} else if (activeTab === 'dep') {{
+    if (focusMode) {{
+      const vis = new Set([...externalChanges.dependency.added, ...externalChanges.dependency.modified]);
+      (externalChanges.dependency.rows?.removed || []).forEach(n => {{ if (n.parent_id) vis.add(String(n.parent_id)); }});
+      if (vis.size) {{ expandDependencyChangePaths(vis); depRedraw(); }}
+    }}
+    applyExternalChangeHighlights();
+  }}
+  renderChangeStatusOverlay();
+}}
+
+function renderChangeStatusOverlay() {{
+  if (!hasChangeData) return;
+  const el = document.getElementById('canvas-overlay');
+  const dimNote = externalChanges.mode === 'changes' ? `<div class="legend-item"><span class="change-legend-mark context">○</span> Unchanged (dim)</div>` : '';
+  el.innerHTML = originalGraphUi.overlay
+    + `<div class="ov-section"><div class="ov-title">Change status</div>`
+    + `<div class="legend-item"><span class="change-legend-mark added">+</span> Added</div>`
+    + `<div class="legend-item"><span class="change-legend-mark removed">−</span> Removed</div>`
+    + `<div class="legend-item"><span class="change-legend-mark modified">~</span> Modified</div>`
+    + dimNote + `</div>`;
+}}
+
+function drawFeatRemovedGhosts() {{
+  featGhostLayer.selectAll('*').remove();
+  if (!hasChangeData || activeTab !== 'feat') return;
+  const filter = externalChanges.filter;
+  if (filter !== 'all' && filter !== 'removed') return;
+  const removed = (externalChanges.feature.rows?.removed || []).map(node => ({{...node, children: []}}));
+  const removedById = new Map(removed.map(node => [String(node.node_id), node]));
+  const byParent = {{}};
+  removed.forEach(n => {{
+    const removedParent = removedById.get(String(n.parent_id));
+    if (removedParent) {{ removedParent.children.push(n); return; }}
+    const currentParent = nodeById[String(n.parent_id)];
+    if (!currentParent) return;
+    (byParent[String(n.parent_id)] = byParent[String(n.parent_id)] || {{parent: currentParent, roots: []}}).roots.push(n);
+  }});
+  const focusId = externalChanges.focus?.node_id;
+  Object.values(byParent).forEach(grp => {{
+    const ghostRoot = d3.hierarchy({{children: grp.roots}}, node => node.children);
+    const ghostLayout = d3.tree().nodeSize([18, 210])(ghostRoot);
+    const positions = new Map();
+    ghostLayout.descendants().slice(1).forEach(d => {{
+      positions.set(String(d.data.node_id), {{x: grp.parent.y + d.y, y: grp.parent.x + d.x}});
+    }});
+    ghostLayout.descendants().slice(1).forEach(d => {{
+      const n = d.data;
+      const pos = positions.get(String(n.node_id));
+      const parentPos = d.parent.depth === 0
+        ? {{x: grp.parent.y, y: grp.parent.x}}
+        : positions.get(String(d.parent.data.node_id));
+      featGhostLayer.append('path').attr('class', 'feat-ghost-link')
+        .attr('d', `M${{parentPos.x}},${{parentPos.y}} C${{(parentPos.x + pos.x) / 2}},${{parentPos.y}} ${{(parentPos.x + pos.x) / 2}},${{pos.y}} ${{pos.x}},${{pos.y}}`);
+      const g = featGhostLayer.append('g')
+        .attr('class', 'feat-ghost ' + (d.children ? 'branch' : 'leaf') + (focusId === String(n.node_id) ? ' focused' : ''))
+        .attr('data-ghost-id', String(n.node_id))
+        .attr('transform', `translate(${{pos.x}},${{pos.y}})`)
+        .on('click', event => {{ event.stopPropagation(); focusChangeNode(String(n.node_id), 'feature'); }});
+      g.append('circle').attr('class', 'change-status-dot').attr('r', 6);
+      g.append('text').attr('class', 'change-status-glyph').attr('dy', 3).text('−');
+      g.append('circle').attr('class', 'change-focus-ring').attr('r', 11).style('display', focusId === String(n.node_id) ? null : 'none');
+      const nm = n.name || n.node_id;
+      g.append('text').attr('class', 'change-node-label')
+        .attr('x', d.children ? 0 : 10).attr('y', d.children ? 18 : 0).attr('dy', d.children ? 0 : 3.5)
+        .text(nm.length > 30 ? nm.slice(0, 28) + '…' : nm);
+    }});
+  }});
+}}
+
+function drawDepRemovedGhosts() {{
+  depGhostG.selectAll('*').remove();
+  if (!hasChangeData || activeTab !== 'dep' || externalChanges.mode !== 'full' || !externalChanges.emphasize) return;
+  const filter = externalChanges.filter;
+  if (filter !== 'all' && filter !== 'removed') return;
+  const removed = (externalChanges.dependency.rows?.removed || []).map(node => ({{...node, children: []}}));
+  const removedById = new Map(removed.map(node => [String(node.node_id), node]));
+  const roots = [];
+  removed.forEach(node => {{
+    const removedParent = removedById.get(String(node.parent_id));
+    if (removedParent) {{ removedParent.children.push(node); return; }}
+    const parent = depNodeMap[String(node.parent_id)];
+    if (parent && Number.isFinite(parent._x) && Number.isFinite(parent._y)) roots.push({{parent, node}});
+  }});
+  const focusId = externalChanges.focus?.node_id;
+  roots.forEach(rootItem => {{
+    const hierarchy = d3.tree().nodeSize([18, 150])(d3.hierarchy(rootItem.node, node => node.children));
+    const positions = new Map();
+    hierarchy.descendants().forEach(d => positions.set(String(d.data.node_id), {{x: rootItem.parent._x + d.y + 90, y: rootItem.parent._y + d.x}}));
+    hierarchy.descendants().forEach(d => {{
+      const id = String(d.data.node_id);
+      const pos = positions.get(id);
+      const parentPos = d.parent ? positions.get(String(d.parent.data.node_id)) : {{x: rootItem.parent._x, y: rootItem.parent._y}};
+      depGhostG.append('line').attr('class', 'dep-ghost-link')
+        .attr('x1', parentPos.x).attr('y1', parentPos.y).attr('x2', pos.x).attr('y2', pos.y);
+      const g = depGhostG.append('g').attr('class', 'dep-ghost ' + (d.children ? 'branch' : 'leaf') + (focusId === id ? ' focused' : ''))
+        .attr('data-ghost-id', id).attr('transform', `translate(${{pos.x}},${{pos.y}})`)
+        .on('click', event => {{ event.stopPropagation(); focusChangeNode(id, 'dependency'); }});
+      g.append('circle').attr('class', 'change-status-dot').attr('r', 6);
+      g.append('text').attr('class', 'change-status-glyph').attr('dy', 3).text('−');
+      g.append('circle').attr('class', 'change-focus-ring').attr('r', 11).style('display', focusId === id ? null : 'none');
+      const name = d.data.name || id;
+      g.append('text').attr('class', 'change-node-label')
+        .attr('x', d.children ? 0 : 10).attr('y', d.children ? 18 : 0).attr('dy', d.children ? 0 : 3.5)
+        .text(name.length > 28 ? name.slice(0, 26) + '…' : name);
+    }});
+  }});
+}}
+
+function drawDepChangedGroups() {{
+  depChangeGroupG.selectAll('*').remove();
+  if (!hasChangeData || activeTab !== 'dep' || externalChanges.mode !== 'full' || !externalChanges.emphasize) return;
+  const rows = [
+    ...(externalChanges.dependency.rows?.added || []).map(node => ({{...node, status: 'added'}})),
+    ...(externalChanges.dependency.rows?.modified || []).map(node => ({{...node, status: 'modified'}})),
+  ].filter(node => externalChanges.filter === 'all' || externalChanges.filter === node.status);
+  const focusId = externalChanges.focus?.node_id;
+  rows.forEach(node => {{
+    const id = String(node.node_id);
+    if (depVisNodeDataMap[id]) return;
+    const descendants = depAllDescendants[id] || new Set();
+    const points = [...descendants].map(childId => depVisNodeDataMap[childId])
+      .filter(child => child && Number.isFinite(child.x) && Number.isFinite(child.y));
+    if (!points.length) return;
+    const x = points.reduce((sum, point) => sum + point.x, 0) / points.length;
+    const y = points.reduce((sum, point) => sum + point.y, 0) / points.length;
+    const label = node.name || id;
+    const text = label.length > 22 ? label.slice(0, 20) + '…' : label;
+    const width = Math.max(54, text.length * 6 + 14);
+    const group = depChangeGroupG.append('g')
+      .attr('class', `dep-change-group ${{node.status}}${{focusId === id ? ' focused' : ''}}`)
+      .attr('data-change-group-id', id).attr('transform', `translate(${{x}},${{y - 18}})`)
+      .on('click', event => {{ event.stopPropagation(); focusChangeNode(id, 'dependency'); }});
+    group.append('rect').attr('x', -width / 2).attr('y', -9).attr('width', width).attr('height', 18);
+    group.append('text').attr('text-anchor', 'middle').attr('dy', 3.5).text(text);
+  }});
+}}
+
+function centerDepOn(x, y) {{
+  const scale = 1.15;
+  const rightInset = (typeof cpOpen !== 'undefined' && cpOpen) ? 330 : 0;
+  const centerX = (width - rightInset) / 2;
+  svg.call(zoomDep.transform, d3.zoomIdentity.translate(centerX - x * scale, height / 2 - y * scale).scale(scale));
+}}
+
+function focusDepRenderedNode(id) {{
+  depNodeG.selectAll('g.dep-node').classed('change-focused', d => String(d.id) === String(id));
+  depNodeG.selectAll('g.dep-node .change-focus-ring').style('display', function() {{ return String(this.parentNode.__data__.id) === String(id) ? null : 'none'; }});
+  depHullG.selectAll('path.dep-hull').classed('change-focused', d => String(d.id) === String(id));
+  depLabelG.selectAll('text.dep-hull-label').classed('change-focused', d => String(d.id) === String(id));
+  const node = depVisNodeDataMap[String(id)];
+  if (node) {{ centerDepOn(node.x, node.y); return; }}
+  const source = depNodeMap[String(id)];
+  if (source && Number.isFinite(source._x) && Number.isFinite(source._y)) {{ centerDepOn(source._x, source._y); return; }}
+  const changedGroup = depChangeGroupG.selectAll('.dep-change-group').filter(function() {{ return this.getAttribute('data-change-group-id') === String(id); }})
+    .classed('focused', true).node();
+  if (changedGroup) {{
+    const match = (changedGroup.getAttribute('transform') || '').match(/translate\\(([-\\d.]+),([-\\d.]+)\\)/);
+    if (match) {{ centerDepOn(Number(match[1]), Number(match[2])); return; }}
+  }}
+  const ghost = depGhostG.selectAll('.dep-ghost').filter(function() {{ return this.getAttribute('data-ghost-id') === String(id); }}).node();
+  if (ghost) {{
+    const match = (ghost.getAttribute('transform') || '').match(/translate\\(([-\\d.]+),([-\\d.]+)\\)/);
+    if (match) centerDepOn(Number(match[1]), Number(match[2]));
+  }}
+}}
+
+function centerFeatOn(x, y) {{
+  const scale = 1.1;
+  svg.call(zoomFeat.transform, d3.zoomIdentity.translate(width / 2 - x * scale, height / 2 - y * scale).scale(scale));
+}}
+
+function fitFeatEmphasis() {{
+  const b = gFeat.node().getBBox();
+  if (!b.width || !b.height) return;
+  const rightInset = (typeof cpOpen !== 'undefined' && cpOpen) ? 342 : 30;
+  const usableW = Math.max(width - 40 - rightInset, 200);
+  const usableH = Math.max(height - 120, 200);
+  const scale = Math.min(usableW / (b.width + 80), usableH / (b.height + 80), 1) * 0.9;
+  svg.call(zoomFeat.transform, d3.zoomIdentity.translate(40 + usableW / 2 - (b.x + b.width / 2) * scale, 110 + usableH / 2 - (b.y + b.height / 2) * scale).scale(scale));
+}}
+
+function focusChangeNode(id, scope) {{
+  scope = scope || (activeTab === 'dep' ? 'dependency' : 'feature');
+  const sets = externalChanges[scope];
+  const removedSet = new Set((sets.rows?.removed || []).map(n => String(n.node_id)));
+  const kind = sets.added.has(String(id)) ? 'added' : sets.modified.has(String(id)) ? 'modified' : removedSet.has(String(id)) ? 'removed' : 'context';
+  const sameDependencyFocus = externalChanges.mode === 'changes' && scope === 'dependency' && activeTab === 'dep'
+    && externalChanges.focus?.scope === 'dependency' && String(externalChanges.focus.node_id) === String(id);
+  externalChanges.focus = sameDependencyFocus ? null : {{scope, node_id: String(id), kind}};
+  if (externalChanges.mode === 'changes' && scope === 'dependency' && activeTab === 'dep') {{
+    drawChangeGraph();
+    if (typeof renderChangesPanel === 'function') renderChangesPanel();
+    return;
+  }}
+  clearGraphFocusVisuals();
+  if (scope === 'feature' && activeTab === 'feat') {{
+    if (kind === 'removed') {{
+      drawFeatRemovedGhosts();
+      const el = featGhostLayer.selectAll('.feat-ghost').filter(function() {{ return this.getAttribute('data-ghost-id') === String(id); }}).node();
+      if (el) {{
+        const m = (el.getAttribute('transform') || '').match(/translate\\(([-\\d.]+),([-\\d.]+)\\)/);
+        if (m) centerFeatOn(Number(m[1]), Number(m[2]));
+      }}
+    }} else {{
+      expandFeatureChangePaths(new Set([String(id)]));
+      update(root);
+      applyExternalChangeHighlights();
+      drawFeatRemovedGhosts();
+      nodeLayer.selectAll('g.node').classed('change-focused', d => String(d.data.id) === String(id));
+      nodeLayer.selectAll('g.node .change-focus-ring').style('display', function() {{ return String(this.parentNode.__data__.data.id) === String(id) ? null : 'none'; }});
+      const t = nodeById[String(id)];
+      if (t) centerFeatOn(t.y, t.x);
+    }}
+  }}
+  if (scope === 'dependency' && activeTab === 'dep') {{
+    depInit();
+    expandDependencyChangePaths(new Set([String(id)]));
+    pendingDepFocusId = String(id);
+    depRedraw();
+    setTimeout(() => {{
+      if (pendingDepFocusId === String(id)) {{
+        drawDepChangedGroups();
+        drawDepRemovedGhosts();
+        focusDepRenderedNode(String(id));
+      }}
+    }}, 350);
+  }}
+  if (typeof renderChangesPanel === 'function') renderChangesPanel();
+}}
+
+function changeRows(scope) {{
+  const source = externalChanges[scope] || {{}};
+  const rows = [];
+  ['added', 'removed', 'modified'].forEach(kind => {{
+    (source.rows?.[kind] || []).forEach(node => rows.push({{
+      ...node,
+      id: String(node.node_id || node.id),
+      status: kind,
+      scope,
+    }}));
+  }});
+  return rows;
+}}
+
+function allFeatureNodes() {{
+  const values = [];
+  const seen = new Set();
+  function visit(node) {{
+    const id = String(node.data.id);
+    if (seen.has(id)) return;
+    seen.add(id); values.push(node);
+    [...(node.children || []), ...(node._children || [])].forEach(visit);
+  }}
+  visit(root);
+  return values;
+}}
+
+function currentFeatureNode(id) {{
+  const node = allFeatureNodes().find(item => String(item.data.id) === String(id));
+  if (!node) return null;
+  return {{
+    id: String(node.data.id), name: node.data.name || node.data.id,
+    node_type: node.data.node_type || node.data.meta?.type_name,
+    path: node.data.meta?.path, status: 'context', scope: 'feature',
+    parent_id: node.parent ? String(node.parent.data.id) : null,
+  }};
+}}
+
+function currentDependencyNode(id) {{
+  const node = depNodeMap[String(id)] || depNodesRaw.find(item => String(item.id) === String(id));
+  if (!node) return null;
+  return {{
+    id: String(node.id), name: node.name || node.id, node_type: node.type,
+    status: 'context', scope: 'dependency', parent_id: depParentMap[node.id] || null,
+  }};
+}}
+
+function edgeId(value) {{ return String(typeof value === 'object' ? value.id : value); }}
+function graphEdgeKey(edge) {{ return `${{edgeId(edge.source)}}|${{edgeId(edge.target)}}|${{edge.relation || edge.type || ''}}`; }}
+
+function currentFeatureRows() {{
+  return allFeatureNodes().map(node => currentFeatureNode(node.data.id)).filter(Boolean);
+}}
+
+function currentFeatureEdges() {{
+  const hierarchy = allFeatureNodes().filter(node => node.parent).map(node => ({{
+    source: String(node.parent.data.id), target: String(node.data.id), relation: 'contains', status: 'context',
+  }}));
+  return [
+    ...hierarchy,
+    ...semanticEdges.map(edge => ({{source: String(edge.src), target: String(edge.dst), relation: edge.relation, status: 'context'}})),
+  ];
+}}
+
+function currentDependencyRows() {{
+  return depNodesRaw.map(node => currentDependencyNode(node.id)).filter(Boolean);
+}}
+
+function currentDependencyEdges() {{
+  const semantic = depEdgesRaw.map(edge => ({{
+    source: String(edge.source), target: String(edge.target), relation: edge.type, status: 'context',
+  }}));
+  const hierarchy = Object.entries(depParentMap).map(([child, parent]) => ({{
+    source: String(parent), target: String(child), relation: 'contains', status: 'context',
+  }}));
+  return [...hierarchy, ...semantic];
+}}
+
+function currentMappingEdges() {{
+  return Object.entries(depToRpgMap).flatMap(([depId, featureIds]) =>
+    (featureIds || []).map(featureId => ({{source: String(depId), target: String(featureId), relation: 'maps_to', status: 'context'}})));
+}}
+
+function buildChangeGraph(scope) {{
+  const allRows = scope === 'map' ? [...changeRows('feature'), ...changeRows('dependency')] : changeRows(scope);
+  const filtered = externalChanges.filter === 'all'
+    ? allRows
+    : allRows.filter(node => node.status === externalChanges.filter);
+  const nodes = new Map(filtered.map(node => [node.id, {{...node}}]));
+  const edges = new Map();
+  const diffEdges = scope === 'feature'
+    ? [
+        ...(externalChanges.semanticEdges?.added || []).map(edge => ({{...edge, status: 'added'}})),
+        ...(externalChanges.semanticEdges?.removed || []).map(edge => ({{...edge, status: 'removed'}})),
+        ...(externalChanges.hierarchyEdges?.added || []).map(edge => ({{...edge, status: 'added'}})),
+        ...(externalChanges.hierarchyEdges?.removed || []).map(edge => ({{...edge, status: 'removed'}})),
+      ]
+    : scope === 'dependency' ? [
+        ...(externalChanges.dependencyEdges?.added || []).map(edge => ({{...edge, status: 'added'}})),
+        ...(externalChanges.dependencyEdges?.removed || []).map(edge => ({{...edge, status: 'removed'}})),
+      ] : [
+        ...(externalChanges.mappingEdges?.added || []).map(edge => ({{...edge, status: 'added'}})),
+        ...(externalChanges.mappingEdges?.removed || []).map(edge => ({{...edge, status: 'removed'}})),
+      ];
+  const currentRows = scope === 'feature' ? currentFeatureRows() : scope === 'dependency' ? currentDependencyRows() : [...currentFeatureRows(), ...currentDependencyRows()];
+  const currentEdges = scope === 'feature' ? currentFeatureEdges() : scope === 'dependency' ? currentDependencyEdges() : currentMappingEdges();
+  if (externalChanges.contextMode === 'full') currentRows.forEach(node => {{ if (!nodes.has(node.id)) nodes.set(node.id, node); }});
+  const sourceEdges = [...currentEdges, ...diffEdges];
+
+  function addContext(id) {{
+    if (!id || nodes.has(String(id))) return;
+    const row = scope === 'feature' ? currentFeatureNode(id) : scope === 'dependency' ? currentDependencyNode(id) : (currentFeatureNode(id) || currentDependencyNode(id));
+    if (row) nodes.set(row.id, row);
+  }}
+  filtered.forEach(node => {{
+    addContext(node.parent_id || node.previous_parent_id);
+  }});
+  sourceEdges.forEach(raw => {{
+    const edge = {{
+      source: String(raw.source), target: String(raw.target),
+      relation: raw.relation || 'related', status: raw.status || 'context',
+    }};
+    if (nodes.has(edge.source) && nodes.has(edge.target)) edges.set(graphEdgeKey(edge), edge);
+  }});
+  filtered.forEach(node => {{
+    const parent = node.parent_id || node.previous_parent_id;
+    if (!parent || !nodes.has(String(parent))) return;
+    const edge = {{source: String(parent), target: node.id, relation: 'contains', status: node.status === 'removed' ? 'removed' : 'context'}};
+    edges.set(graphEdgeKey(edge), edge);
+  }});
+  return {{nodes: [...nodes.values()], edges: [...edges.values()]}};
+}}
+
+function changeNodeGlyph(status) {{ return status === 'added' ? '+' : status === 'removed' ? '−' : status === 'modified' ? '~' : ''; }}
+
+function updateChangeChrome(scope, graph) {{
+  const changed = graph.nodes.filter(node => node.status !== 'context').length;
+  const context = graph.nodes.length - changed;
+  const target = document.getElementById(scope === 'feature' ? 'stats-feat' : scope === 'dependency' ? 'stats-dep' : 'stats-map');
+  target.innerHTML = `<span class="stat">Changed: <b>${{changed}}</b></span>`
+    + `<span class="stat">Context: <b>${{context}}</b></span>`
+    + `<span class="stat">Visible relations: <b>${{graph.edges.length}}</b></span>`;
+  const relationLegend = scope === 'dependency'
+    ? `<div class="ov-section"><div class="ov-title">Directed relations</div>
+       <div class="legend-item"><div class="legend-line" style="background:#f0883e"></div>imports</div>
+       <div class="legend-item"><div class="legend-line" style="background:#3fb950"></div>invokes</div>
+       <div class="legend-item"><div class="legend-line" style="background:#a371f7"></div>inherits</div>
+       <div class="legend-item"><div class="legend-line" style="border-top:1px dashed #6e7681"></div>contains</div></div>`
+    : '';
+  document.getElementById('canvas-overlay').innerHTML = `
+    <div class="ov-title">Change status</div>
+    <div class="legend-item"><span style="color:#3fb950;font-weight:800">+</span> Added</div>
+    <div class="legend-item"><span style="color:#f85149;font-weight:800">−</span> Removed</div>
+    <div class="legend-item"><span style="color:#d29922;font-weight:800">~</span> Modified</div>
+    <div class="legend-item"><span style="color:#8b949e;font-weight:800">○</span> Context</div>
+    ${{relationLegend}}
+    <div class="ov-section"><span class="ov-key">Arrow</span> source → target</div>
+    <div class="ov-section"><span class="ov-key">Click</span> node — focus<br><span class="ov-key">Scroll</span> — zoom</div>`;
+}}
+
+function drawChangeGraph() {{
+  if (externalChanges.mode !== 'changes') {{
+    if (changeSimulation) changeSimulation.stop();
+    gChange.style('display', 'none');
+    return;
+  }}
+  const scope = externalChanges.focus?.scope || (activeTab === 'dep' ? 'dependency' : activeTab === 'map' ? 'map' : 'feature');
+  const graph = buildChangeGraph(scope);
+  updateChangeChrome(scope, graph);
+  gFeat.style('display', 'none'); gDep.style('display', 'none'); gMap.style('display', 'none');
+  gChange.style('display', null);
+  svg.on('.zoom', null).call(zoomChange);
+  if (changeSimulation) changeSimulation.stop();
+  gChange.selectAll('text.change-empty').remove();
+  if (!graph.nodes.length) {{
+    changeLinkLayer.selectAll('*').remove();
+    changeNodeLayer.selectAll('*').remove();
+    gChange.append('text').attr('class', 'change-empty').attr('x', width / 2).attr('y', height / 2)
+      .attr('text-anchor', 'middle').attr('fill', '#8b949e').attr('font-size', 15)
+      .text(`No ${{externalChanges.filter}} ${{scope}} nodes in this change`);
+    return;
+  }}
+
+  const links = changeLinkLayer.selectAll('line.change-graph-link').data(graph.edges, graphEdgeKey);
+  links.exit().remove();
+  const linkAll = links.enter().append('line').merge(links)
+    .attr('class', edge => `change-graph-link rel-${{String(edge.relation || 'related').toLowerCase().replace(/[^a-z0-9_-]+/g, '-')}} ${{edge.status || 'context'}}`)
+    .attr('marker-end', edge => `url(#arrow-rel-${{directedEdgeColors[edge.relation] ? edge.relation : 'default'}})`);
+
+  const selection = changeNodeLayer.selectAll('g.change-graph-node').data(graph.nodes, node => node.id);
+  selection.exit().remove();
+  const entered = selection.enter().append('g').on('click', (event, node) => {{
+    event.stopPropagation();
+    focusChangeNode(node.id, node.scope);
+  }});
+  entered.append('circle').attr('r', 11);
+  entered.append('title');
+  entered.append('text').attr('class', 'status-glyph').attr('dy', 3.5);
+  entered.append('text').attr('class', 'node-label').attr('x', 16).attr('dy', 4);
+  const all = entered.merge(selection)
+    .attr('class', node => `change-graph-node ${{node.status}}${{externalChanges.focus?.node_id === node.id ? ' focused' : ''}}`);
+  all.select('.status-glyph').text(node => changeNodeGlyph(node.status));
+  all.select('title').text(node => `${{node.name || node.id}}\n${{node.id}}\n${{node.status}}`);
+  all.select('.node-label').text(node => {{
+    const name = node.name || node.id;
+    return name.length > 20 ? name.slice(0, 18) + '…' : name;
+  }});
+
+  const forceNodes = graph.nodes.map(node => ({{...node}}));
+  changeSimulation = d3.forceSimulation(forceNodes)
+    .force('link', d3.forceLink(graph.edges).id(node => node.id).distance(108).strength(.66))
+    .force('charge', d3.forceManyBody().strength(graph.nodes.length > 80 ? -55 : -135).distanceMax(280))
+    .force('center', d3.forceCenter(width / 2, height / 2))
+    .force('collision', d3.forceCollide(58).strength(.92))
+    .alpha(.9).alphaDecay(.045)
+    .stop();
+  for (let iteration = 0; iteration < 140; iteration++) changeSimulation.tick();
+  linkAll.attr('x1', edge => edge.source.x).attr('y1', edge => edge.source.y)
+    .attr('x2', edge => edge.target.x).attr('y2', edge => edge.target.y);
+  all.attr('transform', node => {{
+    const forceNode = forceNodes.find(item => item.id === node.id);
+    return forceNode ? `translate(${{forceNode.x}},${{forceNode.y}})` : '';
+  }});
+  const focusedId = externalChanges.focus?.scope === 'dependency' ? String(externalChanges.focus.node_id) : null;
+  const neighborIds = new Set(focusedId ? [focusedId] : []);
+  if (focusedId) graph.edges.forEach(edge => {{
+    const sourceId = edgeId(edge.source), targetId = edgeId(edge.target);
+    if (sourceId === focusedId || targetId === focusedId) {{ neighborIds.add(sourceId); neighborIds.add(targetId); }}
+  }});
+  linkAll
+    .classed('focus-related', edge => {{
+      if (!focusedId) return false;
+      const sourceId = edgeId(edge.source), targetId = edgeId(edge.target);
+      return sourceId === focusedId || targetId === focusedId;
+    }})
+    .classed('focus-dim', edge => {{
+      if (!focusedId) return false;
+      const sourceId = edgeId(edge.source), targetId = edgeId(edge.target);
+      return sourceId !== focusedId && targetId !== focusedId;
+    }});
+  all
+    .classed('focus-neighbor', node => !!focusedId && neighborIds.has(String(node.id)))
+    .classed('focus-dim', node => !!focusedId && !neighborIds.has(String(node.id)));
+  svg.on('click.change-deselect', event => {{
+    if (event.target !== svg.node() || externalChanges.mode !== 'changes' || activeTab !== 'dep' || !externalChanges.focus) return;
+    externalChanges.focus = null;
+    drawChangeGraph();
+    if (typeof renderChangesPanel === 'function') renderChangesPanel();
+  }});
+  requestAnimationFrame(fitChangeGraph);
+}}
+
+function fitChangeGraph() {{
+  if (externalChanges.mode !== 'changes') return;
+  const rightInset = (typeof cpOpen !== 'undefined' && cpOpen) ? 342 : 30;
+  const leftInset = 30, topInset = 96, bottomInset = 30;
+  const usableWidth = Math.max(width - leftInset - rightInset, 120);
+  const usableHeight = Math.max(height - topInset - bottomInset, 120);
+  const centerX = leftInset + usableWidth / 2;
+  const centerY = topInset + usableHeight / 2;
+  const focused = externalChanges.focus?.node_id;
+  if (focused) {{
+    const target = changeNodeLayer.selectAll('g.change-graph-node').filter(node => node.id === focused).node();
+    if (target) {{
+      const transform = target.getAttribute('transform') || '';
+      const match = transform.match(/translate\\(([-\\d.]+),([-\\d.]+)\\)/);
+      if (match) {{
+        const scale = 1.25;
+        svg.call(zoomChange.transform, d3.zoomIdentity.translate(centerX - Number(match[1]) * scale, centerY - Number(match[2]) * scale).scale(scale));
+        return;
+      }}
+    }}
+  }}
+  const bounds = gChange.node().getBBox();
+  if (!bounds.width || !bounds.height) return;
+  const fitScale = Math.min(usableWidth / (bounds.width + 80), usableHeight / (bounds.height + 80), 1.4) * .9;
+  const scale = Math.max(fitScale, .5);
+  if (!Number.isFinite(scale) || scale <= 0) return;
+  svg.call(zoomChange.transform, d3.zoomIdentity
+    .translate(centerX - (bounds.x + bounds.width / 2) * scale, centerY - (bounds.y + bounds.height / 2) * scale)
+    .scale(scale));
+}}
+
+function drawRemovedRail() {{
+  const removed = [
+    ...(externalChanges.feature.rows?.removed || []),
+    ...(externalChanges.dependency.rows?.removed || []),
+  ];
+  if (externalChanges.mode !== 'full' || !externalChanges.emphasize || !removed.length) {{
+    gRemovedRail.style('display', 'none').selectAll('*').remove();
+    return;
+  }}
+  const shown = removed.slice(0, 12);
+  const railWidth = 225, rowHeight = 24;
+  const railHeight = 44 + shown.length * rowHeight + (removed.length > shown.length ? 22 : 0);
+  gRemovedRail.style('display', null).attr('transform', `translate(${{width - railWidth - 14}},72)`);
+  gRemovedRail.selectAll('*').remove();
+  gRemovedRail.append('rect').attr('class', 'removed-rail-bg').attr('width', railWidth).attr('height', railHeight);
+  gRemovedRail.append('text').attr('class', 'removed-rail-title').attr('x', 12).attr('y', 22).text(`− Removed nodes (${{removed.length}})`);
+  const row = gRemovedRail.selectAll('g.removed-rail-node').data(shown).enter().append('g')
+    .attr('class', 'removed-rail-node').attr('transform', (node, index) => `translate(15,${{40 + index * rowHeight}})`);
+  row.append('circle').attr('r', 6);
+  row.append('text').attr('x', 12).attr('dy', 3.5).text(node => {{
+    const name = node.name || node.node_id;
+    return name.length > 28 ? name.slice(0, 26) + '…' : name;
+  }});
+  if (removed.length > shown.length) gRemovedRail.append('text').attr('class', 'removed-rail-more')
+    .attr('x', 15).attr('y', 44 + shown.length * rowHeight).text(`+${{removed.length - shown.length}} more in Current Changes`);
+}}
+
+function updateChangeSummary() {{
+  const target = document.getElementById('change-summary');
+  if (!externalChanges.active) {{ target.hidden = true; return; }}
+  const f = externalChanges.feature, d = externalChanges.dependency;
+  const count = (sets, kind) => externalChanges.filter === 'all' || externalChanges.filter === kind ? sets[kind].size : 0;
+  target.innerHTML = '<b>Current changes</b>'
+    + `<span class="added">+${{count(f,'added') + count(d,'added')}}</span>`
+    + `<span class="removed">−${{count(f,'removed') + count(d,'removed')}}</span>`
+    + `<span class="modified">~${{count(f,'modified') + count(d,'modified')}}</span>`;
+  target.hidden = false;
+}}
+
+window.addEventListener('message', event => {{
+  if (event.source !== window.parent) return;
+  if (event.data?.type === 'cmind:theme') {{ applyRpgTheme(event.data.theme, false); return; }}
+  if (event.data?.type !== 'cmind:rpg-highlight') return;
+  externalChanges = {{
+    active: !!event.data.emphasize,
+    mode: event.data.mode || 'changes',
+    filter: event.data.filter || 'all',
+    contextMode: event.data.contextMode || 'context',
+    emphasize: !!event.data.emphasize,
+    focus: event.data.focus || null,
+    feature: externalNodeSets(event.data.feature),
+    dependency: externalNodeSets(event.data.dependency),
+    semanticEdges: event.data.semanticEdges || {{}},
+    dependencyEdges: event.data.dependencyEdges || {{}},
+    hierarchyEdges: event.data.hierarchyEdges || {{}},
+    mappingEdges: event.data.mappingEdges || {{}},
+  }};
+  if (externalChanges.mode === 'changes') {{
+    gRemovedRail.style('display', 'none');
+    const requestedTab = externalChanges.focus?.scope === 'dependency' ? 'dep' : externalChanges.focus?.scope === 'feature' ? 'feat' : activeTab;
+    switchTab(requestedTab || 'feat');
+    updateChangeSummary();
+    return;
+  }}
+  if (changeSimulation) changeSimulation.stop();
+  gChange.style('display', 'none');
+  clearExternalChangeHighlights();
+  const featureVisible = new Set([...externalChanges.feature.added, ...externalChanges.feature.modified]);
+  const dependencyVisible = new Set([...externalChanges.dependency.added, ...externalChanges.dependency.modified]);
+  if (externalChanges.emphasize) {{
+    if (featureVisible.size) {{
+      expandFeatureChangePaths(featureVisible);
+      update(root);
+    }}
+    if (dependencyVisible.size) {{
+      depInit();
+      expandDependencyChangePaths(dependencyVisible);
+      depRedraw();
+    }}
+  }}
+  switchTab(activeTab || 'feat');
+  updateChangeSummary();
+  if (externalChanges.emphasize) applyExternalChangeHighlights();
+  else document.getElementById('change-summary').hidden = true;
+  drawRemovedRail();
+}});
 
 // ── Search ──
 document.getElementById('search').addEventListener('input', function() {{
@@ -1783,7 +2976,7 @@ document.getElementById('search').addEventListener('input', function() {{
 
   if (activeTab === 'feat') {{
     if (q.length < 2) {{
-      nodeLayer.selectAll('circle').attr('stroke', '#30363d').attr('stroke-width', 1.5);
+      nodeLayer.selectAll('.node-dot').attr('stroke', '#30363d').attr('stroke-width', 1.5);
       return;
     }}
     root.descendants().forEach(d => {{
@@ -1849,15 +3042,156 @@ document.getElementById('search').addEventListener('input', function() {{
   }}
 }});
 
+// ══ Self-contained change workbench (in-page controls; no parent needed) ══
+let cpOpen = false;
+function cpEsc(s) {{ return String(s == null ? '' : s).replace(/[&<>"]/g, c => ({{'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}}[c])); }}
+function cpPath(p) {{ return Array.isArray(p) ? p.join(' / ') : (p == null ? '' : String(p)); }}
+function cpScope() {{ return activeTab === 'dep' ? 'dependency' : 'feature'; }}
+
+function renderStatusCounts() {{
+  const c = (cpScope() === 'dependency' ? changeData.dependency_nodes : changeData.feature_nodes) || {{}};
+  const k = c.counts || {{added: 0, removed: 0, modified: 0}};
+  document.getElementById('cnt-added').textContent = k.added || 0;
+  document.getElementById('cnt-removed').textContent = k.removed || 0;
+  document.getElementById('cnt-modified').textContent = k.modified || 0;
+  document.getElementById('cnt-all').textContent = (k.added || 0) + (k.removed || 0) + (k.modified || 0);
+}}
+
+function cpFilteredRows() {{
+  const q = (document.getElementById('cp-search').value || '').toLowerCase().trim();
+  let rows = changeRows(cpScope());
+  if (externalChanges.filter !== 'all') rows = rows.filter(r => r.status === externalChanges.filter);
+  if (q) rows = rows.filter(r => ((r.name || '') + ' ' + (r.id || '') + ' ' + cpPath(r.path)).toLowerCase().includes(q));
+  return rows;
+}}
+
+function renderChangeDetail(node) {{
+  const el = document.getElementById('cp-detail');
+  if (!node) {{ el.className = 'cp-detail empty'; el.textContent = 'Select a changed node to see what changed.'; return; }}
+  el.className = `cp-detail selected ${{node.status}}`;
+  const dl = [];
+  dl.push(`<dt>Status</dt><dd>${{node.status}}</dd>`);
+  if (node.node_type) dl.push(`<dt>Type</dt><dd>${{cpEsc(node.node_type)}}</dd>`);
+  dl.push(`<dt>Path</dt><dd>${{cpEsc(cpPath(node.path) || node.id)}}</dd>`);
+  if (node.changed_fields && node.changed_fields.length) dl.push(`<dt>Changed</dt><dd>${{cpEsc(node.changed_fields.join(', '))}}</dd>`);
+  if (node.previous_parent_id) dl.push(`<dt>Prev parent</dt><dd>${{cpEsc(node.previous_parent_id)}}</dd>`);
+  if (node.parent_id) dl.push(`<dt>${{node.status === 'removed' ? 'Old parent' : 'Parent'}}</dt><dd>${{cpEsc(node.parent_id)}}</dd>`);
+  el.innerHTML = `<div class="cp-d-title"><span class="cp-mark ${{node.status}}">${{changeNodeGlyph(node.status)}}</span>${{cpEsc(node.name || node.id)}}</div><dl>${{dl.join('')}}</dl>`;
+}}
+
+function renderChangesPanel() {{
+  if (!hasChangeData) return;
+  renderStatusCounts();
+  document.getElementById('cp-title').textContent = (cpScope() === 'dependency' ? 'Dependency' : 'Feature') + ' changes';
+  const version = document.getElementById('cp-version');
+  const range = (changeData.parent_short || 'empty') + ' → ' + (changeData.short_commit || 'current');
+  const operation = String(changeData.operation || 'RPG update').replace(/--json/g, '').trim();
+  version.textContent = 'RPG versions ' + range + ' · ' + operation;
+  version.title = 'Meta-git RPG versions ' + range + (changeData.committed_at ? ' · ' + changeData.committed_at : '') + ' · ' + operation;
+  const rows = cpFilteredRows();
+  document.getElementById('cp-count').textContent = rows.length + ' node' + (rows.length === 1 ? '' : 's');
+  const focusId = externalChanges.focus?.node_id;
+  const listEl = document.getElementById('cp-list');
+  listEl.innerHTML = rows.map(r => `<button class="cp-row ${{r.status}}${{focusId === r.id ? ' selected' : ''}}" data-cp-id="${{cpEsc(r.id)}}" aria-pressed="${{focusId === r.id}}">`
+    + `<span class="cp-mark ${{r.status}}">${{changeNodeGlyph(r.status)}}</span>`
+    + `<span class="cp-row-main"><span class="cp-name">${{cpEsc(r.name || r.id)}}</span><span class="cp-path">${{cpEsc(cpPath(r.path) || r.id)}}</span></span></button>`).join('')
+    || '<div style="color:#6e7681;font-size:11px;padding:12px;text-align:center">No matching nodes.</div>';
+  listEl.querySelectorAll('[data-cp-id]').forEach(el => {{ el.onclick = () => selectChangeNode(el.getAttribute('data-cp-id')); }});
+  renderChangeDetail(rows.find(r => r.id === focusId) || null);
+  const selectedRow = listEl.querySelector('.cp-row.selected');
+  if (selectedRow) requestAnimationFrame(() => selectedRow.scrollIntoView({{block: 'nearest'}}));
+}}
+
+function selectChangeNode(id) {{
+  focusChangeNode(String(id), cpScope());
+}}
+
+function syncChangesPanelVisibility() {{
+  const show = cpOpen && hasChangeData && activeTab !== 'map';
+  document.getElementById('changes-panel').style.display = show ? 'flex' : 'none';
+  document.body.classList.toggle('cp-open', show);
+  const btn = document.getElementById('btn-changes-panel');
+  if (btn) {{
+    btn.style.display = activeTab === 'map' ? 'none' : '';
+    btn.textContent = cpOpen ? 'Changes \u27e9' : 'Changes \u27e8';
+  }}
+}}
+function openChangesPanel(open) {{
+  cpOpen = open;
+  syncChangesPanelVisibility();
+}}
+function toggleChangesPanel() {{ openChangesPanel(!cpOpen); requestAnimationFrame(fitCurrent); }}
+
+function setStatusFilter(filter) {{
+  externalChanges.filter = filter;
+  externalChanges.focus = null;
+  document.querySelectorAll('#status-seg button').forEach(b => b.classList.toggle('active', b.dataset.status === filter));
+  if (externalChanges.mode === 'changes' && activeTab === 'dep') drawChangeGraph();
+  else applyChangeEmphasis();
+  renderChangesPanel();
+}}
+
+function setMode(mode) {{
+  externalChanges.mode = mode;
+  externalChanges.active = (mode === 'changes');
+  externalChanges.focus = null;
+  document.getElementById('mode-changes').classList.toggle('active', mode === 'changes');
+  document.getElementById('mode-full').classList.toggle('active', mode === 'full');
+  if (mode === 'changes' && activeTab === 'map') activeTab = 'feat';
+  openChangesPanel(cpOpen);
+  switchTab(activeTab);
+  renderChangesPanel();
+}}
+
+function openMapping() {{
+  if (externalChanges.mode === 'changes') setMode('full');
+  switchTab('map');
+}}
+
+function fitCurrent() {{
+  if (externalChanges.mode === 'changes' && activeTab === 'dep') {{ fitChangeGraph(); return; }}
+  if (activeTab === 'feat') {{ fitFeatEmphasis(); return; }}
+  if (activeTab === 'dep') {{ depFitVisible(); return; }}
+  if (activeTab === 'map') {{ switchTab('map'); return; }}
+}}
+function resetCurrent() {{
+  externalChanges.focus = null;
+  clearGraphFocusVisuals();
+  if (externalChanges.mode === 'changes' && activeTab === 'dep') {{ drawChangeGraph(); return; }}
+  if (activeTab === 'feat') fitFeatEmphasis();
+  else if (activeTab === 'dep') depFitVisible();
+  else svg.call(zoomMap.transform, d3.zoomIdentity);
+  if (typeof renderChangesPanel === 'function') renderChangesPanel();
+}}
+
+function initChangeWorkbench() {{
+  if (!hasChangeData) {{ document.getElementById('header-row2').style.display = 'none'; return; }}
+  externalChanges = {{
+    active: true, mode: 'changes', filter: 'all', contextMode: 'context', emphasize: false, focus: null,
+    feature: externalNodeSets(changeData.feature_nodes),
+    dependency: externalNodeSets(changeData.dependency_nodes),
+    semanticEdges: changeData.semantic_edges || {{}},
+    dependencyEdges: changeData.dependency_edges || {{}},
+    hierarchyEdges: changeData.feature_hierarchy_edges || {{}},
+    mappingEdges: changeData.mapping_edges || {{}},
+  }};
+  document.getElementById('header-row2').style.display = 'flex';
+  document.getElementById('btn-changes-panel').style.display = '';
+  document.getElementById('cp-search').addEventListener('input', renderChangesPanel);
+  setMode('changes');
+}}
+
 // ── Init feat graph ──
 svg.call(zoomFeat);
 svg.call(zoomFeat.transform, d3.zoomIdentity.translate(margin.left, margin.top));
 root.x0 = height / 2;
 root.y0 = 0;
 update(root);
+initChangeWorkbench();
 
 setTimeout(() => {{
   const bounds = gFeat.node().getBBox();
+  if (!bounds.width || !bounds.height) return;
   const fullWidth = bounds.width + margin.left + margin.right;
   const fullHeight = bounds.height + margin.top + margin.bottom;
   const scale = Math.min(width / fullWidth, height / fullHeight, 1) * 0.9;
@@ -1867,6 +3201,7 @@ setTimeout(() => {{
                  height / 2 - bounds.y * scale - bounds.height * scale / 2)
       .scale(scale));
 }}, 400);
+}}
 </script>
 </body>
 </html>"""
@@ -1885,6 +3220,8 @@ def main():
               ))
     parser.add_argument("-o", "--output", default=None,
                         help="Output HTML file (default: <rpg_file>.html)")
+    parser.add_argument("--change-data", default=None,
+                        help="Optional rpg_latest_change JSON to embed for the in-page Current Changes view")
     args = parser.parse_args()
 
     rpg_path = Path(args.rpg_file).expanduser()
@@ -1897,7 +3234,13 @@ def main():
     except FileNotFoundError as exc:
         print(f"Error: {exc}", file=sys.stderr)
         sys.exit(1)
-    html_content = generate_html(data)
+
+    change_data = None
+    if args.change_data:
+        change_path = Path(args.change_data).expanduser()
+        if change_path.is_file():
+            change_data = json.loads(change_path.read_text(encoding="utf-8"))
+    html_content = generate_html(data, change_data)
 
     output = args.output or str(rpg_path.with_suffix(".html"))
     Path(output).write_text(html_content, encoding="utf-8")

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import subprocess
 from collections import defaultdict
 from dataclasses import dataclass
@@ -13,6 +14,7 @@ from pathlib import Path
 from typing import Any, Iterable
 
 from common.copilot_usage import associate_copilot_usage, collect_copilot_usage
+from common.rpg_diff import previous_rpg_version, read_rpg_version, semantic_rpg_diff
 from common.dashboard_schema import assert_valid_snapshot, sanitize_snapshot
 from common.trajectory_summary import collect_trajectory_runs, merge_trajectory_runs
 from common.paths import (
@@ -1297,6 +1299,152 @@ def collect_trends(runs: list[dict[str, Any]]) -> dict[str, Any]:
     return {"by_command": dict(grouped)}
 
 
+_META_SUBJECT_RE = re.compile(r"^\[hook:([^\]@]+?)\s*@\s*([0-9a-fA-F]+)\]\s*(.*)$")
+
+
+def _operation_command(value: Any) -> str:
+    token = str(value or "").strip().split(maxsplit=1)[0]
+    return token.lstrip("/").replace("-", "_").lower()
+
+
+def collect_rpg_history(
+    sources: DashboardSources,
+    runs: list[dict[str, Any]],
+) -> tuple[list[dict[str, Any]], dict[str, Any]]:
+    """Cheap RPG version index from the meta-git (one ``git log``, no file reads).
+
+    Every operation commits ``rpg.json`` into the home-side meta-git, so the
+    complete, git-compressed version history already exists.  This lists only
+    lightweight metadata per version for the UI; the full ``rpg.json`` for any
+    listed commit is read on demand (see ``rpg_version.py``), never embedded
+    here, which keeps the snapshot small while retaining full history.
+    """
+    meta_root = sources.data_dir.parent
+    try:
+        rel = sources.rpg_file.relative_to(meta_root).as_posix()
+    except ValueError:
+        rel = "data/rpg.json"
+
+    log = _run_git(
+        meta_root,
+        "log",
+        "--max-count=200",
+        "--format=%H%x1f%cI%x1f%s",
+        "--",
+        rel,
+    )
+    if not log:
+        return [], _source_health("rpg_history", meta_root, "not_applicable")
+
+    # Join with already-collected run metrics by source commit — no file reads.
+    run_by_commit: dict[str, list[dict[str, Any]]] = defaultdict(list)
+    for run in runs:
+        metrics = run.get("metrics") if isinstance(run.get("metrics"), dict) else {}
+        commit = metrics.get("new_commit")
+        if commit:
+            candidates = run_by_commit[str(commit)]
+            if run not in candidates:
+                candidates.append(run)
+
+    versions: list[dict[str, Any]] = []
+    for line in log.splitlines():
+        parts = line.split("\x1f")
+        if len(parts) < 3:
+            continue
+        sha, committed_at, subject = parts[0], parts[1], parts[2]
+        match = _META_SUBJECT_RE.match(subject)
+        if match:
+            hook, source_commit, operation = match.group(1), match.group(2), match.group(3).strip()
+        else:
+            hook, source_commit, operation = None, None, subject.strip()
+        candidates = [
+            candidate
+            for full_commit, commit_runs in run_by_commit.items()
+            if source_commit
+            and (full_commit.startswith(source_commit) or source_commit.startswith(full_commit))
+            for candidate in commit_runs
+        ]
+        operation_command = _operation_command(operation)
+        run = next(
+            (
+                candidate
+                for candidate in candidates
+                if _operation_command(candidate.get("command")) == operation_command
+            ),
+            None,
+        )
+        metrics = run.get("metrics") if run and isinstance(run.get("metrics"), dict) else {}
+        versions.append({
+            "commit": sha,
+            "short_commit": sha[:8],
+            "committed_at": committed_at,
+            "operation": operation or hook or "commit",
+            "hook": hook,
+            "source_commit": source_commit,
+            "source_short": source_commit[:8] if source_commit else None,
+            "message": subject,
+            "node_count": metrics.get("node_count"),
+            "edge_count": metrics.get("edge_count"),
+            "nodes_delta": metrics.get("nodes_delta"),
+            "edges_delta": metrics.get("edges_delta"),
+            "run_id": run.get("run_id") if run else None,
+        })
+    for index, version_info in enumerate(versions):
+        previous = versions[index + 1]["commit"] if index + 1 < len(versions) else None
+        version_info["previous_version_commit"] = previous
+        version_info["previous_version_short"] = previous[:8] if previous else None
+    return versions, _source_health("rpg_history", meta_root, "available", records=len(versions))
+
+
+def collect_latest_rpg_change(
+    sources: DashboardSources,
+    versions: list[dict[str, Any]],
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    """Read only the newest two RPG blobs and compute their semantic change."""
+    meta_root = sources.data_dir.parent
+    if not versions:
+        return {}, _source_health("rpg_latest_change", meta_root, "not_applicable")
+    try:
+        relative_path = sources.rpg_file.relative_to(meta_root).as_posix()
+    except ValueError:
+        relative_path = "data/rpg.json"
+
+    latest = versions[0]
+    commit = str(latest["commit"])
+    parent = latest.get("previous_version_commit") or previous_rpg_version(
+        meta_root,
+        relative_path,
+        commit,
+    )
+    current = read_rpg_version(meta_root, relative_path, commit)
+    if current is None:
+        return {}, _source_health(
+            "rpg_latest_change",
+            meta_root,
+            "invalid",
+            detail=f"cannot read {commit}:{relative_path}",
+        )
+    before = read_rpg_version(meta_root, relative_path, str(parent)) if parent else {}
+    if parent and before is None:
+        return {}, _source_health(
+            "rpg_latest_change",
+            meta_root,
+            "partial",
+            detail=f"cannot read {parent}:{relative_path}",
+        )
+    change = semantic_rpg_diff(
+        before or {},
+        current,
+        commit=commit,
+        parent_commit=str(parent) if parent else None,
+    )
+    change["committed_at"] = latest.get("committed_at")
+    change["operation"] = latest.get("operation")
+    change["source_commit"] = latest.get("source_commit")
+    change["run_id"] = latest.get("run_id")
+    return change, _source_health("rpg_latest_change", meta_root, "available", records=1)
+
+
 def build_dashboard_snapshot(
     sources: DashboardSources | None = None,
     *,
@@ -1324,6 +1472,8 @@ def build_dashboard_snapshot(
         telemetry["llm"]["copilot_cli"],
     )
     rpg_edit, rpg_edit_health = collect_rpg_edit_context(sources)
+    rpg_history, rpg_history_health = collect_rpg_history(sources, runs)
+    rpg_latest_change, rpg_latest_change_health = collect_latest_rpg_change(sources, rpg_history)
     trends = collect_trends(runs)
     for run in runs:
         run["verification"], run["next_actions"] = collect_run_verification(run)
@@ -1355,6 +1505,8 @@ def build_dashboard_snapshot(
         "graph": graph,
         "tasks": tasks,
         "rpg_edit": rpg_edit,
+        "rpg_history": rpg_history,
+        "rpg_latest_change": rpg_latest_change,
         "artifacts": artifacts,
         "telemetry": telemetry,
         "verification": verification,
@@ -1367,6 +1519,8 @@ def build_dashboard_snapshot(
             git_health,
             *telemetry_health,
             *rpg_edit_health,
+            rpg_history_health,
+            rpg_latest_change_health,
             trajectory_health,
         ],
     }

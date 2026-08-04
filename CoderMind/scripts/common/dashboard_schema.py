@@ -77,6 +77,8 @@ def validate_snapshot(snapshot: Any) -> list[str]:
         "graph": dict,
         "tasks": dict,
         "rpg_edit": dict,
+        "rpg_history": list,
+        "rpg_latest_change": dict,
         "artifacts": list,
         "telemetry": dict,
         "verification": dict,

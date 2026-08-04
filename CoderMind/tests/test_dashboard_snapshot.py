@@ -347,6 +347,71 @@ def test_collects_git_changes_and_focused_impact(tmp_path):
     assert impact["rpg_nodes"][0]["node_id"] == "feature-1"
 
 
+def test_collects_rpg_history_from_meta_git(tmp_path):
+    sources = _sources(tmp_path)
+    meta_root = tmp_path  # sources.data_dir.parent is the home-side meta-git root
+    sources.data_dir.mkdir(parents=True)
+    _git(meta_root, "init", "-q")
+    _git(meta_root, "config", "user.email", "test@example.com")
+    _git(meta_root, "config", "user.name", "Snapshot Test")
+
+    sources.rpg_file.write_text(json.dumps({
+        "root": {"id": "repo", "node_type": "repo", "children": [{"id": "a", "children": []}]},
+    }), encoding="utf-8")
+    _git(meta_root, "add", "data/rpg.json")
+    _git(meta_root, "commit", "-qm", "[hook:post-commit @ abc1234] update-rpg --json")
+
+    sources.rpg_file.write_text(json.dumps({
+        "root": {"id": "repo", "node_type": "repo", "children": [
+            {"id": "a", "children": []}, {"id": "b", "children": []},
+        ]},
+    }), encoding="utf-8")
+    _git(meta_root, "add", "data/rpg.json")
+    _git(meta_root, "commit", "-qm", "[hook:post-merge @ def5678] update-rpg --json")
+
+    _write_events(sources.run_events_file, [
+        {"event_type": "run_started", "run_id": "run-history", "command": "update_rpg", "status": "running"},
+        {
+            "event_type": "run_finished",
+            "run_id": "run-history",
+            "command": "update_rpg",
+            "status": "success",
+            "metrics": {
+                "new_commit": "def5678abcdef0123456789",
+                "node_count": 3,
+                "edge_count": 2,
+                "nodes_delta": 1,
+                "edges_delta": 1,
+            },
+        },
+    ])
+
+    history = build_dashboard_snapshot(sources)["rpg_history"]
+    assert len(history) == 2
+    assert history[0]["operation"] == "update-rpg --json"
+    assert history[0]["hook"] == "post-merge"
+    assert history[0]["source_commit"] == "def5678"
+    assert history[0]["node_count"] == 3
+    assert history[0]["nodes_delta"] == 1
+    assert history[0]["run_id"] == "run-history"
+    assert history[1]["operation"] == "update-rpg --json"
+    assert history[1]["source_commit"] == "abc1234"
+    assert all(version["commit"] and version["short_commit"] for version in history)
+    assert history[0]["previous_version_commit"] == history[1]["commit"]
+
+    latest = build_dashboard_snapshot(sources)["rpg_latest_change"]
+    assert latest["quality"] == "measured"
+    assert latest["commit"] == history[0]["commit"]
+    assert latest["parent_commit"] == history[1]["commit"]
+    assert latest["feature_nodes"]["counts"] == {
+        "added": 1,
+        "removed": 0,
+        "modified": 0,
+        "total": 3,
+    }
+    assert latest["feature_nodes"]["added"][0]["node_id"] == "b"
+
+
 def test_collects_rpg_edit_retrieval_decision_and_verification(tmp_path):
     sources = _sources(tmp_path)
     sources.workspace_root.mkdir(parents=True)

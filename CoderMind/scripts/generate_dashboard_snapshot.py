@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Build the renderer-independent CoderMind dashboard snapshot."""
+"""Build the CoderMind dashboard snapshot and publish its static report."""
 
 from __future__ import annotations
 
@@ -16,22 +16,26 @@ from common.dashboard_snapshot import (  # noqa: E402
     build_dashboard_snapshot,
     write_dashboard_snapshot,
 )
+from common.dashboard_report import write_dashboard_report  # noqa: E402
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description="Build CoderMind dashboard snapshot JSON")
+    parser = argparse.ArgumentParser(description="Build the CoderMind dashboard snapshot and static report")
     parser.add_argument("--output", type=Path, default=None, help="Override snapshot output path")
+    parser.add_argument("--reports-dir", type=Path, default=None, help="Override static report output directory")
     parser.add_argument("--print", action="store_true", dest="print_snapshot", help="Print full snapshot JSON")
     args = parser.parse_args()
 
     snapshot = build_dashboard_snapshot()
     output = write_dashboard_snapshot(snapshot, args.output)
+    report = write_dashboard_report(snapshot, args.reports_dir)
     if args.print_snapshot:
         print(json.dumps(snapshot, ensure_ascii=False, indent=2))
     else:
         print(json.dumps({
             "status": "success",
             "snapshot": str(output),
+            "report": str(report.report_html),
             "runs": len(snapshot["runs"]),
             "pipeline_steps": len(snapshot["pipeline"]),
             "source_warnings": sum(

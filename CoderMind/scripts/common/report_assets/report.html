@@ -1,0 +1,63 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>CoderMind · Run Report</title>
+<script>
+// Set the theme before paint to avoid a flash of the wrong palette.
+(function(){try{var t=localStorage.getItem("cmind-report-theme");}catch(e){}
+document.documentElement.setAttribute("data-theme", t==="light"||t==="dark"?t:"dark");})();
+</script>
+<link rel="stylesheet" href="assets/report.css">
+</head>
+<body>
+<div class="shell">
+  <header class="topbar">
+    <div class="brand">
+      <div class="brandmark">CM</div>
+      <div class="brand-text">
+        <h1 id="brandRepo">CoderMind</h1>
+        <small id="brandMeta">run report</small>
+      </div>
+    </div>
+    <nav class="nav" id="nav">
+      <button data-view="overview">Overview</button>
+      <button data-view="pipeline">Pipeline</button>
+      <button data-view="rpg">RPG</button>
+      <button data-view="runs">Runs</button>
+    </nav>
+    <div class="topmeta">
+      <button class="btn ghost theme-toggle" id="themeToggle" title="Toggle light / dark" aria-label="Toggle theme">◐</button>
+      <span class="mode-pill" id="modePill">—</span>
+      <span class="status-dot" id="statusDot"></span>
+      <span id="topStatus" class="mono">—</span>
+      <span class="sep">·</span>
+      <span id="topCommit" class="mono muted">—</span>
+    </div>
+  </header>
+
+  <main class="main">
+    <section id="view-overview" class="view"></section>
+    <section id="view-pipeline" class="view"></section>
+    <section id="view-rpg" class="view rpg-view"></section>
+    <section id="view-runs" class="view"></section>
+  </main>
+</div>
+
+<div class="drawer-scrim" id="drawerScrim"></div>
+<aside class="drawer" id="drawer" aria-hidden="true">
+  <div class="drawer-head">
+    <div>
+      <div class="drawer-kicker mono" id="drawerKicker">Detail</div>
+      <h2 id="drawerTitle">—</h2>
+    </div>
+    <button class="btn ghost" id="drawerClose" aria-label="Close">✕</button>
+  </div>
+  <div class="drawer-body" id="drawerBody"></div>
+</aside>
+
+<script src="report-data.js"></script>
+<script src="assets/report.js"></script>
+</body>
+</html>

@@ -4751,6 +4751,37 @@ def script(
             proc.returncode,
         )
 
+    # Keep the workspace report current after each successful pipeline script.
+    # Invoke the generator directly (not through ``cmind script``) to avoid
+    # recursion and preserve the original command's exit status on report errors.
+    if proc.returncode == 0 and ws_root is not None and path.name != "generate_dashboard_snapshot.py":
+        generator = _resolve_script_path("generate_dashboard_snapshot.py")
+        if generator is not None:
+            try:
+                refresh = subprocess.run(
+                    [sys.executable, str(generator)],
+                    cwd=ws_root,
+                    env=env,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.STDOUT,
+                    timeout=120,
+                )
+                refresh_output = refresh.stdout or b""
+                refresh_failed = refresh.returncode != 0
+            except (OSError, subprocess.TimeoutExpired) as exc:
+                refresh_output = f"dashboard refresh error: {exc}\n".encode("utf-8", errors="replace")
+                refresh_failed = True
+            from . import _storage
+            refresh_log = _storage.workspace_logs_dir(ws_root) / "generate_dashboard_snapshot.log"
+            try:
+                refresh_log.parent.mkdir(parents=True, exist_ok=True)
+                with refresh_log.open("ab") as handle:
+                    handle.write(refresh_output)
+            except OSError:
+                pass
+            if refresh_failed:
+                console.print("[yellow]warning:[/yellow] dashboard report refresh failed; see generate_dashboard_snapshot.log")
+
     raise typer.Exit(proc.returncode)
 
 
