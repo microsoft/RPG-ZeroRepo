@@ -138,17 +138,25 @@ a:hover{text-decoration:underline}
 .pmini{border:1px solid var(--line);border-radius:10px;background:var(--panel2);padding:14px}
 .pmini.encoder{border-color:var(--enc-line)} .pmini.decoder{border-color:var(--dec-line)}
 .pmini-top{display:flex;align-items:center;gap:10px;margin-bottom:12px}
+.pmini-jump{width:100%;padding:3px;border:0;border-radius:7px;background:transparent;color:var(--ink);text-align:left}
+.pmini-jump:hover{background:var(--panel3)}
+.pmini-jump:focus-visible,.pmini-phase:focus-visible{outline:2px solid var(--enc);outline-offset:2px}
+.pmini.decoder .pmini-jump:focus-visible,.pmini.decoder .pmini-phase:focus-visible{outline-color:var(--dec)}
 .pmini-top .pipe-tag{width:30px;height:30px;border-radius:7px;display:grid;place-items:center;font:700 10px var(--mono)}
 .pmini.encoder .pipe-tag{color:var(--enc2);background:var(--enc-soft);border:1px solid var(--enc-line)}
 .pmini.decoder .pipe-tag{color:var(--dec2);background:var(--dec-soft);border:1px solid var(--dec-line)}
+.pmini-name{display:flex;flex-direction:column;min-width:0}
 .pmini-top strong{font-size:14px}
 .pmini-top .sub{color:var(--faint);font-size:10px}
 .pmini-top .count{margin-left:auto;font:700 12px var(--mono);color:var(--muted)}
 .pmini-phases{margin-top:12px;display:flex;flex-direction:column;gap:8px}
-.pmini-phase{display:flex;align-items:center;justify-content:space-between;gap:10px}
+.pmini-phase{display:flex;align-items:center;gap:10px;width:100%;padding:5px;border:0;border-radius:6px;background:transparent;color:var(--ink);text-align:left}
+.pmini-phase:hover{background:var(--panel3)}
 .pmini-plabel{font:10px var(--mono);color:var(--muted)}
 .pmini-plabel .loop{color:var(--enc2)}
-.pmini-dots{display:flex;gap:4px}
+.pmini-dots{display:flex;gap:4px;margin-left:auto}
+.pmini-arrow{color:var(--faint);font-size:16px;line-height:1;transition:transform .15s,color .15s}
+.pmini-jump:hover .pmini-arrow,.pmini-phase:hover .pmini-arrow{color:var(--ink);transform:translateX(2px)}
 .pdot{width:9px;height:9px;border-radius:3px;background:var(--track);border:1px solid var(--line)}
 .pdot.ok{background:var(--ok);border-color:transparent}
 .pdot.running{background:var(--enc);border-color:transparent}
@@ -158,7 +166,7 @@ a:hover{text-decoration:underline}
   border-top:1px dashed var(--line);padding-top:9px}
 
 /* ---- pipeline cards ---- */
-.pipe{border:1px solid var(--line);border-radius:var(--radius);background:var(--panel);margin-bottom:16px;overflow:hidden}
+.pipe{border:1px solid var(--line);border-radius:var(--radius);background:var(--panel);margin-bottom:16px;overflow:hidden;scroll-margin-top:76px}
 .pipe-head{display:flex;align-items:center;gap:12px;padding:15px 17px;border-bottom:1px solid var(--line2)}
 .pipe-tag{width:34px;height:34px;border-radius:8px;display:grid;place-items:center;font:700 11px var(--mono)}
 .pipe.encoder .pipe-tag{color:var(--enc2);background:var(--enc-soft);border:1px solid var(--enc-line)}
@@ -166,7 +174,7 @@ a:hover{text-decoration:underline}
 .pipe-head h3{margin:0;font-size:15px}
 .pipe-head .sub{color:var(--faint);font:10px var(--mono);margin-top:2px}
 .pipe-head .count{margin-left:auto;font:11px var(--mono);color:var(--muted)}
-.phase{padding:14px 17px;border-top:1px solid var(--line2)}
+.phase{padding:14px 17px;border-top:1px solid var(--line2);scroll-margin-top:76px}
 .phase:first-of-type{border-top:0}
 .phase-title{display:flex;align-items:center;gap:8px;font:700 10px var(--mono);letter-spacing:.06em;
   text-transform:uppercase;color:var(--faint);margin-bottom:12px}
@@ -185,6 +193,13 @@ a:hover{text-decoration:underline}
 .stage-card.running .stage-ico{color:var(--enc2);border-color:var(--enc-line);background:var(--enc-soft)}
 .stage-card.failed .stage-ico{color:var(--fail);border-color:var(--fail-line);background:var(--fail-soft)}
 .stage-card.pending{opacity:.62}
+.pipe.encoder.pipeline-jump-highlight{border-color:var(--enc);box-shadow:0 0 0 3px var(--enc-soft)}
+.pipe.decoder.pipeline-jump-highlight{border-color:var(--dec);box-shadow:0 0 0 3px var(--dec-soft)}
+.pipe.encoder .phase.pipeline-jump-highlight{background:var(--enc-soft);box-shadow:inset 0 0 0 2px var(--enc)}
+.pipe.decoder .phase.pipeline-jump-highlight{background:var(--dec-soft);box-shadow:inset 0 0 0 2px var(--dec)}
+.pipeline-jump-highlight{animation:pipeline-jump-pulse 1.2s ease-out 1}
+@keyframes pipeline-jump-pulse{0%{filter:brightness(1.28)}100%{filter:brightness(1)}}
+@media (prefers-reduced-motion:reduce){.pipeline-jump-highlight{animation:none}.pmini-arrow{transition:none}}
 
 /* ---- status pills / badges ---- */
 .pill{display:inline-flex;align-items:center;gap:5px;border-radius:999px;padding:3px 9px;

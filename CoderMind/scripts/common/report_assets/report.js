@@ -7,6 +7,7 @@
 (function () {
   "use strict";
   var R = window.CMIND_REPORT || {};
+  var RPG_DOCUMENT = window.CMIND_RPG_HTML || "";
 
   /* ---------- helpers ---------- */
   var $ = function (s, r) { return (r || document).querySelector(s); };
@@ -234,11 +235,16 @@
         var k = resolveStage(key, s[0]).kind;
         return '<span class="pdot ' + k + '" title="' + esc(s[1]) + '"></span>';
       }).join("");
-      return '<div class="pmini-phase"><span class="pmini-plabel">' + esc(ph.label) + (ph.loop ? ' <span class="loop">↻</span>' : "") + '</span><span class="pmini-dots">' + dots + "</span></div>";
+      return '<button type="button" class="pmini-phase" data-pipeline-jump="' + key + "/" + ph.id
+        + '" aria-label="Open ' + esc(cat.label + " " + ph.label) + ' pipeline details"><span class="pmini-plabel">'
+        + esc(ph.label) + (ph.loop ? ' <span class="loop">↻</span>' : "")
+        + '</span><span class="pmini-dots">' + dots + '</span><span class="pmini-arrow" aria-hidden="true">›</span></button>';
     }).join("");
     return '<div class="pmini ' + key + '">'
-      + '<div class="pmini-top"><span class="pipe-tag">' + cat.icon + '</span><div><strong>' + cat.label + "</strong><div class=\"sub mono\">" + esc(cat.tagline) + "</div></div>"
-      + '<span class="count mono">' + countLabel + "</span></div>"
+      + '<button type="button" class="pmini-top pmini-jump" data-pipeline-jump="' + key
+      + '" aria-label="Open detailed ' + esc(cat.label) + ' pipeline"><span class="pipe-tag">' + cat.icon
+      + '</span><span class="pmini-name"><strong>' + cat.label + '</strong><span class="sub mono">' + esc(cat.tagline)
+      + '</span></span><span class="count mono">' + countLabel + '</span><span class="pmini-arrow" aria-hidden="true">›</span></button>'
       + '<div class="bar ' + (key === "decoder" ? "dec" : "") + (p.percent === 100 ? " ok" : "") + '"><i style="width:' + p.percent + '%"></i></div>'
       + '<div class="pmini-phases">' + phases + "</div>"
       + (!isActive && p.done === 0 ? '<div class="pmini-empty mono">not run in this workspace</div>' : "")
@@ -319,8 +325,9 @@
   function pipeSection(key) {
     var cat = CATALOG[key], p = pipelineProgress(key);
     var phases = cat.phases.map(function (ph) {
-      return '<div class="phase"><div class="phase-title">' + esc(ph.label) + (ph.loop ? ' <span class="loop">↻ loop</span>' : "") + "</div><div class=\"stages\">"
-        + ph.stages.map(function (s) { return stageCard(key, s); }).join("") + "</div></div>";
+      return '<section class="phase" id="pipeline-' + key + "-" + ph.id + '" tabindex="-1"><div class="phase-title">'
+        + esc(ph.label) + (ph.loop ? ' <span class="loop">↻ loop</span>' : "") + "</div><div class=\"stages\">"
+        + ph.stages.map(function (s) { return stageCard(key, s); }).join("") + "</div></section>";
     }).join("");
     var empty = (key !== activeMode && p.done === 0)
       ? '<div class="note" style="margin:0 17px 16px"><span class="i">ℹ</span><span>No ' + esc(cat.label) + ' run recorded in this <span class="mono">' + esc(activeMode) + '</span>-mode workspace. Stages below show the pipeline shape only.</span></div>'
@@ -328,7 +335,9 @@
     var count = p.source === "snapshot"
       ? p.done + "/" + p.total + " snapshot steps · " + p.percent + "%"
       : "not run · " + p.catalogTotal + " catalog stages";
-    return '<div class="pipe ' + key + '"><div class="pipe-head"><span class="pipe-tag">' + cat.icon + '</span><div><h3>' + cat.label + '</h3><div class="sub mono">' + esc(cat.tagline) + '</div></div><span class="count mono">' + count + "</span></div>" + empty + phases + "</div>";
+    return '<section class="pipe ' + key + '" id="pipeline-' + key + '" tabindex="-1"><div class="pipe-head"><span class="pipe-tag">'
+      + cat.icon + '</span><div><h3>' + cat.label + '</h3><div class="sub mono">' + esc(cat.tagline)
+      + '</div></div><span class="count mono">' + count + "</span></div>" + empty + phases + "</section>";
   }
   function renderPipeline() {
     $("#view-pipeline").innerHTML =
@@ -518,31 +527,16 @@
       + '<div class="rpg-actions"><button class="btn sm" id="rpgHistoryBtn">History (' + historyCount + ')</button>'
       + '<button class="btn sm" id="rpgFull">⛶ Fullscreen</button>'
       + '<a class="btn sm" href="rpg.html" target="_blank" rel="noopener">Open in tab ↗</a></div></div>';
-    var fallback = '<div class="rpg-fallback" id="rpgFallback" hidden><div class="empty"><div class="big">Graph library unavailable offline</div>'
-      + '<p>The embedded graph needs <span class="mono">d3.v7.min.js</span>. Vendor it at <span class="mono">assets/d3.v7.min.js</span> and rerun <span class="mono">build_report_data.py</span>, or open this report with network access.</p>'
-      + '<p><a class="btn sm" href="rpg.html" target="_blank" rel="noopener">Open graph in a new tab ↗</a></p></div></div>';
-    var frame = '<div class="rpg-frame" id="rpgFrameWrap"><iframe id="rpgFrame" src="rpg.html" title="RPG graph"></iframe>'
-      + fallback + '<button class="rpg-fs-exit" id="rpgFsExit" hidden>✕ Exit fullscreen</button></div>';
+    var frame = '<div class="rpg-frame" id="rpgFrameWrap"><iframe class="ready" id="rpgFrame" title="RPG graph"></iframe>'
+      + '<button class="rpg-fs-exit" id="rpgFsExit" hidden>✕ Exit fullscreen</button></div>';
     $("#view-rpg").innerHTML = head + frame;
 
     var frameElement = $("#rpgFrame");
-    function checkGraph() {
-      // Same-origin (both localhost or both file://): detect a failed D3 load.
-      try {
-        var ok = frameElement.contentWindow && frameElement.contentWindow.d3;
-        frameElement.style.display = ok ? "" : "none";
-        $("#rpgFallback").hidden = !!ok;
-        if (ok) {
-          syncRpgTheme();
-          setTimeout(function () { frameElement.classList.add("ready"); }, 80);
-        }
-      } catch (e) { /* cross-origin: leave the graph as-is */ }
-    }
     frameElement.addEventListener("load", function () {
       syncRpgTheme();
-      setTimeout(checkGraph, 250);
     });
-    setTimeout(checkGraph, 1600);
+    if (RPG_DOCUMENT) frameElement.srcdoc = RPG_DOCUMENT;
+    else frameElement.src = "rpg.html";
 
     var wrap = $("#rpgFrameWrap");
     function fsRequest(el) {
@@ -599,9 +593,28 @@
 
   /* ---------- routing ---------- */
   var VIEWS = ["overview", "pipeline", "rpg", "runs"];
+  var pipelineHighlightTimer = null;
   function currentView() {
     var h = (location.hash || "").replace(/^#/, "").split("/")[0];
     return VIEWS.indexOf(h) >= 0 ? h : "overview";
+  }
+  function pipelineTarget() {
+    var parts = (location.hash || "").replace(/^#/, "").split("/");
+    if (parts[0] !== "pipeline" || ["encoder", "decoder"].indexOf(parts[1]) < 0) return null;
+    var cat = CATALOG[parts[1]];
+    var phase = parts[2] && cat.phases.some(function (item) { return item.id === parts[2]; }) ? parts[2] : null;
+    return document.getElementById("pipeline-" + parts[1] + (phase ? "-" + phase : ""));
+  }
+  function revealPipelineTarget() {
+    var target = pipelineTarget();
+    if (!target) { window.scrollTo(0, 0); return; }
+    $$(".pipeline-jump-highlight").forEach(function (el) { el.classList.remove("pipeline-jump-highlight"); });
+    target.classList.add("pipeline-jump-highlight");
+    var reducedMotion = window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    target.scrollIntoView({ behavior: reducedMotion ? "auto" : "smooth", block: target.classList.contains("phase") ? "center" : "start" });
+    try { target.focus({ preventScroll: true }); } catch (e) { target.focus(); }
+    if (pipelineHighlightTimer) clearTimeout(pipelineHighlightTimer);
+    pipelineHighlightTimer = setTimeout(function () { target.classList.remove("pipeline-jump-highlight"); }, 2400);
   }
   function route() {
     var v = currentView();
@@ -611,7 +624,8 @@
     else if (v === "pipeline") renderPipeline();
     else if (v === "rpg") renderRpg();
     else if (v === "runs") renderRuns();
-    window.scrollTo(0, 0);
+    if (v === "pipeline" && pipelineTarget()) requestAnimationFrame(revealPipelineTarget);
+    else window.scrollTo(0, 0);
   }
 
   /* ---------- events ---------- */
@@ -620,6 +634,8 @@
     location.hash = b.dataset.view;
   });
   document.addEventListener("click", function (e) {
+    var pipelineJump = e.target.closest("[data-pipeline-jump]");
+    if (pipelineJump) { location.hash = "pipeline/" + pipelineJump.getAttribute("data-pipeline-jump"); return; }
     var rmodeEl = e.target.closest("[data-rmode]");
     if (rmodeEl) { rpgMode = rmodeEl.getAttribute("data-rmode"); renderRpg(); return; }
     var filterEl = e.target.closest("[data-rpg-filter]");

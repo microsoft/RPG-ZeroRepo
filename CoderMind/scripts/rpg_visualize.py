@@ -410,13 +410,15 @@ g.change-modified > .change-status-glyph {{ fill: #1f2937 !important; }}
 .change-graph-link.focus-related {{ stroke-width: 2.6; stroke-opacity: .95; }}
 .change-graph-link.focus-dim {{ stroke-opacity: .06; }}
 .change-graph-node {{ pointer-events: all; cursor: pointer; transition: opacity .14s; }}
-.change-graph-node circle {{ stroke-width: 2; pointer-events: all; cursor: pointer; }}
-.change-graph-node text {{ fill: #c9d1d9; font-size: 11px; pointer-events: none; }}
+.change-graph-node circle {{ fill: var(--node-fill,#484f58); stroke: #30363d; stroke-width: 2; pointer-events: all; cursor: pointer; }}
+.change-graph-node .node-label {{ fill: #e6edf3; font-size: 11.5px; font-weight: 600; pointer-events: none;
+  paint-order: stroke; stroke: #0d1117; stroke-width: 3px; stroke-linejoin: round; }}
 .change-graph-node .status-glyph {{ fill: #0d1117; font-size: 10px; font-weight: 800; text-anchor: middle; }}
-.change-graph-node.added circle {{ fill: rgba(63,185,80,.22); stroke: #3fb950; }}
-.change-graph-node.removed circle {{ fill: rgba(248,81,73,.14); stroke: #f85149; stroke-dasharray: 5 3; }}
-.change-graph-node.modified circle {{ fill: rgba(210,153,34,.20); stroke: #d29922; stroke-width: 4; }}
-.change-graph-node.context circle {{ fill: #30363d; stroke: #6e7681; }}
+.change-graph-node.added circle {{ stroke: #3fb950; stroke-width: 4; }}
+.change-graph-node.removed circle {{ stroke: #f85149; stroke-width: 3; stroke-dasharray: 5 3; }}
+.change-graph-node.modified circle {{ stroke: #d29922; stroke-width: 4; }}
+.change-graph-node.context circle {{ stroke: #6e7681; }}
+.change-graph-node.normal circle {{ stroke: #30363d; }}
 .change-graph-node.context {{ opacity: .42; }}
 .change-graph-node.focus-neighbor {{ opacity: 1; }}
 .change-graph-node.focus-dim {{ opacity: .16; }}
@@ -516,7 +518,7 @@ body.cp-open #canvas-overlay {{ left: 12px; }}
 #cp-search-wrap {{ display: flex; align-items: center; gap: 6px; min-height: 30px; background: #0d1117; border: 1px solid #30363d; border-radius: 6px; padding: 4px 8px; color: #6e7681; }}
 #cp-search {{ flex: 1; background: none; border: 0; outline: 0; color: #c9d1d9; font-size: 12px; }}
 #cp-list {{ display: flex; flex-direction: column; gap: 4px; overflow: auto; min-height: 0; flex: 1; }}
-.cp-row {{ position: relative; display: grid; grid-template-columns: 19px 1fr; gap: 7px; align-items: center; text-align: left;
+.cp-row {{ position: relative; display: grid; grid-template-columns:auto minmax(0,1fr); gap: 8px; align-items: center; text-align: left;
   min-height: 42px; overflow: hidden; background: #0d1117; border: 1px solid #21262d; border-radius: 7px; color: #c9d1d9; padding: 5px 7px 5px 10px; cursor: pointer; transition: border-color .14s, background .14s, box-shadow .14s; }}
 .cp-row::before {{ content: ''; position: absolute; inset: 0 auto 0 0; width: 3px; background: #58a6ff; opacity: .55; }}
 .cp-row.added::before {{ background: var(--change-added); }}
@@ -528,7 +530,9 @@ body.cp-open #canvas-overlay {{ left: 12px; }}
 .cp-row.selected::before {{ width: 4px; opacity: 1; }}
 .cp-row.selected .cp-name {{ color: #fff; font-weight: 800; }}
 .cp-row.selected .cp-path {{ color: #b8c6d8; }}
-.cp-mark {{ width: 19px; height: 19px; display: grid; place-items: center; border-radius: 50%; color: #fff; font-weight: 900; font-size: 12px; }}
+.cp-mark {{ min-width: 19px; min-height: 19px; display: inline-flex; align-items: center; justify-content: center; gap: 4px;
+  border-radius: 999px; padding: 2px 7px; color: #fff; font-weight: 800; font-size: 10px; white-space: nowrap; }}
+.cp-mark b {{ font-size: 12px; line-height: 1; }}
 .cp-mark.added {{ background: var(--change-added-strong); }}
 .cp-mark.removed {{ background: var(--change-removed-strong); }}
 .cp-mark.modified {{ color: #1f2937; background: var(--change-modified-strong); }}
@@ -622,6 +626,8 @@ body.cp-open #canvas-overlay {{ left: 12px; }}
 :root[data-theme="light"] .dep-node text,
 :root[data-theme="light"] .map-feat-node text,
 :root[data-theme="light"] .map-dep-node text {{ fill: #334155 !important; }}
+:root[data-theme="light"] .change-graph-node .node-label {{ fill: #263548 !important; stroke: #f6f8fb !important; stroke-width: 4px; font-weight: 650; }}
+:root[data-theme="light"] .change-graph-node circle {{ stroke: #64748b; }}
 :root[data-theme="light"] .edge-default,
 :root[data-theme="light"] .dep-link-default {{ stroke: #94a3b8; }}
 :root[data-theme="light"] .change-dim {{ opacity: .70; }}
@@ -727,7 +733,7 @@ body.cp-open #canvas-overlay {{ left: 12px; }}
 <aside id="changes-panel" style="display:none">
   <div id="cp-head">
     <div><div><strong id="cp-title">Changes</strong> <span id="cp-count" class="cp-count">0</span></div><small id="cp-version"></small></div>
-    <button id="cp-collapse" onclick="toggleChangesPanel()" title="Collapse">⟩</button>
+    <button id="cp-collapse" onclick="toggleChangesPanel()" title="Hide changes" aria-label="Hide changes">Hide</button>
   </div>
   <div id="status-group" class="cp-filters">
     <div id="status-seg" class="cp-filter-seg">
@@ -1100,7 +1106,7 @@ function toggleEdges() {{
   showEdges = !showEdges;
   document.getElementById('btn-edges').classList.toggle('active', showEdges);
   if (activeTab === 'feat') drawSemanticEdges();
-  else if (activeTab === 'dep') depRedraw();
+  else if (activeTab === 'dep') changeLinkLayer.style('display', showEdges ? null : 'none');
   else if (activeTab === 'map') mapDrawLinks();
 }}
 
@@ -2222,15 +2228,8 @@ function switchTab(tab) {{
     if (depSimulation) depSimulation.stop();
     svg.on('.zoom', null).call(zoomFeat);
   }} else if (tab === 'dep') {{
-    if (!hasDep) {{
-      gDep.selectAll('*').remove();
-      gDep.append('foreignObject').attr('width', width).attr('height', height)
-        .append('xhtml:div').attr('class', 'no-data').text('No dep graph data');
-    }} else {{
-      if (depInitialized) depRedraw(); else depInit();
-      if (depSimulation) depSimulation.alpha(0.1).restart();
-    }}
-    svg.on('.zoom', null).call(zoomDep);
+    if (depSimulation) depSimulation.stop();
+    svg.on('.zoom', null).call(zoomChange);
   }} else if (tab === 'map') {{
     if (depSimulation) depSimulation.stop();
     if (!hasMap) {{
@@ -2254,12 +2253,11 @@ function switchTab(tab) {{
           .scale(scale));
     }}, 350);
   }}
-  if (externalChanges.mode === 'changes' && activeTab === 'dep' && typeof drawChangeGraph === 'function') {{
+  if (activeTab === 'dep' && typeof drawChangeGraph === 'function') {{
     document.getElementById('search').style.display = 'none';
     document.getElementById('feat-controls').style.display = 'none';
     document.getElementById('dep-controls').style.display = 'none';
     document.getElementById('map-controls').style.display = 'none';
-    document.getElementById('btn-edges').style.display = 'none';
     drawChangeGraph();
   }} else if (typeof applyChangeEmphasis === 'function') {{
     applyChangeEmphasis();
@@ -2556,10 +2554,10 @@ function focusChangeNode(id, scope) {{
   const sets = externalChanges[scope];
   const removedSet = new Set((sets.rows?.removed || []).map(n => String(n.node_id)));
   const kind = sets.added.has(String(id)) ? 'added' : sets.modified.has(String(id)) ? 'modified' : removedSet.has(String(id)) ? 'removed' : 'context';
-  const sameDependencyFocus = externalChanges.mode === 'changes' && scope === 'dependency' && activeTab === 'dep'
+  const sameDependencyFocus = scope === 'dependency' && activeTab === 'dep'
     && externalChanges.focus?.scope === 'dependency' && String(externalChanges.focus.node_id) === String(id);
   externalChanges.focus = sameDependencyFocus ? null : {{scope, node_id: String(id), kind}};
-  if (externalChanges.mode === 'changes' && scope === 'dependency' && activeTab === 'dep') {{
+  if (scope === 'dependency' && activeTab === 'dep') {{
     drawChangeGraph();
     if (typeof renderChangesPanel === 'function') renderChangesPanel();
     return;
@@ -2642,7 +2640,7 @@ function currentDependencyNode(id) {{
   const node = depNodeMap[String(id)] || depNodesRaw.find(item => String(item.id) === String(id));
   if (!node) return null;
   return {{
-    id: String(node.id), name: node.name || node.id, node_type: node.type,
+    id: String(node.id), name: String(node.id) === '.' ? 'repository root' : (node.name || node.id), node_type: node.type,
     status: 'context', scope: 'dependency', parent_id: depParentMap[node.id] || null,
   }};
 }}
@@ -2670,12 +2668,21 @@ function currentDependencyRows() {{
 
 function currentDependencyEdges() {{
   const semantic = depEdgesRaw.map(edge => ({{
-    source: String(edge.source), target: String(edge.target), relation: edge.type, status: 'context',
+    source: edgeId(edge.source), target: edgeId(edge.target), relation: edge.type, status: 'context',
   }}));
   const hierarchy = Object.entries(depParentMap).map(([child, parent]) => ({{
     source: String(parent), target: String(child), relation: 'contains', status: 'context',
   }}));
   return [...hierarchy, ...semantic];
+}}
+
+function buildFullDependencyGraph() {{
+  const nodes = currentDependencyRows().map(node => ({{...node, status: 'normal'}}));
+  const nodeIds = new Set(nodes.map(node => String(node.id)));
+  const edges = currentDependencyEdges()
+    .filter(edge => nodeIds.has(String(edge.source)) && nodeIds.has(String(edge.target)))
+    .map(edge => ({{...edge, status: 'normal'}}));
+  return {{nodes, edges}};
 }}
 
 function currentMappingEdges() {{
@@ -2734,14 +2741,75 @@ function buildChangeGraph(scope) {{
 }}
 
 function changeNodeGlyph(status) {{ return status === 'added' ? '+' : status === 'removed' ? '−' : status === 'modified' ? '~' : ''; }}
+function dependencyDisplayLabel(node) {{
+  const fullName = String(node.name || node.id);
+  const conciseName = fullName.startsWith('example_') ? fullName.slice('example_'.length) : fullName;
+  return conciseName.length > 20 ? conciseName.slice(0, 18) + '…' : conciseName;
+}}
+
+function placeChangeGraphLabels(selection, forceNodeById) {{
+  const placed = [];
+  const nodePoints = [...forceNodeById.values()];
+  const entries = selection.nodes().map(element => ({{
+    element,
+    node: element.__data__,
+    label: d3.select(element).select('.node-label'),
+  }})).filter(entry => entry.label.node() && forceNodeById.has(String(entry.node.id)));
+  entries.sort((a, b) => b.label.node().getComputedTextLength() - a.label.node().getComputedTextLength());
+
+  function overlapArea(a, b) {{
+    return Math.max(0, Math.min(a.right, b.right) - Math.max(a.left, b.left))
+      * Math.max(0, Math.min(a.bottom, b.bottom) - Math.max(a.top, b.top));
+  }}
+
+  entries.forEach(entry => {{
+    const point = forceNodeById.get(String(entry.node.id));
+    const textWidth = Math.max(entry.label.node().getComputedTextLength(), 20);
+    const textHeight = 12;
+    const candidates = [
+      {{x: 16, y: 4, anchor: 'start', left: point.x + 16, top: point.y - 6}},
+      {{x: -16, y: 4, anchor: 'end', left: point.x - 16 - textWidth, top: point.y - 6}},
+      {{x: 0, y: -16, anchor: 'middle', left: point.x - textWidth / 2, top: point.y - 27}},
+      {{x: 0, y: 22, anchor: 'middle', left: point.x - textWidth / 2, top: point.y + 10}},
+      {{x: 12, y: -14, anchor: 'start', left: point.x + 12, top: point.y - 25}},
+      {{x: -12, y: -14, anchor: 'end', left: point.x - 12 - textWidth, top: point.y - 25}},
+      {{x: 12, y: 20, anchor: 'start', left: point.x + 12, top: point.y + 8}},
+      {{x: -12, y: 20, anchor: 'end', left: point.x - 12 - textWidth, top: point.y + 8}},
+    ].map(candidate => ({{
+      ...candidate,
+      right: candidate.left + textWidth,
+      bottom: candidate.top + textHeight,
+    }}));
+    candidates.forEach(candidate => {{
+      candidate.score = placed.reduce((score, box) => score + overlapArea(candidate, box) * 4, 0);
+      candidate.score += nodePoints.reduce((score, node) => {{
+        if (String(node.id) === String(entry.node.id)) return score;
+        return score + (node.x >= candidate.left - 5 && node.x <= candidate.right + 5
+          && node.y >= candidate.top - 5 && node.y <= candidate.bottom + 5 ? 120 : 0);
+      }}, 0);
+    }});
+    const choice = candidates.reduce((best, candidate) => candidate.score < best.score ? candidate : best);
+    entry.label.attr('x', choice.x).attr('y', choice.y).attr('dy', 0).attr('text-anchor', choice.anchor);
+    placed.push(choice);
+  }});
+}}
 
 function updateChangeChrome(scope, graph) {{
+  const fullMode = externalChanges.mode === 'full';
   const changed = graph.nodes.filter(node => node.status !== 'context').length;
   const context = graph.nodes.length - changed;
   const target = document.getElementById(scope === 'feature' ? 'stats-feat' : scope === 'dependency' ? 'stats-dep' : 'stats-map');
-  target.innerHTML = `<span class="stat">Changed: <b>${{changed}}</b></span>`
-    + `<span class="stat">Context: <b>${{context}}</b></span>`
-    + `<span class="stat">Visible relations: <b>${{graph.edges.length}}</b></span>`;
+  if (fullMode && scope === 'dependency') {{
+    const semanticCount = graph.edges.filter(edge => edge.relation !== 'contains').length;
+    const hierarchyCount = graph.edges.length - semanticCount;
+    target.innerHTML = `<span class="stat">Nodes: <b>${{graph.nodes.length}}</b></span>`
+      + `<span class="stat">Semantic: <b>${{semanticCount}}</b></span>`
+      + `<span class="stat">Hierarchy: <b>${{hierarchyCount}}</b></span>`;
+  }} else {{
+    target.innerHTML = `<span class="stat">Changed: <b>${{changed}}</b></span>`
+      + `<span class="stat">Context: <b>${{context}}</b></span>`
+      + `<span class="stat">Visible relations: <b>${{graph.edges.length}}</b></span>`;
+  }}
   const relationLegend = scope === 'dependency'
     ? `<div class="ov-section"><div class="ov-title">Directed relations</div>
        <div class="legend-item"><div class="legend-line" style="background:#f0883e"></div>imports</div>
@@ -2749,25 +2817,31 @@ function updateChangeChrome(scope, graph) {{
        <div class="legend-item"><div class="legend-line" style="background:#a371f7"></div>inherits</div>
        <div class="legend-item"><div class="legend-line" style="border-top:1px dashed #6e7681"></div>contains</div></div>`
     : '';
-  document.getElementById('canvas-overlay').innerHTML = `
-    <div class="ov-title">Change status</div>
+  const nodeTypeLegend = scope === 'dependency'
+    ? `<div class="ov-section"><div class="ov-title">Node fill · code type</div>
+       <div class="legend-item"><span style="width:10px;height:10px;border-radius:50%;background:#1f6feb"></span>directory</div>
+       <div class="legend-item"><span style="width:10px;height:10px;border-radius:50%;background:#3fb950"></span>file / module</div>
+       <div class="legend-item"><span style="width:10px;height:10px;border-radius:50%;background:#a371f7"></span>class</div>
+       <div class="legend-item"><span style="width:10px;height:10px;border-radius:50%;background:#d2a8ff"></span>function / method</div></div>`
+    : '';
+  const changeLegend = fullMode ? '' : `<div class="ov-title">Change status</div>
     <div class="legend-item"><span style="color:#3fb950;font-weight:800">+</span> Added</div>
     <div class="legend-item"><span style="color:#f85149;font-weight:800">−</span> Removed</div>
     <div class="legend-item"><span style="color:#d29922;font-weight:800">~</span> Modified</div>
-    <div class="legend-item"><span style="color:#8b949e;font-weight:800">○</span> Context</div>
-    ${{relationLegend}}
+    <div class="legend-item"><span style="color:#8b949e;font-weight:800">○</span> Context</div>`;
+  document.getElementById('canvas-overlay').innerHTML = `${{changeLegend}}${{nodeTypeLegend}}${{relationLegend}}
     <div class="ov-section"><span class="ov-key">Arrow</span> source → target</div>
     <div class="ov-section"><span class="ov-key">Click</span> node — focus<br><span class="ov-key">Scroll</span> — zoom</div>`;
 }}
 
 function drawChangeGraph() {{
-  if (externalChanges.mode !== 'changes') {{
+  if (activeTab !== 'dep') {{
     if (changeSimulation) changeSimulation.stop();
     gChange.style('display', 'none');
     return;
   }}
-  const scope = externalChanges.focus?.scope || (activeTab === 'dep' ? 'dependency' : activeTab === 'map' ? 'map' : 'feature');
-  const graph = buildChangeGraph(scope);
+  const scope = 'dependency';
+  const graph = externalChanges.mode === 'full' ? buildFullDependencyGraph() : buildChangeGraph(scope);
   updateChangeChrome(scope, graph);
   gFeat.style('display', 'none'); gDep.style('display', 'none'); gMap.style('display', 'none');
   gChange.style('display', null);
@@ -2800,29 +2874,33 @@ function drawChangeGraph() {{
   entered.append('text').attr('class', 'status-glyph').attr('dy', 3.5);
   entered.append('text').attr('class', 'node-label').attr('x', 16).attr('dy', 4);
   const all = entered.merge(selection)
-    .attr('class', node => `change-graph-node ${{node.status}}${{externalChanges.focus?.node_id === node.id ? ' focused' : ''}}`);
+    .attr('class', node => `change-graph-node ${{node.status}}${{externalChanges.focus?.node_id === node.id ? ' focused' : ''}}`)
+    .style('--node-fill', node => nodeTypeColors[node.node_type] || nodeTypeColors.default);
   all.select('.status-glyph').text(node => changeNodeGlyph(node.status));
   all.select('title').text(node => `${{node.name || node.id}}\n${{node.id}}\n${{node.status}}`);
   all.select('.node-label').text(node => {{
-    const name = node.name || node.id;
-    return name.length > 20 ? name.slice(0, 18) + '…' : name;
+    return dependencyDisplayLabel(node);
   }});
 
   const forceNodes = graph.nodes.map(node => ({{...node}}));
+  const forceNodeById = new Map(forceNodes.map(node => [String(node.id), node]));
   changeSimulation = d3.forceSimulation(forceNodes)
-    .force('link', d3.forceLink(graph.edges).id(node => node.id).distance(108).strength(.66))
+    .force('link', d3.forceLink(graph.edges).id(node => node.id)
+      .distance(edge => edge.relation === 'contains' ? 62 : 108)
+      .strength(edge => edge.relation === 'contains' ? .78 : .58))
     .force('charge', d3.forceManyBody().strength(graph.nodes.length > 80 ? -55 : -135).distanceMax(280))
     .force('center', d3.forceCenter(width / 2, height / 2))
-    .force('collision', d3.forceCollide(58).strength(.92))
+    .force('collision', d3.forceCollide(node => 42 + Math.min(String(node.name || node.id).length, 20) * 2.8).strength(.96))
     .alpha(.9).alphaDecay(.045)
     .stop();
-  for (let iteration = 0; iteration < 140; iteration++) changeSimulation.tick();
+  for (let iteration = 0; iteration < 180; iteration++) changeSimulation.tick();
   linkAll.attr('x1', edge => edge.source.x).attr('y1', edge => edge.source.y)
     .attr('x2', edge => edge.target.x).attr('y2', edge => edge.target.y);
   all.attr('transform', node => {{
-    const forceNode = forceNodes.find(item => item.id === node.id);
+    const forceNode = forceNodeById.get(String(node.id));
     return forceNode ? `translate(${{forceNode.x}},${{forceNode.y}})` : '';
   }});
+  placeChangeGraphLabels(all, forceNodeById);
   const focusedId = externalChanges.focus?.scope === 'dependency' ? String(externalChanges.focus.node_id) : null;
   const neighborIds = new Set(focusedId ? [focusedId] : []);
   if (focusedId) graph.edges.forEach(edge => {{
@@ -2844,7 +2922,7 @@ function drawChangeGraph() {{
     .classed('focus-neighbor', node => !!focusedId && neighborIds.has(String(node.id)))
     .classed('focus-dim', node => !!focusedId && !neighborIds.has(String(node.id)));
   svg.on('click.change-deselect', event => {{
-    if (event.target !== svg.node() || externalChanges.mode !== 'changes' || activeTab !== 'dep' || !externalChanges.focus) return;
+    if (event.target !== svg.node() || activeTab !== 'dep' || !externalChanges.focus) return;
     externalChanges.focus = null;
     drawChangeGraph();
     if (typeof renderChangesPanel === 'function') renderChangesPanel();
@@ -2853,7 +2931,7 @@ function drawChangeGraph() {{
 }}
 
 function fitChangeGraph() {{
-  if (externalChanges.mode !== 'changes') return;
+  if (activeTab !== 'dep') return;
   const rightInset = (typeof cpOpen !== 'undefined' && cpOpen) ? 342 : 30;
   const leftInset = 30, topInset = 96, bottomInset = 30;
   const usableWidth = Math.max(width - leftInset - rightInset, 120);
@@ -3043,7 +3121,7 @@ document.getElementById('search').addEventListener('input', function() {{
 }});
 
 // ══ Self-contained change workbench (in-page controls; no parent needed) ══
-let cpOpen = false;
+let cpOpen = true;
 function cpEsc(s) {{ return String(s == null ? '' : s).replace(/[&<>"]/g, c => ({{'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}}[c])); }}
 function cpPath(p) {{ return Array.isArray(p) ? p.join(' / ') : (p == null ? '' : String(p)); }}
 function cpScope() {{ return activeTab === 'dep' ? 'dependency' : 'feature'; }}
@@ -3076,7 +3154,8 @@ function renderChangeDetail(node) {{
   if (node.changed_fields && node.changed_fields.length) dl.push(`<dt>Changed</dt><dd>${{cpEsc(node.changed_fields.join(', '))}}</dd>`);
   if (node.previous_parent_id) dl.push(`<dt>Prev parent</dt><dd>${{cpEsc(node.previous_parent_id)}}</dd>`);
   if (node.parent_id) dl.push(`<dt>${{node.status === 'removed' ? 'Old parent' : 'Parent'}}</dt><dd>${{cpEsc(node.parent_id)}}</dd>`);
-  el.innerHTML = `<div class="cp-d-title"><span class="cp-mark ${{node.status}}">${{changeNodeGlyph(node.status)}}</span>${{cpEsc(node.name || node.id)}}</div><dl>${{dl.join('')}}</dl>`;
+  const statusLabel = node.status === 'added' ? 'Added' : node.status === 'removed' ? 'Removed' : node.status === 'modified' ? 'Modified' : 'Context';
+  el.innerHTML = `<div class="cp-d-title"><span class="cp-mark ${{node.status}}"><b>${{changeNodeGlyph(node.status)}}</b>${{statusLabel}}</span>${{cpEsc(node.name || node.id)}}</div><dl>${{dl.join('')}}</dl>`;
 }}
 
 function renderChangesPanel() {{
@@ -3092,9 +3171,12 @@ function renderChangesPanel() {{
   document.getElementById('cp-count').textContent = rows.length + ' node' + (rows.length === 1 ? '' : 's');
   const focusId = externalChanges.focus?.node_id;
   const listEl = document.getElementById('cp-list');
-  listEl.innerHTML = rows.map(r => `<button class="cp-row ${{r.status}}${{focusId === r.id ? ' selected' : ''}}" data-cp-id="${{cpEsc(r.id)}}" aria-pressed="${{focusId === r.id}}">`
-    + `<span class="cp-mark ${{r.status}}">${{changeNodeGlyph(r.status)}}</span>`
-    + `<span class="cp-row-main"><span class="cp-name">${{cpEsc(r.name || r.id)}}</span><span class="cp-path">${{cpEsc(cpPath(r.path) || r.id)}}</span></span></button>`).join('')
+  listEl.innerHTML = rows.map(r => {{
+    const statusLabel = r.status === 'added' ? 'Added' : r.status === 'removed' ? 'Removed' : r.status === 'modified' ? 'Modified' : 'Context';
+    return `<button class="cp-row ${{r.status}}${{focusId === r.id ? ' selected' : ''}}" data-cp-id="${{cpEsc(r.id)}}" aria-pressed="${{focusId === r.id}}">`
+    + `<span class="cp-mark ${{r.status}}"><b>${{changeNodeGlyph(r.status)}}</b>${{statusLabel}}</span>`
+    + `<span class="cp-row-main"><span class="cp-name">${{cpEsc(r.name || r.id)}}</span><span class="cp-path">${{cpEsc(cpPath(r.path) || r.id)}}</span></span></button>`;
+  }}).join('')
     || '<div style="color:#6e7681;font-size:11px;padding:12px;text-align:center">No matching nodes.</div>';
   listEl.querySelectorAll('[data-cp-id]').forEach(el => {{ el.onclick = () => selectChangeNode(el.getAttribute('data-cp-id')); }});
   renderChangeDetail(rows.find(r => r.id === focusId) || null);
@@ -3113,7 +3195,7 @@ function syncChangesPanelVisibility() {{
   const btn = document.getElementById('btn-changes-panel');
   if (btn) {{
     btn.style.display = activeTab === 'map' ? 'none' : '';
-    btn.textContent = cpOpen ? 'Changes \u27e9' : 'Changes \u27e8';
+    btn.textContent = cpOpen ? 'Hide changes' : 'Show changes';
   }}
 }}
 function openChangesPanel(open) {{
@@ -3126,7 +3208,7 @@ function setStatusFilter(filter) {{
   externalChanges.filter = filter;
   externalChanges.focus = null;
   document.querySelectorAll('#status-seg button').forEach(b => b.classList.toggle('active', b.dataset.status === filter));
-  if (externalChanges.mode === 'changes' && activeTab === 'dep') drawChangeGraph();
+  if (activeTab === 'dep') drawChangeGraph();
   else applyChangeEmphasis();
   renderChangesPanel();
 }}
@@ -3149,7 +3231,7 @@ function openMapping() {{
 }}
 
 function fitCurrent() {{
-  if (externalChanges.mode === 'changes' && activeTab === 'dep') {{ fitChangeGraph(); return; }}
+  if (activeTab === 'dep') {{ fitChangeGraph(); return; }}
   if (activeTab === 'feat') {{ fitFeatEmphasis(); return; }}
   if (activeTab === 'dep') {{ depFitVisible(); return; }}
   if (activeTab === 'map') {{ switchTab('map'); return; }}
@@ -3157,7 +3239,7 @@ function fitCurrent() {{
 function resetCurrent() {{
   externalChanges.focus = null;
   clearGraphFocusVisuals();
-  if (externalChanges.mode === 'changes' && activeTab === 'dep') {{ drawChangeGraph(); return; }}
+  if (activeTab === 'dep') {{ drawChangeGraph(); return; }}
   if (activeTab === 'feat') fitFeatEmphasis();
   else if (activeTab === 'dep') depFitVisible();
   else svg.call(zoomMap.transform, d3.zoomIdentity);
