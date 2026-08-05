@@ -14,6 +14,7 @@ Usage:
 import json
 import logging
 import os
+import subprocess
 import sys
 import argparse
 from pathlib import Path
@@ -319,7 +320,23 @@ def run_update_rpg(
     max_exclude_votes: int = 1,
 ) -> dict:
     """Run an incremental RPG update with lifecycle and change metrics."""
-    with record_run("update_rpg", trigger="script") as run_event:
+    hook_type = os.environ.get("CMIND_HOOK")
+    hook_sha = os.environ.get("CMIND_HOOK_SHA")
+    hook_invocation_id = os.environ.get("CMIND_HOOK_INVOCATION_ID")
+    metadata = {
+        key: value
+        for key, value in {
+            "hook_type": hook_type,
+            "hook_sha": hook_sha,
+            "hook_invocation_id": hook_invocation_id,
+        }.items()
+        if value
+    }
+    with record_run(
+        "update_rpg",
+        trigger="hook" if hook_type else "script",
+        metadata=metadata or None,
+    ) as run_event:
         result = _run_update_rpg(
             rpg_file=rpg_file,
             last_repo_dir=last_repo_dir,
@@ -329,6 +346,16 @@ def run_update_rpg(
             max_exclude_votes=max_exclude_votes,
             run_id=run_event.run_id,
         )
+        if not result.get("prev_ref"):
+            try:
+                result["prev_ref"] = subprocess.check_output(
+                    ["git", "rev-parse", "HEAD"],
+                    cwd=last_repo_dir,
+                    stderr=subprocess.DEVNULL,
+                    text=True,
+                ).strip()
+            except (OSError, subprocess.SubprocessError):
+                pass
         if result.get("status") != "success":
             run_event.status = "failed"
             run_event.error = {
@@ -343,6 +370,7 @@ def run_update_rpg(
                     "dep_nodes", "dep_edges", "dep_nodes_delta", "dep_edges_delta",
                     "dep_to_rpg_map_size", "aligned", "groups_pathed", "l1_pathed",
                     "meta_git_advanced", "previous_commit", "new_commit", "functional_areas",
+                    "prev_ref",
                 )
                 if result.get(key) is not None
             })

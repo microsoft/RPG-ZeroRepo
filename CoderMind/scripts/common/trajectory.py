@@ -14,9 +14,11 @@ maintains its own trajectory file in .cmind/trajectory/
 """
 
 import json
+import os
 import time
 import logging
-from datetime import datetime
+import uuid
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Dict, Any, List, Optional
 from dataclasses import dataclass, field, asdict
@@ -24,6 +26,33 @@ from enum import Enum
 
 from .paths import TRAJECTORY_DIR
 from .paths import WORKSPACE_ROOT
+from .activity_events import ActivityWriter, current_activity_context, default_writer, new_id
+
+
+ACTIVITY_WRITER: ActivityWriter | None = None
+
+
+def _activity_writer() -> ActivityWriter:
+    return ACTIVITY_WRITER or default_writer()
+
+
+def _activity_now() -> str:
+    return datetime.now(timezone.utc).isoformat(timespec="milliseconds").replace("+00:00", "Z")
+
+
+def _activity_duration_ms(started_at: str | None, finished_at: str | None) -> float | None:
+    if not started_at or not finished_at:
+        return None
+    try:
+        started = datetime.fromisoformat(started_at.replace("Z", "+00:00"))
+        finished = datetime.fromisoformat(finished_at.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    if started.tzinfo is None:
+        started = started.replace(tzinfo=timezone.utc)
+    if finished.tzinfo is None:
+        finished = finished.replace(tzinfo=timezone.utc)
+    return round((finished - started).total_seconds() * 1000, 3)
 
 
 # ============================================================================
@@ -60,6 +89,7 @@ class ScriptCall:
     exit_code: Optional[int] = None
     stdout: str = ""
     stderr: str = ""
+    activity_span_id: Optional[str] = None
     
     def to_dict(self) -> Dict[str, Any]:
         return asdict(self)
@@ -81,6 +111,7 @@ class LLMInteraction:
     success: bool = False
     error: Optional[str] = None
     duration_seconds: Optional[float] = None
+    activity_span_id: Optional[str] = None
     
     def to_dict(self) -> Dict[str, Any]:
         return asdict(self)
@@ -103,6 +134,7 @@ class Step:
     llm_interactions: List[LLMInteraction] = field(default_factory=list)
     error: Optional[str] = None
     metadata: Dict[str, Any] = field(default_factory=dict)
+    activity_span_id: Optional[str] = None
     
     def to_dict(self) -> Dict[str, Any]:
         return {
@@ -115,7 +147,8 @@ class Step:
             "script_calls": [sc.to_dict() for sc in self.script_calls],
             "llm_interactions": [li.to_dict() for li in self.llm_interactions],
             "error": self.error,
-            "metadata": self.metadata
+            "metadata": self.metadata,
+            "activity_span_id": self.activity_span_id,
         }
     
     @classmethod
@@ -128,7 +161,8 @@ class Step:
             started_at=data.get("started_at"),
             finished_at=data.get("finished_at"),
             error=data.get("error"),
-            metadata=data.get("metadata", {})
+            metadata=data.get("metadata", {}),
+            activity_span_id=data.get("activity_span_id"),
         )
         step.script_calls = [ScriptCall.from_dict(sc) for sc in data.get("script_calls", [])]
         step.llm_interactions = [LLMInteraction.from_dict(li) for li in data.get("llm_interactions", [])]
@@ -200,8 +234,8 @@ class Trajectory:
         self.trajectory_dir = self.base_dir / TRAJECTORY_DIR
         
         # Generate filename with timestamp (human-readable, to seconds)
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        self.trajectory_file = self.trajectory_dir / f"{command_name}_trajectory_{timestamp}.json"
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
+        self.trajectory_file = self.trajectory_dir / f"{command_name}_trajectory_{timestamp}_{uuid.uuid4().hex}.json"
         
         # Trajectory data
         self.status: str = CommandStatus.NOT_STARTED.value
@@ -212,6 +246,11 @@ class Trajectory:
         self.resume_point: Optional[ResumePoint] = None
         self.error: Optional[str] = None
         self.metadata: Dict[str, Any] = {}
+        self.activity_trace_id: Optional[str] = None
+        self.activity_span_id: Optional[str] = None
+        self.activity_parent_span_id: Optional[str] = None
+        self.activity_enabled = False
+        self._activity_finished = False
         
         # Runtime tracking
         self._llm_interaction_counter = 0
@@ -244,6 +283,12 @@ class Trajectory:
             self.finished_at = data.get("finished_at")
             self.error = data.get("error")
             self.metadata = data.get("metadata", {})
+            activity = data.get("activity") if isinstance(data.get("activity"), dict) else {}
+            self.activity_trace_id = activity.get("trace_id")
+            self.activity_span_id = activity.get("span_id")
+            self.activity_parent_span_id = activity.get("parent_span_id")
+            self.activity_enabled = bool(activity.get("enabled"))
+            self._activity_finished = bool(activity.get("finished"))
             
             self.steps = [Step.from_dict(s) for s in data.get("steps", [])]
             self.targets_state = {
@@ -279,6 +324,13 @@ class Trajectory:
             "finished_at": self.finished_at,
             "error": self.error,
             "metadata": self.metadata,
+            "activity": {
+                "trace_id": self.activity_trace_id,
+                "span_id": self.activity_span_id,
+                "parent_span_id": self.activity_parent_span_id,
+                "enabled": self.activity_enabled,
+                "finished": self._activity_finished,
+            },
             "steps": [s.to_dict() for s in self.steps],
             "targets_state": {k: v.to_dict() for k, v in self.targets_state.items()},
             "resume_point": self.resume_point.to_dict() if self.resume_point else None
@@ -300,31 +352,112 @@ class Trajectory:
     
     def start(self, metadata: Dict[str, Any] = None) -> None:
         """Start the command execution."""
+        active = current_activity_context()
+        if self.activity_span_id is None:
+            self.activity_enabled = active is None or self.command_name == "code_gen"
+            self.activity_trace_id = (
+                active.trace_id if active else os.environ.get("CMIND_TRACE_ID") or new_id("trc")
+            )
+            self.activity_parent_span_id = (
+                active.span_id if active else os.environ.get("CMIND_PARENT_SPAN_ID")
+            )
+            self.activity_span_id = new_id("spn")
+            activity_event = "span_started"
+        else:
+            activity_event = "span_resumed"
         self.status = CommandStatus.IN_PROGRESS.value
-        self.started_at = datetime.now().isoformat()
+        self.started_at = _activity_now()
         self.finished_at = None
         self.error = None
+        self._activity_finished = False
         if metadata:
             self.metadata.update(metadata)
+        if self.activity_enabled:
+            _activity_writer().append(
+                activity_event,
+                trace_id=str(self.activity_trace_id),
+                span_id=str(self.activity_span_id),
+                parent_span_id=self.activity_parent_span_id,
+                kind="workflow",
+                name=self.command_name,
+                logical_key=f"decoder-{self.command_name.replace('_', '-')}",
+                status="running",
+                fields={
+                    "started_at": self.started_at,
+                    "trigger": "trajectory",
+                    "quality": "measured",
+                },
+            )
         self.save()
     
     def complete(self, metadata: Dict[str, Any] = None) -> None:
         """Mark command as successfully completed."""
         self.status = CommandStatus.COMPLETED.value
-        self.finished_at = datetime.now().isoformat()
+        self.finished_at = _activity_now()
         self.resume_point = None
         if metadata:
             self.metadata.update(metadata)
+        self._finish_activity("success")
         self.save()
     
     def fail(self, error: str, metadata: Dict[str, Any] = None) -> None:
         """Mark command as failed."""
         self.status = CommandStatus.FAILED.value
-        self.finished_at = datetime.now().isoformat()
+        self.finished_at = _activity_now()
         self.error = error
         if metadata:
             self.metadata.update(metadata)
+        self._finish_activity("failed", error=error)
         self.save()
+
+    def _finish_activity(self, status: str, *, error: str | None = None) -> None:
+        if not self.activity_enabled or self._activity_finished or not self.activity_span_id:
+            return
+        _activity_writer().append(
+            "span_finished",
+            trace_id=str(self.activity_trace_id),
+            span_id=self.activity_span_id,
+            parent_span_id=self.activity_parent_span_id,
+            kind="workflow",
+            name=self.command_name,
+            logical_key=f"decoder-{self.command_name.replace('_', '-')}",
+            status=status,
+            timestamp=_activity_now(),
+            fields={
+                "started_at": self.started_at,
+                "finished_at": self.finished_at,
+                "duration_ms": _activity_duration_ms(self.started_at, self.finished_at),
+                "trigger": "trajectory",
+                "quality": "measured",
+                "error": {"type": "TrajectoryError", "message": error} if error else None,
+                "metadata": self.metadata,
+            },
+        )
+        self._activity_finished = True
+
+    def _finish_step_activity(self, step: Step, status: str, *, error: str | None = None) -> None:
+        if not self.activity_enabled or not step.activity_span_id:
+            return
+        _activity_writer().append(
+            "span_finished",
+            trace_id=str(self.activity_trace_id),
+            span_id=step.activity_span_id,
+            parent_span_id=self.activity_span_id,
+            kind="workflow.stage",
+            name=step.name,
+            logical_key=f"decoder-{self.command_name.replace('_', '-')}-{step.name.replace('_', '-')}",
+            status=status,
+            timestamp=_activity_now(),
+            fields={
+                "started_at": step.started_at,
+                "finished_at": step.finished_at,
+                "duration_ms": _activity_duration_ms(step.started_at, step.finished_at),
+                "sequence": step.step_id,
+                "quality": "measured",
+                "error": {"type": "TrajectoryError", "message": error} if error else None,
+                "metrics": step.metadata,
+            },
+        )
     
     def is_resumable(self) -> bool:
         """Check if this trajectory can be resumed."""
@@ -369,7 +502,24 @@ class Trajectory:
         step = self.get_step(step_id)
         if step:
             step.status = StepStatus.IN_PROGRESS.value
-            step.started_at = datetime.now().isoformat()
+            step.started_at = _activity_now()
+            if self.activity_enabled and self.activity_span_id:
+                step.activity_span_id = step.activity_span_id or new_id("spn")
+                _activity_writer().append(
+                    "span_started",
+                    trace_id=str(self.activity_trace_id),
+                    span_id=step.activity_span_id,
+                    parent_span_id=self.activity_span_id,
+                    kind="workflow.stage",
+                    name=step.name,
+                    logical_key=f"decoder-{self.command_name.replace('_', '-')}-{step.name.replace('_', '-')}",
+                    status="running",
+                    fields={
+                        "started_at": step.started_at,
+                        "sequence": step.step_id,
+                        "quality": "measured",
+                    },
+                )
             self.save()
     
     def complete_step(self, step_id: int, metadata: Dict[str, Any] = None) -> None:
@@ -377,9 +527,10 @@ class Trajectory:
         step = self.get_step(step_id)
         if step:
             step.status = StepStatus.COMPLETED.value
-            step.finished_at = datetime.now().isoformat()
+            step.finished_at = _activity_now()
             if metadata:
                 step.metadata.update(metadata)
+            self._finish_step_activity(step, "success")
             self.save()
     
     def fail_step(self, step_id: int, error: str) -> None:
@@ -387,8 +538,9 @@ class Trajectory:
         step = self.get_step(step_id)
         if step:
             step.status = StepStatus.FAILED.value
-            step.finished_at = datetime.now().isoformat()
+            step.finished_at = _activity_now()
             step.error = error
+            self._finish_step_activity(step, "failed", error=error)
             self.save()
     
     def skip_step(self, step_id: int, reason: str = "") -> None:
@@ -396,9 +548,10 @@ class Trajectory:
         step = self.get_step(step_id)
         if step:
             step.status = StepStatus.SKIPPED.value
-            step.finished_at = datetime.now().isoformat()
+            step.finished_at = _activity_now()
             if reason:
                 step.metadata["skip_reason"] = reason
+            self._finish_step_activity(step, "skipped", error=reason or None)
             self.save()
     
     # ========================================================================
@@ -417,9 +570,22 @@ class Trajectory:
         
         script_call = ScriptCall(
             command=command,
-            started_at=datetime.now().isoformat()
+            started_at=_activity_now(),
+            activity_span_id=new_id("spn") if self.activity_enabled else None,
         )
         step.script_calls.append(script_call)
+        if self.activity_enabled and script_call.activity_span_id:
+            _activity_writer().append(
+                "span_started",
+                trace_id=str(self.activity_trace_id),
+                span_id=script_call.activity_span_id,
+                parent_span_id=step.activity_span_id or self.activity_span_id,
+                kind="tool.script",
+                name=Path(command.split()[0]).name if command.split() else "script",
+                logical_key="script-call",
+                status="running",
+                fields={"started_at": script_call.started_at},
+            )
         self.save()
         return len(step.script_calls) - 1
     
@@ -435,10 +601,28 @@ class Trajectory:
         step = self.get_step(step_id)
         if step and 0 <= call_index < len(step.script_calls):
             sc = step.script_calls[call_index]
-            sc.finished_at = datetime.now().isoformat()
+            sc.finished_at = _activity_now()
             sc.exit_code = exit_code
             sc.stdout = stdout
             sc.stderr = stderr
+            if self.activity_enabled and sc.activity_span_id:
+                _activity_writer().append(
+                    "span_finished",
+                    trace_id=str(self.activity_trace_id),
+                    span_id=sc.activity_span_id,
+                    parent_span_id=step.activity_span_id or self.activity_span_id,
+                    kind="tool.script",
+                    name=Path(sc.command.split()[0]).name if sc.command.split() else "script",
+                    logical_key="script-call",
+                    status="success" if exit_code == 0 else "failed",
+                    timestamp=_activity_now(),
+                    fields={
+                        "started_at": sc.started_at,
+                        "finished_at": sc.finished_at,
+                        "exit_code": exit_code,
+                        "command_name": Path(sc.command.split()[0]).name if sc.command.split() else None,
+                    },
+                )
             self.save()
     
     # ========================================================================
@@ -463,11 +647,24 @@ class Trajectory:
         self._llm_interaction_counter += 1
         interaction = LLMInteraction(
             interaction_id=self._llm_interaction_counter,
-            timestamp=datetime.now().isoformat(),
+            timestamp=_activity_now(),
             purpose=purpose,
-            prompt=prompt
+            prompt=prompt,
+            activity_span_id=new_id("spn") if self.activity_enabled else None,
         )
         step.llm_interactions.append(interaction)
+        if self.activity_enabled and interaction.activity_span_id:
+            _activity_writer().append(
+                "span_started",
+                trace_id=str(self.activity_trace_id),
+                span_id=interaction.activity_span_id,
+                parent_span_id=step.activity_span_id or self.activity_span_id,
+                kind="tool.llm",
+                name=purpose,
+                logical_key="llm-call",
+                status="running",
+                fields={"started_at": interaction.timestamp, "purpose": purpose},
+            )
         self.save()
         return self._llm_interaction_counter
     
@@ -493,6 +690,24 @@ class Trajectory:
                 interaction.success = success
                 interaction.error = error
                 interaction.duration_seconds = duration_seconds
+                if self.activity_enabled and interaction.activity_span_id:
+                    _activity_writer().append(
+                        "span_finished",
+                        trace_id=str(self.activity_trace_id),
+                        span_id=interaction.activity_span_id,
+                        parent_span_id=step.activity_span_id or self.activity_span_id,
+                        kind="tool.llm",
+                        name=interaction.purpose,
+                        logical_key="llm-call",
+                        status="success" if success else "failed",
+                        timestamp=_activity_now(),
+                        fields={
+                            "started_at": interaction.timestamp,
+                            "duration_ms": round(duration_seconds * 1000, 3) if duration_seconds is not None else None,
+                            "purpose": interaction.purpose,
+                            "error": {"type": "LLMError", "message": error} if error else None,
+                        },
+                    )
                 self.save()
                 return
     

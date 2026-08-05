@@ -72,6 +72,7 @@ def test_writes_complete_static_report(tmp_path: Path) -> None:
         outputs.rpg_html,
         outputs.report_css,
         outputs.report_js,
+        outputs.history_index_js,
     ):
         assert output.is_file()
         assert output.stat().st_size > 0
@@ -82,6 +83,7 @@ def test_writes_complete_static_report(tmp_path: Path) -> None:
     rpg_html = outputs.rpg_html.read_text(encoding="utf-8")
 
     assert 'src="report-data.js"' in report_html
+    assert 'src="history-index.js"' in report_html
     assert 'src="assets/report.js"' in report_html
     assert 'href="assets/report.css"' in report_html
     assert "fetch(" not in report_html
@@ -93,13 +95,27 @@ def test_writes_complete_static_report(tmp_path: Path) -> None:
     assert "Feature plan" not in report_js
     assert "Pipeline readiness and stage evidence" in report_js
     assert "no evidence" in report_js
-    assert "Source availability" in report_js
+    assert "Data coverage" in report_js
     assert "artifact present" in report_js
     assert 'data-pipeline-jump="' in report_js
     assert 'id="pipeline-' in report_js
     assert 'location.hash = "pipeline/"' in report_js
     assert "scrollIntoView" in report_js
     assert "pipeline-jump-highlight" in report_js
+    assert "Run History" in report_js
+    assert "Latest recorded activity" in report_js
+    assert "MCP is on demand" in report_js
+    assert "Git hook / " in report_js
+    assert "data-history-filter" in report_js
+    assert 'kind === "hook.workflow"' in report_js
+    assert 'kind === "mcp.session"' in report_js
+    assert "loadHistoryDetail" in report_js
+    assert "replace(/[_-]+/g" in report_js
+    assert "data-history-toggle" in report_js
+    assert "collapsedHistoryRoots" in report_js
+    assert "Export JSON" not in report_js
+    assert "data-history-export" not in report_js
+    assert "Data coverage" in report_js
     assert '<iframe class="ready" id="rpgFrame"' in report_js
     assert 'id="rpgFrame" src="rpg.html"' not in report_js
     assert "frameElement.srcdoc = RPG_DOCUMENT" in report_js
@@ -112,6 +128,7 @@ def test_writes_complete_static_report(tmp_path: Path) -> None:
     )
     payload = json.loads(report_data.split("window.CMIND_REPORT = ", 1)[1].rsplit(";", 1)[0])
     assert payload["workspace"]["name"] == "demo"
+    assert payload["history"]["available"] is False
     assert embedded_rpg == rpg_html
     assert "const hasChangeData = true;" in rpg_html
     assert "old12345" in rpg_html
@@ -153,6 +170,78 @@ def test_writes_complete_static_report(tmp_path: Path) -> None:
     assert "externalChanges.mode !== 'changes' && !externalChanges.emphasize" in rpg_html
     assert "const featureFocusId = externalChanges.focus?.scope === 'feature'" in rpg_html
     assert not list((tmp_path / "reports").rglob("*.tmp"))
+
+
+def test_writes_lazy_history_index_and_detail_files(tmp_path: Path) -> None:
+    snapshot = _snapshot()
+    snapshot["history"] = {
+        "schema_version": 1,
+        "generated_at": "2026-08-05T00:00:00Z",
+        "retention": {"days": 90, "max_bytes": 104857600, "bytes_used": 1200},
+        "summary": {"root_count": 1, "activity_count": 2},
+        "roots": [{
+            "span_id": "spn_root",
+            "trace_id": "trc_root",
+            "kind": "workflow",
+            "logical_key": "decoder-plan",
+            "name": "plan",
+            "status": "success",
+            "started_at": "2026-08-05T00:00:00Z",
+            "finished_at": "2026-08-05T00:00:10Z",
+            "duration_ms": 10000,
+            "quality": "measured",
+            "children": [{
+                "span_id": "spn_child",
+                "trace_id": "trc_root",
+                "parent_span_id": "spn_root",
+                "kind": "workflow.stage",
+                "logical_key": "decoder-plan-skeleton",
+                "name": "skeleton",
+                "status": "success",
+                "children": [],
+            }, {
+                "span_id": "spn_artifact",
+                "trace_id": "trc_root",
+                "parent_span_id": "spn_root",
+                "kind": "artifact.write",
+                "logical_key": "artifact-data-tasks-json",
+                "name": "tasks.json",
+                "status": "success",
+                "children": [],
+            }, {
+                "span_id": "spn_helper",
+                "trace_id": "trc_helper",
+                "parent_span_id": "spn_root",
+                "kind": "command.script",
+                "logical_key": "script-summary-skeleton",
+                "name": "summary_skeleton.py",
+                "status": "success",
+                "children": [],
+            }],
+        }],
+    }
+
+    stale = tmp_path / "reports/history/stale.js"
+    stale.parent.mkdir(parents=True)
+    stale.write_text("stale", encoding="utf-8")
+    outputs = write_dashboard_report(snapshot, tmp_path / "reports")
+
+    assert len(outputs.history_detail_files) == 1
+    assert not stale.exists()
+    index_text = outputs.history_index_js.read_text(encoding="utf-8")
+    assert "window.CMIND_HISTORY_INDEX" in index_text
+    assert "decoder-plan-skeleton" in index_text
+    assert "artifact-data-tasks-json" not in index_text
+    assert "script-summary-skeleton" not in index_text
+    detail_text = outputs.history_detail_files[0].read_text(encoding="utf-8")
+    assert "window.CMIND_HISTORY_DETAILS" in detail_text
+    assert "spn_child" in detail_text
+    assert "spn_artifact" in detail_text
+    assert "spn_helper" in detail_text
+    report_data = outputs.report_data_js.read_text(encoding="utf-8")
+    payload = json.loads(report_data.split("window.CMIND_REPORT = ", 1)[1].rsplit(";", 1)[0])
+    assert payload["history"]["available"] is True
+    assert "roots" not in payload["history"]
 
 
 def test_missing_feature_graph_uses_empty_root(tmp_path: Path) -> None:

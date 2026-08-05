@@ -4,6 +4,7 @@ import sys
 from contextlib import contextmanager
 from pathlib import Path
 from unittest.mock import MagicMock
+from pydantic import BaseModel
 
 _REPO = Path(__file__).resolve().parents[1]
 _SCRIPTS = _REPO / "scripts"
@@ -11,10 +12,11 @@ if str(_SCRIPTS) not in sys.path:
     sys.path.insert(0, str(_SCRIPTS))
 
 import common.run_events as run_events
+import code_gen.sub_agent as sub_agent
 from common.llm_api_client import APILLMClient, LLMConfig, LLMProvider
 from common.llm_client import LLMClient
 from common.llm_types import LLMResponse, LLMUsage, Memory
-from common.session_manager import TraceContext
+from common.session_manager import CopilotSessionManager, TraceContext
 
 
 class _FakeProcess:
@@ -31,6 +33,69 @@ class _FakeSessionManager:
         context = TraceContext()
         yield context
         context.captured_path = Path("/workspace/logs/copilot/process-1.log")
+
+
+def test_copilot_model_calls_disable_tools(tmp_path, monkeypatch):
+    monkeypatch.setattr("common.session_manager.COPILOT_LOGS_DIR", tmp_path / "logs")
+    manager = CopilotSessionManager(project_dir=tmp_path)
+    context = TraceContext()
+
+    manager.before(context, "return json")
+
+    assert "--available-tools=" in context.extra_args
+    assert "--silent" in context.extra_args
+    assert "--disable-builtin-mcps" in context.extra_args
+    assert "--no-custom-instructions" in context.extra_args
+    assert "--allow-all" not in context.extra_args
+
+
+def test_copilot_agentic_calls_allow_tools(tmp_path, monkeypatch):
+    monkeypatch.setattr("common.session_manager.COPILOT_LOGS_DIR", tmp_path / "logs")
+    manager = CopilotSessionManager(project_dir=tmp_path, agentic=True)
+    context = TraceContext()
+
+    manager.before(context, "edit code")
+
+    assert "--allow-all" in context.extra_args
+    assert "--available-tools=" not in context.extra_args
+
+
+def test_structured_call_prefers_final_schema_valid_result(monkeypatch):
+    class Result(BaseModel):
+        value: int
+
+    response = (
+        '<result_json>{"status":"error","message":"permission denied"}</result_json>'
+        '<result_json>{"value":42}</result_json>'
+    )
+    client = LLMClient(tool="copilot")
+    monkeypatch.setattr(client, "generate", lambda **kwargs: response)
+    monkeypatch.setattr(client, "update_last_parsed_result", lambda parsed: None)
+
+    _, result, raw = client.call_structured("system", "user", Result, max_retries=1)
+
+    assert raw == response
+    assert result is not None
+    assert result.value == 42
+
+
+def test_code_gen_sub_agent_explicitly_enables_tools(tmp_path, monkeypatch):
+    captured = {}
+
+    class FakeClient:
+        def __init__(self, **kwargs):
+            captured.update(kwargs)
+
+        def generate(self, prompt, **kwargs):
+            return "BATCH_RESULT: PASS"
+
+    monkeypatch.setattr(sub_agent, "LLMClient", FakeClient)
+
+    response, error = sub_agent.dispatch_sub_agent("implement", tmp_path)
+
+    assert error is None
+    assert response == "BATCH_RESULT: PASS"
+    assert captured["agentic"] is True
 
 
 def test_cli_call_records_context_and_log_file(tmp_path, monkeypatch):

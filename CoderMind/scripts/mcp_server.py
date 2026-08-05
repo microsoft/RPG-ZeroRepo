@@ -28,6 +28,7 @@ import os
 import sys
 import time
 from datetime import datetime, timezone
+from pathlib import Path
 from typing import List, Optional
 
 # Ensure sibling packages (common/, rpg/) are importable when this script is
@@ -37,12 +38,17 @@ if _SCRIPTS_DIR not in sys.path:
     sys.path.insert(0, _SCRIPTS_DIR)
 
 from common.paths import RPG_FILE, MCP_CALLS_LOG  # noqa: E402
+from common.activity_events import ActivityWriter, default_writer, new_id, record_completed_activity  # noqa: E402
 from rpg.graph_query import GraphQueryEngine  # noqa: E402
 
 logger = logging.getLogger(__name__)
 
 # All logging to stderr (stdout is reserved for MCP JSON-RPC)
 logging.basicConfig(stream=sys.stderr, level=logging.WARNING)
+
+ACTIVITY_WRITER: ActivityWriter | None = None
+MCP_SERVER_SESSION_ID = new_id("mcp_session")
+MCP_SERVER_TRACE_ID = new_id("trc")
 
 
 # ---------------------------------------------------------------------------
@@ -58,7 +64,11 @@ def _log_tool_call(tool_name: str, params: dict, result_summary: dict, duration_
     try:
         MCP_CALLS_LOG.parent.mkdir(parents=True, exist_ok=True)
         record = {
+            "call_id": new_id("mcp"),
             "ts": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+            "server_session_id": MCP_SERVER_SESSION_ID,
+            "trace_id": os.environ.get("CMIND_TRACE_ID") or MCP_SERVER_TRACE_ID,
+            "client_context": os.environ.get("CMIND_MCP_CLIENT_CONTEXT"),
             "run_id": os.environ.get("CMIND_RUN_ID"),
             "stage_id": os.environ.get("CMIND_STAGE_ID"),
             "tool": tool_name,
@@ -69,6 +79,33 @@ def _log_tool_call(tool_name: str, params: dict, result_summary: dict, duration_
         record = {key: value for key, value in record.items() if value is not None}
         with open(MCP_CALLS_LOG, "a", encoding="utf-8") as f:
             f.write(json.dumps(record, ensure_ascii=False) + "\n")
+        error = result_summary.get("error")
+        activity_status = (
+            "degraded"
+            if error == "rpg_unavailable"
+            else "failed"
+            if error not in (None, False, "")
+            else "success"
+        )
+        record_completed_activity(
+            "tool.mcp",
+            tool_name,
+            logical_key=f"mcp-{tool_name.replace('_', '-')}",
+            status=activity_status,
+            duration_ms=duration_ms,
+            trigger="mcp",
+            trace_id=record["trace_id"],
+            fields={
+                "tool": tool_name,
+                "call_id": record["call_id"],
+                "server_session_id": MCP_SERVER_SESSION_ID,
+                "client_context": record.get("client_context"),
+                "run_id": record.get("run_id"),
+                "stage_id": record.get("stage_id"),
+                "result": result_summary,
+            },
+            writer=ACTIVITY_WRITER or default_writer(),
+        )
     except Exception:
         pass
 
@@ -89,12 +126,18 @@ def _resolve_rpg_path() -> str:
     automatically; ``--rpg-file`` is reserved for explicit overrides
     (test fixtures, alternative graphs, …).
     """
-    rpg_path = str(RPG_FILE)
     args = sys.argv[1:]
     for i, arg in enumerate(args):
         if arg == "--rpg-file" and i + 1 < len(args):
-            rpg_path = args[i + 1]
-    return rpg_path
+            return args[i + 1]
+    try:
+        from cmind_cli import _storage
+        workspace = _storage.find_workspace_root_from(Path.cwd())
+        if workspace is not None:
+            return str(_storage.workspace_data_dir(workspace) / "rpg.json")
+    except (ImportError, OSError):
+        pass
+    return str(Path.cwd() / ".cmind" / "data" / "rpg.json")
 
 
 # Standard message returned to the AI agent when the RPG graph isn't ready
@@ -276,6 +319,10 @@ def create_mcp_server(rpg_file: str):
         """
         engine = _get_engine()
         if engine is None:
+            _log_tool_call(
+                "search_rpg", {"query": query, "scope": scope, "top_k": top_k},
+                {"results": 0, "error": "rpg_unavailable"}, 0,
+            )
             return _unavailable_payload(rpg_file, _unavailable_reason())
         t0 = time.monotonic()
         results = engine.search(query, scope=scope, top_k=top_k)
@@ -313,6 +360,10 @@ def create_mcp_server(rpg_file: str):
         """
         engine = _get_engine()
         if engine is None:
+            _log_tool_call(
+                "explore_rpg", {"node_id": node_id, "direction": direction, "depth": depth},
+                {"total_nodes": 0, "total_edges": 0, "error": "rpg_unavailable"}, 0,
+            )
             return _unavailable_payload(rpg_file, _unavailable_reason())
         t0 = time.monotonic()
         result = engine.explore(
@@ -347,6 +398,10 @@ def create_mcp_server(rpg_file: str):
         """
         engine = _get_engine()
         if engine is None:
+            _log_tool_call(
+                "get_node_detail", {"node_id": node_id, "include_code": include_code},
+                {"source": "unavailable", "found": False, "error": "rpg_unavailable"}, 0,
+            )
             return _unavailable_payload(rpg_file, _unavailable_reason())
         t0 = time.monotonic()
         result = engine.get_node_detail(node_id, include_code=include_code)
@@ -381,6 +436,10 @@ def create_mcp_server(rpg_file: str):
         """
         engine = _get_engine()
         if engine is None:
+            _log_tool_call(
+                "list_rpg_tree", {"root_id": root_id, "max_depth": max_depth},
+                {"total_nodes": 0, "error": "rpg_unavailable"}, 0,
+            )
             return _unavailable_payload(rpg_file, _unavailable_reason())
         t0 = time.monotonic()
         result = engine.list_tree(root_id=root_id or None, max_depth=max_depth)

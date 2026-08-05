@@ -33,7 +33,10 @@ if str(SCRIPTS_DIR) not in sys.path:
     sys.path.insert(0, str(SCRIPTS_DIR))
 
 from common.paths import REPO_RPG_FILE, DEP_GRAPH_FILE, RPG_HTML_FILE, HOOK_CALLS_LOG  # noqa: E402
+from common.activity_events import ActivityWriter, default_writer, new_id, record_completed_activity  # noqa: E402
 from common.rpg_io import atomic_write_rpg, safe_load_rpg  # noqa: E402
+
+ACTIVITY_WRITER: ActivityWriter | None = None
 
 
 # Shared message used by every subcommand that requires an existing
@@ -59,7 +62,11 @@ def _log_hook_call(hook_type: str, result: dict) -> None:
         from datetime import datetime, timezone
         HOOK_CALLS_LOG.parent.mkdir(parents=True, exist_ok=True)
         record = {
+            "call_id": new_id("hook"),
             "ts": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+            "hook_type": os.environ.get("CMIND_HOOK"),
+            "git_sha": os.environ.get("CMIND_HOOK_SHA"),
+            "hook_invocation_id": os.environ.get("CMIND_HOOK_INVOCATION_ID"),
             "run_id": result.get("run_id") or os.environ.get("CMIND_RUN_ID"),
             "stage_id": result.get("stage_id") or os.environ.get("CMIND_STAGE_ID"),
             "hook": hook_type,
@@ -71,12 +78,40 @@ def _log_hook_call(hook_type: str, result: dict) -> None:
             "added": result.get("added"),
             "deleted": result.get("deleted"),
             "rpg_nodes": result.get("rpg_nodes"),
+            "prev_ref": result.get("prev_ref"),
+            "previous_commit": result.get("previous_commit"),
+            "new_commit": result.get("new_commit"),
             "duration_ms": int(result.get("duration", 0) * 1000),
         }
         # Strip None values to keep lines compact
         record = {k: v for k, v in record.items() if v is not None}
         with open(HOOK_CALLS_LOG, "a", encoding="utf-8") as f:
             f.write(json.dumps(record, ensure_ascii=False) + "\n")
+        record_completed_activity(
+            "hook.operation",
+            hook_type,
+            logical_key=f"encoder-hooks-{hook_type.replace('_', '-')}",
+            status="failed" if result.get("error") else "success",
+            duration_ms=record.get("duration_ms"),
+            trigger="hook",
+            fields={
+                "hook": hook_type,
+                "hook_type": record.get("hook_type"),
+                "git_sha": record.get("git_sha"),
+                "call_id": record["call_id"],
+                "mode": record.get("mode"),
+                "reason": record.get("reason"),
+                "run_id": record.get("run_id"),
+                "stage_id": record.get("stage_id"),
+                "dep_nodes": record.get("dep_nodes"),
+                "dep_edges": record.get("dep_edges"),
+                "rpg_nodes": record.get("rpg_nodes"),
+                "prev_ref": record.get("prev_ref"),
+                "previous_commit": record.get("previous_commit"),
+                "new_commit": record.get("new_commit"),
+            },
+            writer=ACTIVITY_WRITER or default_writer(),
+        )
     except Exception:
         pass
 

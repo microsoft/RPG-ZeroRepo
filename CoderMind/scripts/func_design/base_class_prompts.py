@@ -66,7 +66,7 @@ Requirements:
 Design Guidelines:
 - Do NOT duplicate types that are already defined as base classes.
 - If a data_type is generic enough to be a base class (with subclasses), put it in base_classes instead.
-- Together, base_classes and data_structures should ideally cover all `data_type` labels from the data flow, but the split is a design judgment — prioritize correctness over forced coverage.
+- Together, base_classes and data_structures must cover every `data_type` label from the data flow exactly as written. Use a minimal data structure stub when a third-party or collection type does not justify a base class.
 
 ## Scope Specification
 For each base class or data structure, you must explicitly assign one of the following scopes:
@@ -80,6 +80,8 @@ Favor "just enough abstraction":
 Introduce the smallest number of base classes and shared data formats that make the system clearer, safer, and easier to extend — but never add layers that do not have concrete, immediate purpose.
 
 ## Output Format
+Do not call tools, run commands, inspect files, or perform a pre-check. All required context is already present below. Return the requested structured response directly.
+
 Your response must contain exactly one <think> block and exactly one <result_json> block, with no other content outside these two blocks:
 <think>
 Your internal reasoning and drafts — this is scratch space for evaluating tradeoffs, alternatives, and incremental refinements.

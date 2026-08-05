@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 import re
 from collections import defaultdict
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -23,7 +23,7 @@ def _parse_timestamp(value: Any) -> datetime | None:
     except ValueError:
         return None
     if parsed.tzinfo is None:
-        parsed = parsed.replace(tzinfo=datetime.now().astimezone().tzinfo)
+        parsed = parsed.replace(tzinfo=timezone.utc)
     return parsed.astimezone()
 
 

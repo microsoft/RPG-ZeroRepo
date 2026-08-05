@@ -4,10 +4,10 @@ from __future__ import annotations
 
 import json
 import os
-import secrets
 import sys
 import threading
 import time
+import uuid
 from contextlib import contextmanager
 from contextvars import ContextVar
 from dataclasses import dataclass
@@ -15,6 +15,13 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Iterator, Mapping
 
+from common.activity_events import (
+    ActivityWriter,
+    activity_environment,
+    default_writer,
+    record_activity,
+    record_completed_activity,
+)
 from common.paths import RUN_EVENTS_FILE
 
 try:
@@ -25,6 +32,7 @@ except ImportError:  # pragma: no cover - Windows fallback
 
 SCHEMA_VERSION = 1
 EVENTS_FILE = RUN_EVENTS_FILE
+ACTIVITY_WRITER: ActivityWriter | None = None
 
 _append_lock = threading.Lock()
 _sequence_lock = threading.Lock()
@@ -47,12 +55,12 @@ def _iso_now() -> str:
 
 
 def _new_id(prefix: str) -> str:
-    return f"{prefix}-{secrets.token_hex(8)}"
+    return f"{prefix}-{uuid.uuid4().hex}"
 
 
 def new_run_id(command: str) -> str:
     stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
-    return f"{command}-{stamp}-{secrets.token_hex(2)}"
+    return f"{command}-{stamp}-{uuid.uuid4().hex}"
 
 
 def current_event_context() -> EventContext | None:
@@ -61,17 +69,27 @@ def current_event_context() -> EventContext | None:
 
 def event_context_environment() -> dict[str, str]:
     context = current_event_context()
+    environment = activity_environment()
     if context is None:
-        return {}
-    environment = {
+        return environment
+    environment.update({
         "CMIND_RUN_ID": context.run_id,
         "CMIND_COMMAND": context.command,
-    }
+    })
     if context.stage_id:
         environment["CMIND_STAGE_ID"] = context.stage_id
     if context.stage:
         environment["CMIND_STAGE"] = context.stage
     return environment
+
+
+def _activity_writer() -> ActivityWriter:
+    return ACTIVITY_WRITER or default_writer()
+
+
+def _workflow_key(command: str) -> str:
+    pipeline = "encoder" if command in {"encode", "update_rpg"} else "decoder"
+    return f"{pipeline}-{command.replace('_', '-')}"
 
 
 def _next_sequence(run_id: str) -> int:
@@ -138,8 +156,10 @@ def load_events(path: Path | None = None) -> list[dict[str, Any]]:
 class RunEvent:
     """Mutable result handle yielded by :func:`record_run`."""
 
-    def __init__(self, run_id: str) -> None:
+    def __init__(self, run_id: str, trace_id: str, span_id: str) -> None:
         self.run_id = run_id
+        self.trace_id = trace_id
+        self.span_id = span_id
         self.status = "success"
         self.metrics: dict[str, Any] = {}
         self.error: dict[str, Any] | None = None
@@ -162,6 +182,8 @@ class StageEvent:
         phase: str | None,
         attempt: int,
         started_at: str,
+        activity_trace_id: str,
+        activity_span_id: str,
     ) -> None:
         self.run_id = run_id
         self.command = command
@@ -171,6 +193,8 @@ class StageEvent:
         self.phase = phase
         self.attempt = attempt
         self.started_at = started_at
+        self.activity_trace_id = activity_trace_id
+        self.activity_span_id = activity_span_id
         self.status = "success"
         self.metrics: dict[str, Any] = {}
         self.error: dict[str, Any] | None = None
@@ -212,6 +236,7 @@ def record_run(
     command: str,
     *,
     run_id: str | None = None,
+    parent_run_id: str | None = None,
     trigger: str | None = None,
     metadata: Mapping[str, Any] | None = None,
 ) -> Iterator[RunEvent]:
@@ -219,41 +244,59 @@ def record_run(
     resolved_run_id = run_id or new_run_id(command)
     started_at = _iso_now()
     start_perf = time.perf_counter()
-    handle = RunEvent(resolved_run_id)
+    with record_activity(
+        "workflow",
+        command,
+        logical_key=_workflow_key(command),
+        trigger=trigger,
+        writer=_activity_writer(),
+    ) as activity:
+        handle = RunEvent(resolved_run_id, activity.trace_id, activity.span_id)
+        started = _base_event("run_started", resolved_run_id, command, started_at)
+        started.update({"status": "running", "started_at": started_at})
+        if parent_run_id:
+            started["parent_run_id"] = parent_run_id
+        if trigger:
+            started["trigger"] = trigger
+        if metadata:
+            started["metadata"] = dict(metadata)
+        _append_event(started)
+        context_token = _event_context.set(EventContext(resolved_run_id, command))
 
-    started = _base_event("run_started", resolved_run_id, command, started_at)
-    started.update({"status": "running", "started_at": started_at})
-    if trigger:
-        started["trigger"] = trigger
-    if metadata:
-        started["metadata"] = dict(metadata)
-    _append_event(started)
-    context_token = _event_context.set(EventContext(resolved_run_id, command))
-
-    try:
-        yield handle
-    finally:
-        exc = sys.exc_info()[1]
-        if exc is not None and handle.status == "success":
-            handle.status = "failed"
-            handle.error = {"type": type(exc).__name__, "message": str(exc)}
-        finished_at = _iso_now()
-        finished = _base_event("run_finished", resolved_run_id, command, finished_at)
-        finished.update(
-            {
-                "status": handle.status,
-                "started_at": started_at,
-                "finished_at": finished_at,
-                "duration_s": round(time.perf_counter() - start_perf, 3),
-                "error": handle.error,
-            }
-        )
-        if handle.metrics:
-            finished["metrics"] = handle.metrics
-        _append_event(finished)
-        with _sequence_lock:
-            _sequence_counters.pop(resolved_run_id, None)
-        _event_context.reset(context_token)
+        try:
+            yield handle
+        finally:
+            exc = sys.exc_info()[1]
+            if exc is not None and handle.status == "success":
+                handle.status = "failed"
+                handle.error = {"type": type(exc).__name__, "message": str(exc)}
+            finished_at = _iso_now()
+            duration_s = round(time.perf_counter() - start_perf, 3)
+            finished = _base_event("run_finished", resolved_run_id, command, finished_at)
+            finished.update(
+                {
+                    "status": handle.status,
+                    "started_at": started_at,
+                    "finished_at": finished_at,
+                    "duration_s": duration_s,
+                    "error": handle.error,
+                }
+            )
+            if handle.metrics:
+                finished["metrics"] = handle.metrics
+            _append_event(finished)
+            activity.status = handle.status
+            activity.error = handle.error
+            activity.note(
+                run_id=resolved_run_id,
+                parent_run_id=parent_run_id,
+                duration_ms=round(duration_s * 1000, 3),
+                metrics=handle.metrics,
+                metadata=dict(metadata) if metadata else None,
+            )
+            with _sequence_lock:
+                _sequence_counters.pop(resolved_run_id, None)
+            _event_context.reset(context_token)
 
 
 @contextmanager
@@ -269,40 +312,60 @@ def record_stage(
     """Record stage start immediately and append its final result on exit."""
     resolved_sequence = sequence or _next_sequence(run_id)
     started_at = _iso_now()
-    handle = StageEvent(
-        run_id=run_id,
-        command=command,
-        stage_id=_new_id("stage"),
-        sequence=resolved_sequence,
-        stage=stage,
-        phase=phase,
-        attempt=attempt,
-        started_at=started_at,
-    )
-    _append_event(_stage_event("stage_started", handle, started_at, status="running"))
-    start_perf = time.perf_counter()
-    context_token = _event_context.set(EventContext(run_id, command, handle.stage_id, stage))
-
-    try:
-        yield handle
-    finally:
-        exc = sys.exc_info()[1]
-        if exc is not None and handle.status == "success":
-            handle.status = "failed"
-            handle.error = {"type": type(exc).__name__, "message": str(exc)}
-        finished_at = _iso_now()
-        finished = _stage_event("stage_finished", handle, finished_at, status=handle.status)
-        finished.update(
-            {
-                "finished_at": finished_at,
-                "duration_s": round(time.perf_counter() - start_perf, 3),
-                "error": handle.error,
-            }
+    with record_activity(
+        "workflow.stage",
+        stage,
+        logical_key=f"{_workflow_key(command)}-{stage.replace('_', '-')}",
+        writer=_activity_writer(),
+    ) as activity:
+        handle = StageEvent(
+            run_id=run_id,
+            command=command,
+            stage_id=_new_id("stage"),
+            sequence=resolved_sequence,
+            stage=stage,
+            phase=phase,
+            attempt=attempt,
+            started_at=started_at,
+            activity_trace_id=activity.trace_id,
+            activity_span_id=activity.span_id,
         )
-        if handle.metrics:
-            finished["metrics"] = handle.metrics
-        _append_event(finished)
-        _event_context.reset(context_token)
+        _append_event(_stage_event("stage_started", handle, started_at, status="running"))
+        start_perf = time.perf_counter()
+        context_token = _event_context.set(EventContext(run_id, command, handle.stage_id, stage))
+
+        try:
+            yield handle
+        finally:
+            exc = sys.exc_info()[1]
+            if exc is not None and handle.status == "success":
+                handle.status = "failed"
+                handle.error = {"type": type(exc).__name__, "message": str(exc)}
+            finished_at = _iso_now()
+            duration_s = round(time.perf_counter() - start_perf, 3)
+            finished = _stage_event("stage_finished", handle, finished_at, status=handle.status)
+            finished.update(
+                {
+                    "finished_at": finished_at,
+                    "duration_s": duration_s,
+                    "error": handle.error,
+                }
+            )
+            if handle.metrics:
+                finished["metrics"] = handle.metrics
+            _append_event(finished)
+            activity.status = handle.status
+            activity.error = handle.error
+            activity.note(
+                run_id=run_id,
+                stage_id=handle.stage_id,
+                sequence=resolved_sequence,
+                phase=phase,
+                attempt=attempt,
+                duration_ms=round(duration_s * 1000, 3),
+                metrics=handle.metrics,
+            )
+            _event_context.reset(context_token)
 
 
 def enrich_stage(
@@ -351,4 +414,21 @@ def record_llm_call(
         event["stage"] = context.stage
     event = {key: value for key, value in event.items() if value is not None}
     _append_event(event)
+    record_completed_activity(
+        "tool.llm",
+        purpose or provider,
+        logical_key=f"llm-{provider}",
+        status="success" if success else "failed",
+        duration_ms=duration_s * 1000 if duration_s is not None else None,
+        fields={
+            "provider": provider,
+            "model": model,
+            "purpose": purpose,
+            "tokens": dict(tokens) if tokens is not None else None,
+            "token_status": token_status,
+            "log_file": Path(log_file).name if log_file else None,
+            "legacy_event_id": event["event_id"],
+        },
+        writer=_activity_writer(),
+    )
     return str(event["event_id"])

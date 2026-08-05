@@ -1287,6 +1287,37 @@ def _setup_gitignore(project_path: Path, selected_ai: str) -> None:
     def _norm(line: str) -> str:
         return line.strip().lstrip("/")
 
+    # Migrate the pre-Plan-B whole-directory rule. Git cannot re-include
+    # config.toml from an ignored directory, so leaving `.cmind/` in place
+    # silently defeats the managed `!.cmind/config.toml` exception below.
+    normalized_lines = [_norm(line) for line in existing_lines]
+    legacy_cmind_rule = ".cmind/" in normalized_lines
+    glob_index = next(
+        (index for index, line in enumerate(normalized_lines) if line == ".cmind/*"),
+        None,
+    )
+    exception_index = next(
+        (index for index, line in enumerate(normalized_lines) if line == "!.cmind/config.toml"),
+        None,
+    )
+    exception_before_glob = (
+        glob_index is not None
+        and exception_index is not None
+        and exception_index < glob_index
+    )
+    reordered_exception = legacy_cmind_rule or exception_before_glob
+    migrated_lines = [
+        line
+        for line in existing_lines
+        if _norm(line) != ".cmind/"
+        and not (reordered_exception and _norm(line) == "!.cmind/config.toml")
+    ]
+    if len(migrated_lines) != len(existing_lines):
+        trailing_newline = "\n" if existing_text.endswith("\n") else ""
+        existing_text = "\n".join(migrated_lines) + trailing_newline
+        gitignore.write_text(existing_text, encoding="utf-8")
+        existing_lines = migrated_lines
+
     existing_norm = {
         _norm(line)
         for line in existing_lines
@@ -4707,27 +4738,136 @@ def script(
             script_stem = path.stem  # e.g. "feature_build"
             log_path = logs_dir / f"{script_stem}.log"
 
-    if log_path is not None:
-        log_fh = open(log_path, "a", encoding="utf-8")
-        cmd = [sys.executable, str(path), *ctx.args]
-        proc = subprocess.run(
-            cmd, env=env,
-            stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+    activity_context = None
+    read_only_script = (
+        path.stem.startswith("check_")
+        or path.stem.endswith("_validation")
+        or path.stem == "rpg_version"
+    )
+    if ws_root is not None and path.name != "generate_dashboard_snapshot.py" and not read_only_script:
+        scripts_dir = str(_assets.scripts_dir())
+        if scripts_dir not in sys.path:
+            sys.path.insert(0, scripts_dir)
+        from common.activity_events import (  # type: ignore[import-not-found]
+            ActivityWriter,
+            activity_environment,
+            artifact_inventory,
+            new_id,
+            record_activity,
+            record_artifact_changes,
+            workspace_instance_id,
         )
-        # Write captured output to both terminal and log file.
-        output = proc.stdout or b""
-        sys.stdout.buffer.write(output)
-        sys.stdout.buffer.flush()
-        try:
-            log_fh.write(output.decode("utf-8", errors="replace"))
-            log_fh.flush()
-        except OSError:
-            pass
-        finally:
-            log_fh.close()
+        writer = ActivityWriter(
+            _storage.workspace_logs_dir(ws_root) / "activity",
+            workspace_id=workspace_instance_id(ws_root),
+        )
+        relative_script = str(path.relative_to(_assets.scripts_dir())).replace("\\", "/")
+        logical_key = (
+            f"decoder-rpg-edit-{path.stem.replace('_', '-')}"
+            if relative_script.startswith("rpg_edit/")
+            else f"script-{path.stem.replace('_', '-')}"
+        )
+        trace_id = None
+        rpg_edit_session_id = None
+        if relative_script.startswith("rpg_edit/"):
+            session_path = logs_dir / "rpg_edit_activity_session.json"
+            session: Dict[str, Any] = {}
+            try:
+                session = json.loads(session_path.read_text(encoding="utf-8"))
+            except (OSError, json.JSONDecodeError):
+                pass
+            started_at = session.get("started_at")
+            stale = True
+            if isinstance(started_at, str):
+                try:
+                    stale = (
+                        datetime.now(timezone.utc)
+                        - datetime.fromisoformat(started_at.replace("Z", "+00:00"))
+                    ).total_seconds() > 24 * 60 * 60
+                except ValueError:
+                    pass
+            if path.stem == "validate" or stale or not session.get("trace_id"):
+                session = {
+                    "session_id": new_id("rpg_edit_session"),
+                    "trace_id": new_id("trc"),
+                    "started_at": datetime.now(timezone.utc).isoformat(timespec="seconds").replace("+00:00", "Z"),
+                }
+            session["last_phase"] = path.stem
+            temporary_session = session_path.with_suffix(".tmp")
+            temporary_session.write_text(json.dumps(session, indent=2) + "\n", encoding="utf-8")
+            os.replace(temporary_session, session_path)
+            trace_id = str(session["trace_id"])
+            rpg_edit_session_id = str(session["session_id"])
+        activity_context = record_activity(
+            "command.script",
+            relative_script,
+            logical_key=logical_key,
+            trigger="cmind-cli",
+            trace_id=trace_id,
+            writer=writer,
+            heartbeat_interval_s=30,
+        )
+        artifact_roots = {
+            "data": _storage.workspace_data_dir(ws_root),
+            "reports": _storage.workspace_reports_dir(ws_root),
+        }
+        capture_artifacts = relative_script not in {"plan.py", "feature_construct.py"}
+        artifacts_before = artifact_inventory(artifact_roots) if capture_artifacts else {}
     else:
-        cmd = [sys.executable, str(path), *ctx.args]
-        proc = subprocess.run(cmd, env=env)
+        artifact_roots = {}
+        artifacts_before = {}
+        capture_artifacts = False
+
+    if activity_context is not None:
+        script_activity = activity_context.__enter__()
+        env.update(activity_environment())
+    else:
+        script_activity = None
+    try:
+        if log_path is not None:
+            log_fh = open(log_path, "a", encoding="utf-8")
+            cmd = [sys.executable, str(path), *ctx.args]
+            proc = subprocess.run(
+                cmd, env=env,
+                stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+            )
+            # Write captured output to both terminal and log file.
+            output = proc.stdout or b""
+            sys.stdout.buffer.write(output)
+            sys.stdout.buffer.flush()
+            try:
+                log_fh.write(output.decode("utf-8", errors="replace"))
+                log_fh.flush()
+            except OSError:
+                pass
+            finally:
+                log_fh.close()
+        else:
+            cmd = [sys.executable, str(path), *ctx.args]
+            proc = subprocess.run(cmd, env=env)
+        if script_activity is not None:
+            script_activity.status = "success" if proc.returncode == 0 else "failed"
+            if proc.returncode != 0:
+                script_activity.error = {"type": "ScriptExitError", "message": f"exit {proc.returncode}"}
+            script_activity.note(
+                script=relative_script,
+                exit_code=proc.returncode,
+                argument_count=len(ctx.args),
+                rpg_edit_session_id=rpg_edit_session_id,
+            )
+            changed_artifacts = (
+                record_artifact_changes(
+                    artifacts_before,
+                    artifact_roots,
+                    origin=relative_script,
+                    writer=writer,
+                )
+                if capture_artifacts else []
+            )
+            script_activity.note(artifacts_changed=len(changed_artifacts))
+    finally:
+        if activity_context is not None:
+            activity_context.__exit__(*sys.exc_info())
 
     # Snapshot the current state of .cmind/ into the inner git
     # repo so users can `git log` / `git diff` between pipeline stages.
@@ -4994,6 +5134,7 @@ def hook(name: str = typer.Argument(..., help="Hook name: post-commit | post-mer
         [hook:post-merge  @ 9f8e7d6] sync
     """
     from . import _storage
+    from . import _assets
 
     try:
         ws = _storage.find_workspace_root_from(Path.cwd())
@@ -5016,31 +5157,62 @@ def hook(name: str = typer.Argument(..., help="Hook name: post-commit | post-mer
         if local_bin not in env.get("PATH", ""):
             env["PATH"] = local_bin + os.pathsep + env.get("PATH", "")
 
-        _hook_log_line(log_path, f"== {name} fired @ {sha} (ws={ws})")
+        scripts_dir = str(_assets.scripts_dir())
+        if scripts_dir not in sys.path:
+            sys.path.insert(0, scripts_dir)
+        from common.activity_events import (  # type: ignore[import-not-found]
+            ActivityWriter,
+            activity_environment,
+            record_activity,
+            workspace_instance_id,
+        )
 
-        if name == "pre-commit":
-            # Retired: pre-commit is now a deliberate no-op for backward
-            # compatibility with workspaces whose stub hasn't been
-            # stripped yet. Just log and exit success so git proceeds.
-            _hook_log_line(log_path, "pre-commit hook is a no-op (retired)")
-        elif name == "post-merge":
-            _hook_run_foreground(
-                ws, log_path, env,
-                ["update_graphs.py", "sync"],
-                "sync",
-            )
-        elif name == "post-commit":
-            # Fast foreground sync keeps meta.git aligned with HEAD.
-            _hook_run_foreground(
-                ws, log_path, env,
-                ["update_graphs.py", "sync"],
-                "foreground-sync",
-            )
-            # The LLM-driven RPG update runs detached from git commit.
-            _hook_spawn_background(ws, home_dir, log_path, env)
-        else:
-            _hook_log_line(log_path, f"unknown hook name: {name!r}")
-            raise typer.Exit(0)
+        writer = ActivityWriter(
+            _storage.workspace_logs_dir(ws) / "activity",
+            workspace_id=workspace_instance_id(ws),
+        )
+        with record_activity(
+            "hook.workflow",
+            name,
+            logical_key="encoder-hooks",
+            trigger="git",
+            writer=writer,
+            heartbeat_interval_s=30,
+        ) as hook_activity:
+            hook_activity.note(hook_type=name, git_sha=sha)
+            env.update(activity_environment())
+            env["CMIND_HOOK_INVOCATION_ID"] = hook_activity.span_id
+            _hook_log_line(log_path, f"== {name} fired @ {sha} (ws={ws})")
+
+            if name == "pre-commit":
+                # Retired: pre-commit is now a deliberate no-op for backward
+                # compatibility with workspaces whose stub hasn't been
+                # stripped yet. Just log and exit success so git proceeds.
+                _hook_log_line(log_path, "pre-commit hook is a no-op (retired)")
+            elif name == "post-merge":
+                rc = _hook_run_foreground(
+                    ws, log_path, env,
+                    ["update_graphs.py", "sync"],
+                    "sync",
+                )
+                if rc != 0:
+                    hook_activity.status = "failed"
+                    hook_activity.error = {"type": "HookSyncError", "message": f"sync exited {rc}"}
+            elif name == "post-commit":
+                # Fast foreground sync keeps meta.git aligned with HEAD.
+                rc = _hook_run_foreground(
+                    ws, log_path, env,
+                    ["update_graphs.py", "sync"],
+                    "foreground-sync",
+                )
+                if rc != 0:
+                    hook_activity.status = "failed"
+                    hook_activity.error = {"type": "HookSyncError", "message": f"sync exited {rc}"}
+                # The LLM-driven RPG update runs detached from git commit.
+                _hook_spawn_background(ws, home_dir, log_path, env)
+            else:
+                _hook_log_line(log_path, f"unknown hook name: {name!r}")
+                raise typer.Exit(0)
 
     except typer.Exit:
         raise

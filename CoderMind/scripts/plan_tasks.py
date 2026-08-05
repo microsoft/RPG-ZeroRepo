@@ -806,10 +806,11 @@ class TaskPlanner:
         # Add step to trajectory
         step_id = None
         if self.trajectory:
-            step_id = self.trajectory.add_step(
+            step = self.trajectory.add_step(
                 "plan_tasks",
                 description="Create implementation tasks from interfaces using LLM"
             )
+            step_id = step.step_id
             self.trajectory.start_step(step_id)
         
         self.llm = LLMClient(trajectory=self.trajectory, step_id=step_id)
@@ -953,7 +954,7 @@ class TaskPlanner:
         )
         
         # Complete step
-        if self.trajectory and step_id:
+        if self.trajectory and step_id is not None:
             self.trajectory.complete_step(step_id, metadata={
                 "total_tasks": total_tasks,
                 "total_units": total_units,

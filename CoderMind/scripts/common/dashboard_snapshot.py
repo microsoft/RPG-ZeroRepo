@@ -13,6 +13,7 @@ from importlib.metadata import PackageNotFoundError, version
 from pathlib import Path
 from typing import Any, Iterable
 
+from common.activity_history import collect_run_history
 from common.copilot_usage import associate_copilot_usage, collect_copilot_usage
 from common.rpg_diff import previous_rpg_version, read_rpg_version, semantic_rpg_diff
 from common.dashboard_schema import assert_valid_snapshot, sanitize_snapshot
@@ -150,6 +151,38 @@ def _source_health(
     if detail:
         health["detail"] = detail
     return health
+
+
+def classify_source_expectations(
+    health: list[dict[str, Any]],
+    *,
+    mode: str,
+    has_runs: bool,
+    has_rpg_edit: bool,
+) -> list[dict[str, Any]]:
+    """Mark whether each source is required, optional, or not expected here."""
+    required = {"git"}
+    optional = {"activity", "rpg_history", "rpg_latest_change", "copilot_logs"}
+    if has_runs:
+        optional.update({"run_events", "trajectories"})
+    if mode == "encoder":
+        required.add("rpg")
+        optional.update({"run_events", "hook_calls", "mcp_calls", "trajectories"})
+    elif mode == "decoder":
+        optional.update({"rpg", "run_events", "trajectories", "code_gen_state"})
+    if has_rpg_edit:
+        optional.update({
+            "rpg_edit_validate", "rpg_edit_locate", "rpg_edit_plan",
+            "rpg_edit_impact", "rpg_edit_code", "rpg_edit_apply",
+            "rpg_edit_review",
+        })
+
+    classified: list[dict[str, Any]] = []
+    for item in health:
+        source = str(item.get("source") or "")
+        expectation = "required" if source in required else "optional" if source in optional else "not_expected"
+        classified.append({**item, "expectation": expectation})
+    return classified
 
 
 def load_jsonl_records(path: Path, *, source_name: str) -> tuple[list[dict[str, Any]], dict[str, Any]]:
@@ -731,6 +764,85 @@ def collect_workspace_verification(
     return {"checks": checks, "next_actions": next_actions}
 
 
+def collect_automation_activity(history: dict[str, Any]) -> dict[str, Any]:
+    """Summarize on-demand MCP sessions and Git-triggered hook workflows."""
+    roots = [root for root in history.get("roots") or [] if isinstance(root, dict)]
+
+    def walk(node: dict[str, Any]) -> list[dict[str, Any]]:
+        children = [child for child in node.get("children") or [] if isinstance(child, dict)]
+        return [node, *(item for child in children for item in walk(child))]
+
+    mcp_roots = [root for root in roots if root.get("kind") == "mcp.session"]
+    hook_roots = [root for root in roots if root.get("kind") == "hook.workflow"]
+    mcp_calls = [node for root in mcp_roots for node in walk(root) if node.get("kind") == "tool.mcp"]
+    hook_nodes = [node for root in hook_roots for node in walk(root)]
+    hook_operations = [node for node in hook_nodes if node.get("kind") == "hook.operation"]
+    hook_updates = [
+        node for node in hook_nodes
+        if node.get("kind") == "workflow" and node.get("logical_key") == "encoder-update-rpg"
+    ]
+    hook_attribution_mismatches = 0
+    for root in hook_roots:
+        details = root.get("details") if isinstance(root.get("details"), dict) else {}
+        trigger_sha = str(details.get("git_sha") or "")
+        updates = [
+            node for node in walk(root)
+            if node.get("kind") == "workflow" and node.get("logical_key") == "encoder-update-rpg"
+        ]
+        for update in updates:
+            metrics = update.get("metrics") if isinstance(update.get("metrics"), dict) else {}
+            target_sha = str(metrics.get("new_commit") or "")
+            if trigger_sha and target_sha and not target_sha.startswith(trigger_sha):
+                hook_attribution_mismatches += 1
+
+    special_roots = [*mcp_roots, *hook_roots]
+    latest = max(
+        special_roots,
+        key=lambda root: str(root.get("finished_at") or root.get("started_at") or ""),
+        default=None,
+    )
+    latest_summary: dict[str, Any] = {}
+    if latest is not None:
+        details = latest.get("details") if isinstance(latest.get("details"), dict) else {}
+        latest_summary = {
+            "type": "mcp" if latest.get("kind") == "mcp.session" else "hook",
+            "label": (
+                f"{latest.get('name') or 'MCP session'} / {details.get('client_context')}"
+                if latest.get("kind") == "mcp.session" and details.get("client_context")
+                else latest.get("name") or latest.get("logical_key")
+            ),
+            "status": latest.get("status"),
+            "started_at": latest.get("started_at"),
+            "finished_at": latest.get("finished_at"),
+            "duration_ms": latest.get("duration_ms"),
+            "trace_id": latest.get("trace_id"),
+            "hook_type": details.get("hook_type"),
+            "git_sha": details.get("git_sha"),
+            "client_context": details.get("client_context"),
+        }
+
+    failure_statuses = {"failed", "error", "timed_out", "cancelled", "interrupted"}
+    return {
+        "latest": latest_summary,
+        "mcp": {
+            "sessions": len(mcp_roots),
+            "calls": len(mcp_calls),
+            "succeeded": sum(str(call.get("status")) == "success" for call in mcp_calls),
+            "degraded": sum(str(call.get("status")) == "degraded" for call in mcp_calls),
+            "failed": sum(str(call.get("status")) in failure_statuses for call in mcp_calls),
+        },
+        "hooks": {
+            "invocations": len(hook_roots),
+            "post_commit": sum(root.get("name") == "post-commit" for root in hook_roots),
+            "post_merge": sum(root.get("name") == "post-merge" for root in hook_roots),
+            "operations": len(hook_operations),
+            "updates": len(hook_updates),
+            "failed": sum(str(root.get("status")) in failure_statuses for root in hook_roots),
+            "attribution_mismatches": hook_attribution_mismatches,
+        },
+    }
+
+
 def collect_workspace(sources: DashboardSources) -> tuple[dict[str, Any], dict[str, Any]]:
     """Collect reproducibility context without exposing configuration contents."""
     commit = _run_git(sources.workspace_root, "rev-parse", "HEAD")
@@ -953,8 +1065,15 @@ def collect_pipeline(
         if stage_info:
             stage, run_id = stage_info
             raw_status = stage.get("status") or "unknown"
-            status = "completed" if raw_status == "success" else raw_status
-            quality = "measured"
+            if (
+                raw_status in {"not_started", "pending", "unknown"}
+                and artifact.get("status") == "available"
+            ):
+                status = "completed"
+                quality = "inferred"
+            else:
+                status = "completed" if raw_status == "success" else raw_status
+                quality = "measured"
         else:
             run_id = None
             if step_id == "dep_graph" and mode == "encoder":
@@ -1475,9 +1594,41 @@ def build_dashboard_snapshot(
     rpg_history, rpg_history_health = collect_rpg_history(sources, runs)
     rpg_latest_change, rpg_latest_change_health = collect_latest_rpg_change(sources, rpg_history)
     trends = collect_trends(runs)
+    history_hook_records, _ = load_jsonl_records(
+        sources.logs_dir / "hook_calls.jsonl",
+        source_name="hook_calls",
+    )
+    history_mcp_records, _ = load_jsonl_records(
+        sources.logs_dir / "mcp_calls.jsonl",
+        source_name="mcp_calls",
+    )
+    history = collect_run_history(
+        sources.logs_dir,
+        runs,
+        history_hook_records,
+        history_mcp_records,
+    )
+    automation = collect_automation_activity(history)
     for run in runs:
         run["verification"], run["next_actions"] = collect_run_verification(run)
     verification = collect_workspace_verification(pipeline, rpg, tasks)
+    if current_run and current_run.get("display_status") in {
+        "failed", "interrupted", "cancelled", "timed_out", "completed_with_warnings",
+    }:
+        run_actions = current_run.get("next_actions") or []
+        retry_commands = {
+            action.get("command")
+            for action in run_actions
+            if isinstance(action, dict) and action.get("command")
+        }
+        verification["next_actions"] = [
+            *run_actions,
+            *[
+                action
+                for action in verification["next_actions"]
+                if action.get("command") not in retry_commands
+            ],
+        ]
     workspace["mode"] = mode
     if mode != "decoder" and task_health["status"] == "missing":
         task_health["status"] = "not_applicable"
@@ -1511,8 +1662,10 @@ def build_dashboard_snapshot(
         "telemetry": telemetry,
         "verification": verification,
         "runs": runs,
+        "history": history,
+        "automation": automation,
         "trends": trends,
-        "source_health": [
+        "source_health": classify_source_expectations([
             event_health,
             rpg_health,
             task_health,
@@ -1522,7 +1675,8 @@ def build_dashboard_snapshot(
             rpg_history_health,
             rpg_latest_change_health,
             trajectory_health,
-        ],
+            history["source_health"],
+        ], mode=mode, has_runs=bool(runs), has_rpg_edit=bool(rpg_edit.get("available"))),
     }
     sanitized = sanitize_snapshot(snapshot)
     assert_valid_snapshot(sanitized)

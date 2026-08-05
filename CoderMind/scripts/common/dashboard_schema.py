@@ -83,6 +83,8 @@ def validate_snapshot(snapshot: Any) -> list[str]:
         "telemetry": dict,
         "verification": dict,
         "runs": list,
+        "history": dict,
+        "automation": dict,
         "trends": dict,
         "source_health": list,
     }
@@ -117,6 +119,15 @@ def validate_snapshot(snapshot: Any) -> list[str]:
                 for key in ("stage_id", "name", "status"):
                     if not isinstance(stage.get(key), str):
                         errors.append(f"{stage_prefix}.{key} must be str")
+
+    history = snapshot.get("history")
+    if isinstance(history, dict):
+        if not isinstance(history.get("roots"), list):
+            errors.append("history.roots must be list")
+        if not isinstance(history.get("retention"), dict):
+            errors.append("history.retention must be object")
+        if not isinstance(history.get("summary"), dict):
+            errors.append("history.summary must be object")
 
     forbidden = _find_forbidden_keys(snapshot)
     errors.extend(f"forbidden sensitive key: {path}" for path in forbidden)

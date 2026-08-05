@@ -407,7 +407,7 @@ Functional Areas Overview:
 Data Flow (JSON):
 {data_flow_json_str}
 
-Please use the generate_base_classes tool to create base class definitions and data structure stubs.
+Return base class definitions and data structure stubs directly in the required structured format. Do not call tools or run commands.
 
 Focus on:
 1. Shared behavioral abstractions (base classes with abstract methods)
@@ -418,6 +418,7 @@ Focus on:
 Additionally, for data_structures:
 - Data flow types that are generic enough to serve as base classes (with subclasses) should go into base_classes, not data_structures
 - The remaining data flow types that are NOT absorbed by base classes should be defined as data_structures
+- Every data_type label must appear exactly as written in at least one data_structures.data_flow_types list or match a declared base class name
 - Use idiomatic {hints.display_name} data containers with explicit fields and documentation
 - These are stubs (skeleton code) — they will be fully implemented later
 - Each data structure must belong to a specific subtree (not global)
@@ -425,6 +426,7 @@ Additionally, for data_structures:
         
         # Iterate until valid or max iterations
         last_error = ""
+        last_uncovered = set(data_flow_type_names)
         
         for iteration in range(self.max_iterations):
             self.logger.info(f"[BaseClassAgent] Iteration {iteration + 1}/{self.max_iterations}")
@@ -492,6 +494,7 @@ Additionally, for data_structures:
             for ds in data_structures:
                 ds_covered_types.update(ds.get("data_flow_types", []))
             uncovered = set(data_flow_type_names) - ds_covered_types - bc_class_set
+            last_uncovered = uncovered
             
             self.logger.info(
                 f"[BaseClassAgent] Validated: {len(base_classes)} base classes, "
@@ -500,6 +503,12 @@ Additionally, for data_structures:
             )
             if uncovered:
                 self.logger.warning(f"[BaseClassAgent] Uncovered data flow types: {sorted(uncovered)}")
+                last_error = (
+                    "Uncovered data flow types: " + ", ".join(sorted(uncovered))
+                    + ". Define each missing type in data_structures or cover it "
+                    "with a matching base class declaration."
+                )
+                continue
             
             return {
                 "base_classes": base_classes,
@@ -516,6 +525,7 @@ Additionally, for data_structures:
         return {
             "base_classes": [],
             "data_structures": [],
+            "uncovered_data_flow_types": sorted(last_uncovered),
             "success": False,
             "error": last_error,
             "iterations": self.max_iterations

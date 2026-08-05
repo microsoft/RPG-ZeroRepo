@@ -60,6 +60,8 @@ Starting from the global-install layout, all runtime state lives under your home
 ├── .meta.toml   # Back-pointer to the workspace path + metadata
 ├── data/        # Runtime artifacts (rpg.json, dep_graph.json, ...)
 └── logs/        # Per-stage logs (tracked by inner-git; LLM session traces under logs/copilot/ are excluded)
+    └── activity/YYYY-MM-DD/<writer-id>.jsonl
+                  # Conflict-free Run History events, one shard per writer process
 ```
 
 Reports (`rpg.html`, review HTML, …) stay **inside** the workspace at `<workspace>/.cmind/reports/` because they are small, user-facing artefacts that benefit from sitting next to the code (and may be committed).
@@ -78,12 +80,15 @@ Command definitions are installed into the AI-agent-specific folder. Normal user
 |---|---|
 | Your source code | `<workspace>/` |
 | Workspace AI config | `<workspace>/.cmind/config.toml` |
-| User-facing HTML reports (`rpg.html`, …) | `<workspace>/.cmind/reports/` |
+| User-facing report (`report.html`) | `<workspace>/.cmind/reports/report.html` |
+| RPG compatibility report (`rpg.html`) | `<workspace>/.cmind/reports/rpg.html` |
+| Run History index/details | `<workspace>/.cmind/reports/history-index.js`, `history/*.js` |
 | Agent command definitions | `<workspace>/.claude/` or `<workspace>/.github/` |
 | MCP / VS Code config | `<workspace>/.vscode/` |
 | Git hooks (`post-commit`, `post-merge`) | `<workspace>/.git/hooks/` |
 | Generated data (`rpg.json`, `dep_graph.json`, …) | `~/.cmind/workspaces/<workspace-id>/data/` |
 | Per-stage logs | `~/.cmind/workspaces/<workspace-id>/logs/` |
+| Run History event shards | `~/.cmind/workspaces/<workspace-id>/logs/activity/YYYY-MM-DD/` |
 | Inner-git snapshot repo | `~/.cmind/workspaces/<workspace-id>/.git/` |
 | Pipeline scripts (read-only) | inside the installed `cmind-cli` wheel |
 
@@ -152,5 +157,16 @@ Runtime logs are written under `~/.cmind/workspaces/<workspace-id>/logs/`, for e
 - `~/.cmind/workspaces/<workspace-id>/logs/build_data_flow.log`
 
 Execution traces are written under `~/.cmind/workspaces/<workspace-id>/data/trajectory/`. Review or diagnostic artifacts may be written under `<workspace>/.cmind/reports/` when a command generates them.
+
+### Run History and report files
+
+The static `report.html` separates two views of execution state:
+
+- **Pipeline** shows the latest known status/evidence for each Encoder or Decoder stage.
+- **History** shows all retained executions in chronological trees, including workflows, internal stages, Git hooks, MCP/LLM calls, code-generation batches, and artifact evidence when available.
+
+New execution events use full UUID-based trace/span identities and are appended to per-process JSONL shards. Per-writer files avoid write contention between concurrent commands, hooks, MCP servers, and code-generation workers. Old `run_events.jsonl` and trajectory files remain readable as compatibility evidence and are labelled `reported` or `derived` where exact correlation is unavailable.
+
+History is retained automatically for **90 days or 100 MB**, whichever limit is reached first. The current retention policy and activity storage size are shown on the History page. The report loads `history-index.js` initially and loads one `history/<trace>.js` detail file only when the user opens a run, keeping the first page load bounded as history grows.
 
 To discover the home-side paths (data / logs / inner-git) for the current workspace, run `cmind version` from anywhere inside it—the relevant lines are labelled **Workspace**, **Data**, **Logs**, and **Inner git**.

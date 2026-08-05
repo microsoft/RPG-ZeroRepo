@@ -25,6 +25,12 @@ sys.modules["feature_construct_orchestrator"] = feature_construct
 _SPEC.loader.exec_module(feature_construct)
 
 
+@pytest.fixture(autouse=True)
+def activity_writer(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    from common.activity_events import ActivityWriter
+    monkeypatch.setattr(feature_construct, "ACTIVITY_WRITER", ActivityWriter(tmp_path / "activity", workspace_id="ws_test"))
+
+
 @pytest.fixture
 def artifact_paths(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> dict[str, Path]:
     paths = {

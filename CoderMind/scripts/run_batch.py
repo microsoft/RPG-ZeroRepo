@@ -47,6 +47,7 @@ from common.execution_state import (
     complete_batch as state_complete_batch,
     skip_current_batch as state_skip_batch,
 )
+from common.activity_events import ActivityWriter, record_activity
 from common.generated_artifacts import ensure_generated_artifact_excludes
 from common.git_utils import GitRunner
 from common.task_batch import PlannedTask, get_task_by_id
@@ -82,6 +83,8 @@ from code_gen.test_runner import (
     resolve_test_backend,
 )
 from code_gen.rpg_updater import run_rpg_update
+
+ACTIVITY_WRITER: ActivityWriter | None = None
 
 # Git branch helpers extracted to code_gen.git_ops.  These are
 # internal helpers used only by Module 5 ("Batch Orchestrator")
@@ -330,6 +333,11 @@ def run_single_attempt(
         result["agent_error"] = error
         result["failure_reason"] = f"Sub-agent error: {error}"
         result["duration"] = time.time() - start
+        if trajectory and step_id:
+            try:
+                trajectory.fail_step(step_id, result["failure_reason"])
+            except Exception:
+                pass
         return result
 
     # --- Parse sub-agent's self-report ---
@@ -376,11 +384,14 @@ def run_single_attempt(
     # Complete trajectory step
     if trajectory and step_id:
         try:
-            trajectory.complete_step(step_id, {
-                "attempt": attempt,
-                "passed": result["passed"],
-                "duration": result["duration"],
-            })
+            if result["passed"]:
+                trajectory.complete_step(step_id, {
+                    "attempt": attempt,
+                    "passed": True,
+                    "duration": result["duration"],
+                })
+            else:
+                trajectory.fail_step(step_id, result["failure_reason"] or "Post-verification failed")
         except Exception:
             pass
 
@@ -516,7 +527,7 @@ def _task_files_for_dep_graph(task: PlannedTask) -> Optional[List[str]]:
     return [task.file_path]
 
 
-def run_batch(
+def _run_batch_impl(
     batch_id: Optional[str] = None,
     next_batch: bool = False,
     resume: bool = False,
@@ -896,6 +907,67 @@ def run_batch(
             batch_id, task, batch_state, attempts, total_duration,
             scripts=scripts, tasks_path=tasks_path, state_path=state_path,
         )
+
+
+# ============================================================================
+# Activity wrapper
+# ============================================================================
+
+def run_batch(
+    batch_id: Optional[str] = None,
+    next_batch: bool = False,
+    resume: bool = False,
+    retry: Optional[str] = None,
+    merge_file: bool = False,
+    max_units: int = 0,
+    agent_timeout: int = DEFAULT_AGENT_TIMEOUT,
+    tasks_path: Path = TASKS_FILE,
+    state_path: Path = STATE_FILE,
+    repo_path: Optional[Path] = None,
+) -> Dict[str, Any]:
+    """Run one batch while keeping logical task identity separate from execution identity."""
+    requested_batch = retry or batch_id
+    with record_activity(
+        "codegen.batch",
+        requested_batch or "next batch",
+        logical_key="decoder-code-gen-batch",
+        trigger="resume" if resume else "retry" if retry else "command",
+        writer=ACTIVITY_WRITER,
+        heartbeat_interval_s=30,
+    ) as activity:
+        activity.note(
+            batch_id=requested_batch,
+            task_id=requested_batch,
+            resume=resume,
+            retry=bool(retry),
+            merge_file=merge_file,
+        )
+        result = _run_batch_impl(
+            batch_id=batch_id,
+            next_batch=next_batch,
+            resume=resume,
+            retry=retry,
+            merge_file=merge_file,
+            max_units=max_units,
+            agent_timeout=agent_timeout,
+            tasks_path=tasks_path,
+            state_path=state_path,
+            repo_path=repo_path,
+        )
+        activity.status = "success" if result.get("success") else "failed"
+        if not result.get("success"):
+            message = str(result.get("error") or result.get("failure_reason") or "Batch failed")
+            activity.error = {"type": "CodegenBatchError", "message": message}
+        resolved_batch = result.get("batch_id") or requested_batch
+        activity.note(
+            batch_id=resolved_batch,
+            task_id=resolved_batch,
+            task_type=result.get("task_type"),
+            attempts_used=result.get("attempts_used"),
+            file_path=result.get("file_path"),
+            result_type=result.get("type"),
+        )
+        return result
 
 
 # ============================================================================

@@ -10,10 +10,12 @@ if str(SCRIPTS_DIR) not in sys.path:
 
 from decoder_lang import ProjectTaskTemplates, get_backend  # noqa: E402
 from func_design.base_class_agent import (  # noqa: E402
+    BaseClassAgent,
     BaseClassOutput,
     validate_base_classes_model,
     validate_data_structures,
 )
+from check_base_classes import inspect_state  # noqa: E402
 from func_design.interface_agent import (  # noqa: E402
     DependencyCollector,
     SubtreeInterfaceAgent,
@@ -22,6 +24,7 @@ from func_design.interface_agent import (  # noqa: E402
 )
 from func_design.interface_prompts import SUBTREE_INTERFACE_PROMPT  # noqa: E402
 from plan_tasks import TaskPlanner  # noqa: E402
+from common.trajectory import Trajectory  # noqa: E402
 
 
 def test_dependency_collector_extracts_rust_inheritance() -> None:
@@ -149,6 +152,54 @@ def test_data_structure_validation_accepts_go_source() -> None:
     )
 
     assert ok, error
+
+
+def test_base_class_agent_retries_uncovered_data_flow_types() -> None:
+    class FakeLLM:
+        def __init__(self) -> None:
+            self.calls = 0
+
+        def call_structured(self, **kwargs):
+            self.calls += 1
+            if self.calls == 1:
+                model = BaseClassOutput(base_classes=[], data_structures=[])
+            else:
+                model = BaseClassOutput.model_validate({
+                    "base_classes": [],
+                    "data_structures": [{
+                        "code": "class TodoItem:\n    pass\n",
+                        "subtree": "Domain",
+                        "data_flow_types": ["TodoItem"],
+                    }],
+                })
+            return "", model, ""
+
+    llm = FakeLLM()
+    result = BaseClassAgent(llm_client=llm, max_iterations=2).design_base_classes(
+        repo_name="todo",
+        repo_info="todo app",
+        data_flow=[{"data_type": "TodoItem"}],
+        skeleton_tree="Domain",
+        functional_areas=["Domain"],
+    )
+
+    assert result["success"] is True
+    assert result["iterations"] == 2
+    assert result["uncovered_data_flow_types"] == []
+
+
+def test_base_class_check_rejects_uncovered_types(tmp_path: Path) -> None:
+    artifact = tmp_path / "base_classes.json"
+    artifact.write_text(
+        '{"base_classes": [], "data_structures": [], "success": true, '
+        '"uncovered_data_flow_types": ["TodoItem"]}',
+        encoding="utf-8",
+    )
+
+    state = inspect_state(artifact)
+
+    assert state["type"] == "error"
+    assert "Uncovered data flow types: TodoItem" in state["details"]["errors"]
 
 
 def test_interface_validation_accepts_go_declaration() -> None:
@@ -394,6 +445,27 @@ def test_task_planner_project_tasks_use_go_conventions() -> None:
     assert "main.py" not in main_entry
     assert "go test ./..." in readme
     assert "pytest" not in readme
+
+
+def test_task_planner_completes_trajectory_step(tmp_path: Path, monkeypatch) -> None:
+    import plan_tasks as plan_tasks_module
+
+    monkeypatch.setattr(plan_tasks_module, "REPO_DIR", tmp_path / "repo")
+    trajectory = Trajectory("plan_tasks", base_dir=tmp_path)
+    trajectory.start()
+    planner = TaskPlanner(
+        interfaces={"meta": {"primary_language": "python"}, "subtrees": {}},
+        data_flow={"meta": {"primary_language": "python"}, "subtree_order": []},
+        trajectory=trajectory,
+    )
+
+    result = planner.plan()
+
+    assert result["success"] is True
+    assert len(trajectory.steps) == 1
+    assert trajectory.steps[0].status == "completed"
+    assert trajectory.steps[0].started_at is not None
+    assert trajectory.steps[0].finished_at is not None
 
 
 def test_task_planner_prefers_backend_project_task_templates(monkeypatch) -> None:

@@ -12,12 +12,18 @@ if str(_SCRIPTS) not in sys.path:
     sys.path.insert(0, str(_SCRIPTS))
 
 import common.run_events as run_events
+from common.activity_events import ActivityWriter, load_activity_events
 
 
 @pytest.fixture
 def events_file(tmp_path, monkeypatch):
     path = tmp_path / "run_events.jsonl"
     monkeypatch.setattr(run_events, "EVENTS_FILE", path)
+    monkeypatch.setattr(
+        run_events,
+        "ACTIVITY_WRITER",
+        ActivityWriter(tmp_path / "activity", workspace_id="ws_test"),
+    )
     return path
 
 
@@ -69,6 +75,16 @@ def test_run_lifecycle_wraps_stage_events(events_file):
     assert events[0]["trigger"] == "cli"
     assert events[-1]["status"] == "success"
 
+    activity = load_activity_events(events_file.parent / "activity")
+    assert [event["event_type"] for event in activity] == [
+        "span_started", "span_started", "span_finished", "span_finished",
+    ]
+    run_started, stage_started, stage_finished, run_finished = activity
+    assert stage_started["trace_id"] == run_started["trace_id"]
+    assert stage_started["parent_span_id"] == run_started["span_id"]
+    assert stage_finished["span_id"] == stage_started["span_id"]
+    assert run_finished["span_id"] == run_started["span_id"]
+
 
 def test_progress_and_enrichment_are_appended(events_file):
     run_id = run_events.new_run_id("code_gen")
@@ -108,6 +124,16 @@ def test_stage_sequence_is_scoped_to_run(events_file):
     assert started[3]["sequence"] == 1
 
 
+def test_lifecycle_ids_use_full_uuid_entropy(events_file):
+    run_id = run_events.new_run_id("encode")
+    with run_events.record_stage(run_id, "encode", "parse_rpg") as stage:
+        pass
+
+    assert len(run_id.rsplit("-", 1)[-1]) == 32
+    assert len(stage.stage_id.rsplit("-", 1)[-1]) == 32
+    assert all(len(event["event_id"].rsplit("-", 1)[-1]) == 32 for event in run_events.load_events(events_file))
+
+
 def test_concurrent_appends_produce_valid_json_lines(events_file):
     run_id = run_events.new_run_id("code_gen")
 
@@ -140,6 +166,8 @@ def test_event_context_and_llm_call_are_linked(events_file):
         with run_events.record_stage(run.run_id, "encode", "parse_rpg") as stage:
             environment = run_events.event_context_environment()
             assert environment["CMIND_STAGE_ID"] == stage.stage_id
+            assert environment["CMIND_TRACE_ID"] == stage.activity_trace_id
+            assert environment["CMIND_PARENT_SPAN_ID"] == stage.activity_span_id
             event_id = run_events.record_llm_call(
                 provider="copilot",
                 model="gpt-test",
@@ -158,3 +186,11 @@ def test_event_context_and_llm_call_are_linked(events_file):
     assert llm_event["stage_id"] == stage.stage_id
     assert llm_event["log_file"] == "process-1.log"
     assert "prompt" not in llm_event and "response" not in llm_event
+    llm_activity = [
+        event for event in load_activity_events(events_file.parent / "activity")
+        if event.get("kind") == "tool.llm"
+    ]
+    assert len(llm_activity) == 2
+    assert {event["event_type"] for event in llm_activity} == {"span_started", "span_finished"}
+    assert {event["parent_span_id"] for event in llm_activity} == {stage.activity_span_id}
+    assert "prompt" not in llm_activity[-1] and "response" not in llm_activity[-1]

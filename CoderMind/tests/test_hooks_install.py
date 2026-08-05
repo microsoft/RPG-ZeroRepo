@@ -573,6 +573,30 @@ def test_setup_gitignore_partial_existing_rules_only_appends_missing(tmp_path):
     assert ".github/agents/" in content
 
 
+def test_setup_gitignore_migrates_whole_cmind_directory_rule(tmp_path):
+    """The old `.cmind/` rule must not defeat the config.toml negation."""
+    subprocess.run(["git", "init", "-q"], cwd=tmp_path, check=True)
+    (tmp_path / ".gitignore").write_text(
+        "node_modules/\n.cmind/\n!.cmind/config.toml\n",
+        encoding="utf-8",
+    )
+
+    cmind_cli._setup_gitignore(tmp_path, "copilot")
+
+    lines = (tmp_path / ".gitignore").read_text(encoding="utf-8").splitlines()
+    assert ".cmind/" not in lines
+    assert ".cmind/*" in lines
+    assert "!.cmind/config.toml" in lines
+    config = tmp_path / ".cmind" / "config.toml"
+    config.parent.mkdir()
+    config.write_text("[cmind]\n", encoding="utf-8")
+    ignored = subprocess.run(
+        ["git", "check-ignore", "-q", ".cmind/config.toml"],
+        cwd=tmp_path,
+    )
+    assert ignored.returncode == 1
+
+
 # ---------------------------------------------------------------------------
 # MCP auto-approval (pre-authorization)
 # ---------------------------------------------------------------------------

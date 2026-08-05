@@ -34,6 +34,12 @@ sys.modules["plan_orchestrator"] = plan
 _SPEC.loader.exec_module(plan)
 
 
+@pytest.fixture(autouse=True)
+def activity_writer(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    from common.activity_events import ActivityWriter
+    monkeypatch.setattr(plan, "ACTIVITY_WRITER", ActivityWriter(tmp_path / "activity", workspace_id="ws_test"))
+
+
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
@@ -94,7 +100,7 @@ class TestDecideCascade:
         states = _states(["update", "warning", "update", "update", "update"])
         plan.decide(states, force=False)
         assert [s.will_run for s in states] == [False, True, True, True, True]
-        assert states[1].reason == "type=warning"
+        assert states[1].reason == "warning: cross-stage contract violation; rebuild stage and downstream"
 
     def test_force_runs_everything(self) -> None:
         states = _states(["update"] * 5)

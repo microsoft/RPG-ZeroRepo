@@ -212,7 +212,8 @@ class LLMClient:
         tool: str = None,
         trajectory: Optional[Any] = None,  # Trajectory instance
         step_id: Optional[int] = None,
-        logger: Optional[logging.Logger] = None
+        logger: Optional[logging.Logger] = None,
+        agentic: bool = False,
     ):
         """Initialize LLM Client.
         
@@ -221,6 +222,7 @@ class LLMClient:
             trajectory: Trajectory instance for recording LLM calls
             step_id: Current step ID in the trajectory
             logger: Logger instance
+            agentic: Allow the CLI model to use tools and edit the workspace.
         """
         # P1 (explicit arg) wins; otherwise P2-P4 chain via _load_ai_cli_cmd.
         # The empty-string case is tolerated here so unit tests / utilities
@@ -231,6 +233,7 @@ class LLMClient:
         self.trajectory = trajectory
         self.step_id = step_id
         self.logger = logger or logging.getLogger(__name__)
+        self.agentic = agentic
         
         # Session manager — driven by detect_agent_type(self.tool) so the
         # right subclass is chosen even when self.tool came from the
@@ -244,6 +247,7 @@ class LLMClient:
             project_dir=_REPO_DIR,
             trace_filename_builder=self._build_trace_filename,
             logger=self.logger,
+            agentic=agentic,
         )
         
         # Internal call tracking
@@ -880,18 +884,31 @@ class LLMClient:
                 last_response = response
                 last_think = self.extract_think_block(response)
 
-                # Parse the result_json block
-                parsed_data = self.parse_result_json(response)
-                if parsed_data:
+                # Copilot can emit progress before its final answer. Validate
+                # complete result blocks newest-first so progress JSON cannot
+                # mask the final schema-valid response.
+                blocks = re.findall(
+                    r"<result_json>\s*(.*?)\s*</result_json>", response, re.DOTALL
+                )
+                candidates = (
+                    [f"<result_json>{block}</result_json>" for block in reversed(blocks)]
+                    if len(blocks) > 1 else [response]
+                )
+                parsed_any = False
+                for candidate in candidates:
+                    parsed_data = self.parse_result_json(candidate)
+                    if not parsed_data:
+                        continue
+                    parsed_any = True
                     result = self.validate_structure(parsed_data, response_model)
                     if result is not None:
                         self.update_last_parsed_result(parsed_data)
                         self.logger.info("[OK] LLM structured call successful")
                         return last_think, result, response
-                    else:
-                        self.logger.warning(
-                            f"[FAIL] Validation failed (attempt {attempt + 1})"
-                        )
+                if parsed_any:
+                    self.logger.warning(
+                        f"[FAIL] Validation failed (attempt {attempt + 1})"
+                    )
                 else:
                     self.logger.warning(
                         f"[FAIL] Unable to parse <result_json> block (attempt {attempt + 1})"

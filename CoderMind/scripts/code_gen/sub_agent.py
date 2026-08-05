@@ -57,7 +57,7 @@ def dispatch_sub_agent(
     Returns:
         (response_text, error_message) — one of them is None.
     """
-    client = LLMClient(trajectory=trajectory, step_id=step_id)
+    client = LLMClient(trajectory=trajectory, step_id=step_id, agentic=True)
     logger.info(
         "Dispatching sub-agent (purpose=%s, timeout=%ds, prompt_len=%d)",
         purpose, timeout, len(prompt),

@@ -36,6 +36,16 @@ def validate_base_classes_structure(data: Dict[str, Any]) -> Tuple[bool, List[st
     """Validate base classes structure."""
     errors = []
     backend = get_backend(extract_language_metadata(data)[0])
+
+    if data.get("success") is False:
+        errors.append("Base class design did not complete successfully")
+    uncovered = data.get("uncovered_data_flow_types", [])
+    if not isinstance(uncovered, list):
+        errors.append("'uncovered_data_flow_types' must be a list")
+    elif uncovered:
+        errors.append(
+            "Uncovered data flow types: " + ", ".join(str(item) for item in uncovered)
+        )
     
     base_classes = data.get("base_classes", [])
     

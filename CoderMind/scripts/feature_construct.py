@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import shutil
 import signal
 import subprocess
@@ -13,6 +14,10 @@ import time
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Optional
+
+from common.activity_events import ActivityWriter, activity_environment, record_activity
+
+ACTIVITY_WRITER: ActivityWriter | None = None
 
 from common.language_meta import extract_language_metadata
 from common.paths import FEATURE_BUILD_FILE as _FEATURE_BUILD_FILE
@@ -84,7 +89,7 @@ def _script_argv(invoker: list[str], script_name: str) -> list[str]:
 
 def _run_stage(invoker: list[str], script_name: str, extra: list[str]) -> int:
     argv = [*_script_argv(invoker, script_name), *extra]
-    proc = subprocess.run(argv, check=False)
+    proc = subprocess.run(argv, check=False, env={**os.environ, **activity_environment()})
     return proc.returncode
 
 
@@ -526,33 +531,43 @@ def main(argv: Optional[list[str]] = None) -> int:
             print("DRY-RUN >", " ".join(cmd))
         return 0
 
-    started = time.monotonic()
-    for state in states:
-        if not state.will_run:
-            print(f"skip {state.stage.name:<16} ({state.reason})")
-            continue
+    with record_activity(
+        "workflow", "feature_construct", logical_key="decoder-feature-construct",
+        trigger="command", writer=ACTIVITY_WRITER,
+    ) as activity:
+        activity.note(planned_stages=len(runnable), total_stages=len(states))
+        started = time.monotonic()
+        for state in states:
+            if not state.will_run:
+                print(f"skip {state.stage.name:<16} ({state.reason})")
+                continue
 
-        stage_started = time.monotonic()
-        print(f"run  {state.stage.name:<16} {state.stage.build_script} ...")
-        _reset_output_if_needed(state)
-        rc = _run_stage(invoker, state.stage.build_script, _build_args_for(state.stage, args))
-        if rc != 0:
-            _print_failure_hint(invoker, state.stage, rc, phase="build")
-            return rc
+            stage_started = time.monotonic()
+            print(f"run  {state.stage.name:<16} {state.stage.build_script} ...")
+            _reset_output_if_needed(state)
+            rc = _run_stage(invoker, state.stage.build_script, _build_args_for(state.stage, args))
+            if rc != 0:
+                activity.status = "failed"
+                activity.error = {"type": "FeatureConstructStageError", "message": f"{state.stage.name} exited {rc}"}
+                _print_failure_hint(invoker, state.stage, rc, phase="build")
+                return rc
 
-        verify = _check_stage(state.stage)
-        if verify.type != "update":
-            print(
-                f"   verification failed: {verify.type} — {verify.message}",
-                file=sys.stderr,
-            )
-            _print_failure_hint(invoker, state.stage, 1, phase="check")
-            return 1
+            verify = _check_stage(state.stage)
+            if verify.type != "update":
+                activity.status = "failed"
+                activity.error = {"type": "FeatureConstructVerificationError", "message": f"{state.stage.name}: {verify.type}"}
+                print(
+                    f"   verification failed: {verify.type} — {verify.message}",
+                    file=sys.stderr,
+                )
+                _print_failure_hint(invoker, state.stage, 1, phase="check")
+                return 1
 
-        elapsed = time.monotonic() - stage_started
-        print(f"done {state.stage.name:<16} in {elapsed:.1f}s")
+            elapsed = time.monotonic() - stage_started
+            print(f"done {state.stage.name:<16} in {elapsed:.1f}s")
 
-    total_elapsed = time.monotonic() - started
+        total_elapsed = time.monotonic() - started
+        activity.note(duration_ms=round(total_elapsed * 1000, 3))
     print()
     print(f"Feature construct complete in {total_elapsed:.1f}s.")
     print("Next: `/cmind.plan` to build the Repository Planning Graph (RPG).")

@@ -322,6 +322,7 @@ TRAJECTORY_DIR = DATA_DIR / "trajectory"
 MCP_CALLS_LOG = LOGS_DIR / "mcp_calls.jsonl"
 HOOK_CALLS_LOG = LOGS_DIR / "hook_calls.jsonl"
 RUN_EVENTS_FILE = LOGS_DIR / "run_events.jsonl"
+ACTIVITY_LOG_DIR = LOGS_DIR / "activity"
 DASHBOARD_SNAPSHOT_FILE = DATA_DIR / "dashboard_snapshot.json"
 # REPORTS_DIR is defined above (workspace-local in the new layout).
 

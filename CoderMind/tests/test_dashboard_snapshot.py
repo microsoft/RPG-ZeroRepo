@@ -13,6 +13,7 @@ if str(_SCRIPTS) not in sys.path:
 from common.dashboard_snapshot import (
     DashboardSources,
     build_dashboard_snapshot,
+    collect_automation_activity,
     write_dashboard_snapshot,
 )
 
@@ -71,6 +72,9 @@ def test_aggregates_run_stage_and_enrichment(tmp_path):
     assert [check["name"] for check in run["verification"]] == ["run lifecycle", "parse_rpg"]
     assert all(check["status"] == "success" for check in run["verification"])
     assert snapshot["trends"]["by_command"]["encode"][0]["tokens_total"] == 120
+    assert snapshot["history"]["summary"]["root_count"] == 1
+    assert snapshot["history"]["roots"][0]["logical_key"] == "encoder-encode"
+    assert snapshot["history"]["roots"][0]["children"][0]["logical_key"] == "encoder-encode-parse-rpg"
 
 
 def test_marks_finished_run_with_unfinished_stage_as_warning(tmp_path):
@@ -158,6 +162,11 @@ def test_collects_rpg_artifacts_and_encoder_pipeline(tmp_path):
     artifacts = {artifact["label"]: artifact for artifact in snapshot["artifacts"]}
     assert artifacts["rpg_json"]["status"] == "available"
     assert artifacts["rpg_html"]["status"] == "available"
+    health = {item["source"]: item for item in snapshot["source_health"]}
+    assert health["rpg"]["expectation"] == "required"
+    assert health["mcp_calls"]["expectation"] == "optional"
+    assert health["activity"]["expectation"] == "optional"
+    assert health["rpg_edit_plan"]["expectation"] == "not_expected"
 
 
 def test_decoder_pipeline_and_code_gen_state(tmp_path):
@@ -191,6 +200,80 @@ def test_decoder_pipeline_and_code_gen_state(tmp_path):
     assert task_check["status"] == "failed"
 
 
+def test_pipeline_uses_available_artifact_when_stage_is_stale_pending(tmp_path):
+    sources = _sources(tmp_path)
+    sources.workspace_root.mkdir(parents=True)
+    sources.data_dir.mkdir(parents=True)
+    for filename in (
+        "feature_spec.json", "feature_build.json", "feature_tree.json",
+        "skeleton.json", "data_flow.json", "base_classes.json", "interfaces.json",
+    ):
+        (sources.data_dir / filename).write_text("{}", encoding="utf-8")
+    (sources.data_dir / "tasks.json").write_text('{"planned_tasks_dict":{"Core":[]}}', encoding="utf-8")
+    trajectory_dir = sources.data_dir / "trajectory"
+    trajectory_dir.mkdir()
+    (trajectory_dir / "plan_tasks.json").write_text(json.dumps({
+        "command": "plan_tasks",
+        "status": "completed",
+        "started_at": "2026-08-05T00:00:00Z",
+        "finished_at": "2026-08-05T00:00:05Z",
+        "steps": [{"step_id": 1, "name": "other_pending_step", "status": "pending"}],
+    }), encoding="utf-8")
+
+    snapshot = build_dashboard_snapshot(sources)
+
+    tasks_step = next(step for step in snapshot["pipeline"] if step["id"] == "plan_tasks")
+    assert tasks_step["status"] == "completed"
+    assert tasks_step["quality"] == "inferred"
+    assert snapshot["verification"]["next_actions"][0]["command"] == "/cmind.code_gen"
+
+
+def test_collects_mcp_and_hook_automation_separately_from_pipeline() -> None:
+    history = {
+        "roots": [{
+            "kind": "mcp.session", "name": "MCP session", "status": "success",
+            "started_at": "2026-08-05T00:00:00Z", "finished_at": "2026-08-05T00:00:01Z",
+            "children": [
+                {"kind": "tool.mcp", "status": "success"},
+                {"kind": "tool.mcp", "status": "degraded"},
+            ],
+        }, {
+            "kind": "hook.workflow", "name": "post-commit", "status": "success",
+            "started_at": "2026-08-05T00:00:02Z", "finished_at": "2026-08-05T00:00:04Z",
+            "details": {"hook_type": "post-commit", "git_sha": "abc1234"},
+            "children": [
+                {"kind": "hook.operation", "name": "sync", "status": "success"},
+                {"kind": "workflow", "logical_key": "encoder-update-rpg", "status": "success"},
+            ],
+        }]}
+
+    automation = collect_automation_activity(history)
+
+    assert automation["mcp"] == {
+        "sessions": 1, "calls": 2, "succeeded": 1, "degraded": 1, "failed": 0,
+    }
+    assert automation["hooks"] == {
+        "invocations": 1, "post_commit": 1, "post_merge": 0,
+        "operations": 1, "updates": 1, "failed": 0,
+        "attribution_mismatches": 0,
+    }
+    assert automation["latest"]["type"] == "hook"
+    assert automation["latest"]["git_sha"] == "abc1234"
+
+
+def test_detects_hook_update_target_mismatch() -> None:
+    automation = collect_automation_activity({"roots": [{
+        "kind": "hook.workflow", "name": "post-commit", "status": "success",
+        "details": {"git_sha": "abc1234", "hook_type": "post-commit"},
+        "children": [{
+            "kind": "workflow", "logical_key": "encoder-update-rpg",
+            "status": "success", "metrics": {"new_commit": "def5678full"},
+        }],
+    }]})
+
+    assert automation["hooks"]["attribution_mismatches"] == 1
+
+
 def test_verification_preserves_reported_checks_and_derives_retry(tmp_path):
     sources = _sources(tmp_path)
     sources.workspace_root.mkdir(parents=True)
@@ -218,6 +301,40 @@ def test_verification_preserves_reported_checks_and_derives_retry(tmp_path):
     assert [action["quality"] for action in run["next_actions"]] == ["reported", "derived"]
     assert run["next_actions"][0]["detail"] == "Check report directory permissions"
     assert run["next_actions"][1]["command"] == "/cmind.encode"
+
+
+def test_latest_failed_run_reason_is_promoted_to_workspace_attention(tmp_path):
+    sources = _sources(tmp_path)
+    sources.workspace_root.mkdir(parents=True)
+    _write_events(sources.run_events_file, [
+        {
+            "event_type": "run_started", "run_id": "run-1",
+            "command": "design_base_classes", "status": "running",
+        },
+        {
+            "event_type": "stage_started", "run_id": "run-1",
+            "command": "design_base_classes", "stage_id": "stage-1",
+            "sequence": 1, "stage": "design_base_classes", "status": "running",
+        },
+        {
+            "event_type": "stage_finished", "run_id": "run-1",
+            "command": "design_base_classes", "stage_id": "stage-1",
+            "sequence": 1, "stage": "design_base_classes", "status": "failed",
+            "error": {"type": "CoverageError", "message": "six types remain uncovered"},
+        },
+        {
+            "event_type": "run_finished", "run_id": "run-1",
+            "command": "design_base_classes", "status": "failed",
+            "error": {"type": "CoverageError", "message": "six types remain uncovered"},
+        },
+    ])
+
+    snapshot = build_dashboard_snapshot(sources)
+
+    action = snapshot["verification"]["next_actions"][0]
+    assert action["label"] == "Retry design_base_classes"
+    assert action["command"] == "/cmind.design_base_classes"
+    assert action["detail"] == "six types remain uncovered"
 
 
 def test_aggregates_exact_api_llm_call_event(tmp_path):

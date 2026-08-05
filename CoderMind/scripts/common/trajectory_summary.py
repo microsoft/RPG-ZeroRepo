@@ -118,6 +118,7 @@ def summarize_trajectory(path: Path, data: dict[str, Any]) -> dict[str, Any]:
     metadata = data.get("metadata") if isinstance(data.get("metadata"), dict) else {}
     command = str(data.get("command") or "unknown")
     run_id = str(metadata.get("run_id") or f"trajectory:{path.stem}")
+    status = _STATUS_MAP.get(str(data.get("status") or ""), str(data.get("status") or "unknown"))
     stages: list[dict[str, Any]] = []
     for index, raw_step in enumerate(data.get("steps") or [], start=1):
         if not isinstance(raw_step, dict):
@@ -150,7 +151,23 @@ def summarize_trajectory(path: Path, data: dict[str, Any]) -> dict[str, Any]:
             "quality": "reported_trajectory",
         })
 
-    status = _STATUS_MAP.get(str(data.get("status") or ""), str(data.get("status") or "unknown"))
+    # Older plan_tasks trajectories passed the Step object where the API
+    # expected its integer ID, leaving the sole step pending even though the
+    # command completed and wrote its artifact. Reconcile only this strict
+    # single-step shape; unrelated pending work remains visible.
+    if (
+        status == "success"
+        and len(stages) == 1
+        and stages[0].get("name") == command
+        and stages[0].get("status") == "not_started"
+    ):
+        stages[0].update({
+            "status": "success",
+            "started_at": data.get("started_at"),
+            "finished_at": data.get("finished_at"),
+            "duration_s": _duration(data.get("started_at"), data.get("finished_at")),
+            "quality": "derived_trajectory",
+        })
     failed_stages = [stage for stage in stages if stage["status"] in {"failed", "interrupted"}]
     display_status = "completed_with_warnings" if status == "success" and failed_stages else status
     llm_calls = sum(int(stage.get("telemetry", {}).get("llm", {}).get("calls") or 0) for stage in stages)

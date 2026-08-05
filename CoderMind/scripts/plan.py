@@ -46,6 +46,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import shutil
 import signal
 import subprocess
@@ -54,6 +55,10 @@ import time
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Optional
+
+from common.activity_events import ActivityWriter, activity_environment, record_activity
+
+ACTIVITY_WRITER: ActivityWriter | None = None
 
 # Sub-scripts live in the same directory as this file (bundled under
 # cmind_cli/core_pack/scripts/ in the installed wheel).
@@ -157,6 +162,7 @@ def _run_check(invoker: list[str], script_name: str) -> dict[str, Any]:
             argv,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
+            env={**os.environ, **activity_environment()},
             check=False,
         )
     except FileNotFoundError as exc:
@@ -217,7 +223,7 @@ def _extract_last_json_object(text: str) -> Optional[dict[str, Any]]:
 def _run_stage(invoker: list[str], script_name: str, extra: list[str]) -> int:
     """Run a build_*/design_* script and stream its output live."""
     argv = [*_script_argv(invoker, script_name), *extra]
-    proc = subprocess.run(argv, check=False)
+    proc = subprocess.run(argv, check=False, env={**os.environ, **activity_environment()})
     return proc.returncode
 
 
@@ -479,19 +485,26 @@ def main(argv: Optional[list[str]] = None) -> int:
         return 0
 
     # --- Step: execute ----------------------------------------------------
-    started = time.monotonic()
-    for s in states:
-        if not s.will_run:
-            print(f"⏭  {s.stage.name:<14} skip ({s.reason})")
-            continue
+    with record_activity(
+        "workflow", "plan", logical_key="decoder-plan", trigger="command",
+        writer=ACTIVITY_WRITER,
+    ) as activity:
+        activity.note(planned_stages=len(runnable), total_stages=len(states))
+        started = time.monotonic()
+        for s in states:
+            if not s.will_run:
+                print(f"⏭  {s.stage.name:<14} skip ({s.reason})")
+                continue
 
-        stage_started = time.monotonic()
-        print(f"▶  {s.stage.name:<14} running {s.stage.build_script} ...")
-        build_extra = _build_args_for(s.stage, args)
-        rc = _run_stage(invoker, s.stage.build_script, build_extra)
-        if rc != 0:
-            _print_failure_hint(invoker, s.stage, rc, phase="build")
-            return rc
+            stage_started = time.monotonic()
+            print(f"▶  {s.stage.name:<14} running {s.stage.build_script} ...")
+            build_extra = _build_args_for(s.stage, args)
+            rc = _run_stage(invoker, s.stage.build_script, build_extra)
+            if rc != 0:
+                activity.status = "failed"
+                activity.error = {"type": "PlanStageError", "message": f"{s.stage.name} exited {rc}"}
+                _print_failure_hint(invoker, s.stage, rc, phase="build")
+                return rc
 
         # Re-run the check to confirm the artifact came out valid.  Parse
         # its JSON quietly; surface details only when the verification
@@ -502,32 +515,35 @@ def main(argv: Optional[list[str]] = None) -> int:
         # Any other type means the artifact is missing, unusable, or
         # violates a cross-stage contract; fail so bench cannot report a
         # false PASS for partial plans.
-        verify = _run_check(invoker, s.stage.check_script)
-        verify_type = verify.get("type", "error")
-        if verify_type != "update":
-            print(
-                f"   verification failed: {verify_type} — "
-                f"{verify.get('message', 'no message')}",
-                file=sys.stderr,
-            )
-            for err in verify.get("validation_errors", [])[:5]:
-                print(f"     - {err}", file=sys.stderr)
-            _print_failure_hint(invoker, s.stage, 1, phase="check")
-            return 1
+            verify = _run_check(invoker, s.stage.check_script)
+            verify_type = verify.get("type", "error")
+            if verify_type != "update":
+                activity.status = "failed"
+                activity.error = {"type": "PlanVerificationError", "message": f"{s.stage.name}: {verify_type}"}
+                print(
+                    f"   verification failed: {verify_type} — "
+                    f"{verify.get('message', 'no message')}",
+                    file=sys.stderr,
+                )
+                for err in verify.get("validation_errors", [])[:5]:
+                    print(f"     - {err}", file=sys.stderr)
+                _print_failure_hint(invoker, s.stage, 1, phase="check")
+                return 1
 
-        elapsed = time.monotonic() - stage_started
-        print(f"✓  {s.stage.name:<14} done in {elapsed:.1f}s")
+            elapsed = time.monotonic() - stage_started
+            print(f"✓  {s.stage.name:<14} done in {elapsed:.1f}s")
 
     # --- Step: post-pipeline helpers --------------------------------------
-    print()
-    print("Running post-pipeline helpers ...")
-    for post in POST_STEPS:
-        print(f"▶  {post}")
-        rc = _run_stage(invoker, post, [])
-        if rc != 0:
-            print(f"   warning: {post} exited with {rc} (continuing)")
+        print()
+        print("Running post-pipeline helpers ...")
+        for post in POST_STEPS:
+            print(f"▶  {post}")
+            rc = _run_stage(invoker, post, [])
+            if rc != 0:
+                print(f"   warning: {post} exited with {rc} (continuing)")
 
-    total_elapsed = time.monotonic() - started
+        total_elapsed = time.monotonic() - started
+        activity.note(duration_ms=round(total_elapsed * 1000, 3))
     print()
     print(f"Plan complete in {total_elapsed:.1f}s.")
     print("Next: `/cmind.code_gen` to generate source code.")

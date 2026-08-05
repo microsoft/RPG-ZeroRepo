@@ -95,3 +95,25 @@ def test_merges_exact_run_id_and_keeps_legacy_runs(tmp_path):
     assert matched["trajectory_file"] == "matched.json"
     assert matched["stages"][0]["description"] == "Parse repository"
     assert matched["stages"][0]["telemetry"]["trajectory"]["llm"]["calls"] == 1
+
+
+def test_completed_single_step_trajectory_reconciles_legacy_pending_step(tmp_path):
+    trajectory_dir = tmp_path / "trajectory"
+    trajectory_dir.mkdir()
+    data = _trajectory()
+    data["command"] = "plan_tasks"
+    data["steps"] = [{
+        "step_id": 1,
+        "name": "plan_tasks",
+        "status": "pending",
+        "started_at": None,
+        "finished_at": None,
+    }]
+    (trajectory_dir / "plan_tasks.json").write_text(json.dumps(data), encoding="utf-8")
+
+    runs, _ = collect_trajectory_runs(trajectory_dir)
+
+    stage = runs[0]["stages"][0]
+    assert stage["status"] == "success"
+    assert stage["quality"] == "derived_trajectory"
+    assert stage["duration_s"] == 5.0
