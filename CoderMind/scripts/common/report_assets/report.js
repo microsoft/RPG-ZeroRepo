@@ -28,7 +28,7 @@
     if (s == null || isNaN(s)) return "—";
     if (s < 1) return Math.round(s * 1000) + " ms";
     if (s < 60) return s.toFixed(s < 10 ? 2 : 1) + " s";
-    var m = Math.floor(s / 60), r = Math.round(s % 60);
+    var rounded = Math.round(s), m = Math.floor(rounded / 60), r = rounded % 60;
     return m + "m " + String(r).padStart(2, "0") + "s";
   }
   function delta(v) { return v == null ? "—" : v > 0 ? "+" + v : String(v); }
@@ -636,13 +636,30 @@
     if (node.kind === "hook.operation") return "Encoder / Hooks / " + humanizeHistoryName(name);
     if (node.kind === "tool.mcp") return "Encoder / MCP / " + humanizeHistoryName(name);
     if (node.kind === "codegen.batch") return "Decoder / Code Gen / " + humanizeHistoryName(name);
+    if (!child && node.kind === "command.script" && key === "script-run-batch") {
+      var mode = (node.details || {}).mode;
+      return "Decoder / Code Gen" + (mode ? " / " + humanizeHistoryName(mode) : "");
+    }
+    if (node.kind === "command.script") return humanizeHistoryName(String(name).replace(/\.py$/i, ""));
     return prefix + humanizeHistoryName(name);
   }
+  function historyRecovered(node) {
+    return !!(node && node.recovery && node.recovery.status === "recovered");
+  }
+  function historyStatusKind(node) {
+    return historyRecovered(node) ? "ok" : statusKind(node && node.status);
+  }
+  function historyStatusPill(node) {
+    return historyRecovered(node) ? pill("success", "recovered") : pill((node && node.status) || "unknown");
+  }
   function historyTooltip(node) {
-    return [historyDisplayName(node, false), "Status: " + (node.status || "unknown"),
+    var lines = [historyDisplayName(node, false), "Status: " + (node.status || "unknown"),
       "Started: " + historyTime(node.started_at), "Finished: " + historyTime(node.finished_at),
       "Duration: " + historyDuration(node.duration_ms), "Trigger: " + (node.trigger || "unknown"),
-      "Evidence: " + (node.quality || "unknown")].join("\n");
+      "Evidence: " + (node.quality || "unknown")];
+    if (historyRecovered(node)) lines.push("Resolution: recovered by a later successful attempt at "
+      + historyTime(node.recovery.by_finished_at || node.recovery.by_started_at));
+    return lines.join("\n");
   }
   function historyMatches(root) {
     var key = String(root.logical_key || "").toLowerCase(), kind = String(root.kind || "");
@@ -656,8 +673,11 @@
     if (!filterMatch) return false;
     var query = historySearch.trim().toLowerCase();
     if (!query) return true;
-    var values = [root.name, root.logical_key, root.status, root.trigger, root.source];
-    (root.children || []).forEach(function (child) { values.push(child.name, child.logical_key, child.status); });
+    var values = [root.name, root.logical_key, root.status, root.trigger, root.source,
+      historyRecovered(root) ? "recovered" : ""];
+    (root.children || []).forEach(function (child) {
+      values.push(child.name, child.logical_key, child.status, historyRecovered(child) ? "recovered" : "");
+    });
     return values.some(function (value) {
       return String(value || "").toLowerCase().replace(/[_-]+/g, " ").indexOf(query.replace(/[_-]+/g, " ")) >= 0;
     });
@@ -665,14 +685,17 @@
   function historyNodeMatchesQuery(node) {
     var query = historySearch.trim().toLowerCase().replace(/[_-]+/g, " ");
     if (!query) return true;
-    return [node.name, node.logical_key, node.status, node.trigger, node.source].some(function (value) {
+    return [node.name, node.logical_key, node.status, node.trigger, node.source,
+      historyRecovered(node) ? "recovered" : ""].some(function (value) {
       return String(value || "").toLowerCase().replace(/[_-]+/g, " ").indexOf(query) >= 0;
     });
   }
   function historyRow(node, root, child) {
     var hasChildren = !child && (root.children || []).length > 0;
     var collapsed = !!collapsedHistoryRoots[root.span_id];
-    return '<div class="history-row ' + (child ? "child " : "root ") + statusKind(node.status)
+    var recoveryNote = historyRecovered(node) ? " · originally " + esc(node.status || "failed")
+      : (node.recovered_attempts || []).length ? " · recovered " + node.recovered_attempts.length + " prior attempt(s)" : "";
+    return '<div class="history-row ' + (child ? "child " : "root ") + historyStatusKind(node)
       + '" data-tip="' + esc(historyTooltip(node)) + '">'
       + (hasChildren
         ? '<span class="history-tree-toggle" role="button" tabindex="0" data-history-toggle="' + esc(root.span_id)
@@ -683,9 +706,9 @@
       + '" data-history-span="' + esc(node.span_id) + '" data-history-detail="' + esc(root.detail_path || "")
       + '" aria-label="Open details for ' + esc(historyDisplayName(node, child)) + '"><span class="history-main"><strong>'
       + esc(historyDisplayName(node, child)) + '</strong><small>'
-      + esc(node.kind || "activity") + " · " + esc(node.quality || "unknown") + '</small></span>'
+      + esc(node.kind || "activity") + " · " + esc(node.quality || "unknown") + recoveryNote + '</small></span>'
       + '<span class="history-start mono">' + esc(historyShortTime(node.started_at)) + '</span>'
-      + pill(node.status || "unknown") + '<span class="history-duration mono">' + esc(historyDuration(node.duration_ms))
+      + historyStatusPill(node) + '<span class="history-duration mono">' + esc(historyDuration(node.duration_ms))
       + '</span><span class="chev">›</span></span></div>';
   }
   function filteredHistoryRoots() { return (HISTORY.roots || []).filter(historyMatches); }
@@ -725,19 +748,27 @@
     var children = node.children || [];
     if (!children.length) return '<div class="empty"><p>No child activity recorded.</p></div>';
     return '<div class="timeline">' + children.map(function (child) {
-      return '<div class="tl-item ' + statusKind(child.status) + '"><div class="t">' + esc(humanizeHistoryName(child.name))
-        + '</div><div class="d">' + pill(child.status) + ' · ' + esc(historyDuration(child.duration_ms))
+      return '<div class="tl-item ' + historyStatusKind(child) + '"><div class="t">' + esc(humanizeHistoryName(child.name))
+        + '</div><div class="d">' + historyStatusPill(child) + ' · ' + esc(historyDuration(child.duration_ms))
         + ' · ' + qBadge(child.quality) + '</div>' + historyTimeline(child) + '</div>';
     }).join("") + '</div>';
   }
   function openHistoryDrawer(root, target) {
-    var body = '<div class="drawer-section">' + kvTable([["status", pill(target.status)],
+    var statusRows = [["status", pill(target.status)]];
+    if (historyRecovered(target)) statusRows.push(
+      ["resolution", pill("success", "recovered")],
+      ["recovered by", '<span class="mono">' + esc(historyTime(target.recovery.by_finished_at || target.recovery.by_started_at)) + '</span>']
+    );
+    if ((target.recovered_attempts || []).length) statusRows.push(
+      ["recovered attempts", String(target.recovered_attempts.length)]
+    );
+    var body = '<div class="drawer-section">' + kvTable(statusRows.concat([
       ["started", '<span class="mono">' + esc(historyTime(target.started_at)) + '</span>'],
       ["finished", '<span class="mono">' + esc(historyTime(target.finished_at)) + '</span>'],
       ["duration", historyDuration(target.duration_ms)], ["trigger", esc(target.trigger || "—")],
       ["attempt", target.attempt == null ? "—" : target.attempt], ["evidence", qBadge(target.quality) || "—"],
       ["logical key", '<span class="mono">' + esc(target.logical_key || "—") + '</span>'],
-      ["trace", '<span class="mono">' + esc(target.trace_id || root.trace_id || "—") + '</span>']]) + '</div>';
+      ["trace", '<span class="mono">' + esc(target.trace_id || root.trace_id || "—") + '</span>']])) + '</div>';
     if (target.error) body += '<div class="note warn"><span class="i">⚠</span><span>' + esc(typeof target.error === "object" ? (target.error.message || JSON.stringify(target.error)) : target.error) + '</span></div>';
     var details = target.details || {};
     var metrics = target.metrics || {};

@@ -4755,6 +4755,7 @@ def script(
             new_id,
             record_activity,
             record_artifact_changes,
+            script_activity_mode,
             workspace_instance_id,
         )
         writer = ActivityWriter(
@@ -4853,6 +4854,7 @@ def script(
                 script=relative_script,
                 exit_code=proc.returncode,
                 argument_count=len(ctx.args),
+                mode=script_activity_mode(relative_script, list(ctx.args)),
                 rpg_edit_session_id=rpg_edit_session_id,
             )
             changed_artifacts = (

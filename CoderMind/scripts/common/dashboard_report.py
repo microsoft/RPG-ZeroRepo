@@ -83,7 +83,7 @@ def _history_summary(root: dict[str, Any], detail_path: str) -> dict[str, Any]:
     keys = (
         "span_id", "trace_id", "kind", "logical_key", "name", "status",
         "started_at", "finished_at", "duration_ms", "trigger", "attempt",
-        "sequence", "quality", "source", "error",
+        "sequence", "quality", "source", "error", "recovery", "recovered_attempts",
     )
     summary = {key: root.get(key) for key in keys if root.get(key) is not None}
     if isinstance(root.get("metrics"), dict):

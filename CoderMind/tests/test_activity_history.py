@@ -4,6 +4,8 @@ import json
 import sys
 from pathlib import Path
 
+import pytest
+
 _REPO = Path(__file__).resolve().parents[1]
 _SCRIPTS = _REPO / "scripts"
 if str(_SCRIPTS) not in sys.path:
@@ -248,6 +250,42 @@ def test_history_attaches_summary_script_as_workflow_evidence(tmp_path: Path) ->
     assert helper["details"]["grouped_as"] == "workflow_evidence"
 
 
+@pytest.mark.parametrize(
+    ("workflow_name", "workflow_key", "script_name", "script_key"),
+    [
+        ("plan", "decoder-plan", "plan.py", "script-plan"),
+        (
+            "feature_construct", "decoder-feature-construct",
+            "feature_construct.py", "script-feature-construct",
+        ),
+    ],
+)
+def test_history_attaches_merged_stage_check_as_workflow_evidence(
+    tmp_path: Path,
+    workflow_name: str,
+    workflow_key: str,
+    script_name: str,
+    script_key: str,
+) -> None:
+    writer = ActivityWriter(tmp_path / "logs/activity", workspace_id="ws_test")
+    with record_activity(
+        "workflow", workflow_name, logical_key=workflow_key, writer=writer,
+    ):
+        pass
+    with record_activity(
+        "command.script", script_name, logical_key=script_key, writer=writer,
+    ):
+        pass
+
+    history = collect_run_history(tmp_path / "logs", [], [], [])
+
+    assert history["summary"]["root_count"] == 1
+    root = history["roots"][0]
+    assert root["logical_key"] == workflow_key
+    helper = next(child for child in root["children"] if child["logical_key"] == script_key)
+    assert helper["details"]["grouped_as"] == "workflow_evidence"
+
+
 def test_history_marks_stale_unfinished_activity_interrupted(tmp_path: Path) -> None:
     writer = ActivityWriter(tmp_path / "logs/activity", workspace_id="ws_test")
     writer.append(
@@ -266,6 +304,85 @@ def test_history_marks_stale_unfinished_activity_interrupted(tmp_path: Path) -> 
 
     assert history["roots"][0]["status"] == "interrupted"
     assert history["roots"][0]["quality"] == "derived"
+
+
+def test_history_marks_failed_attempts_recovered_by_later_success(tmp_path: Path) -> None:
+    writer = ActivityWriter(tmp_path / "logs/activity", workspace_id="ws_test")
+    attempts = (
+        ("spn_old", "trc_old", "2020-01-01T00:00:00.000Z", None),
+        ("spn_new", "trc_new", "2020-01-01T01:00:00.000Z", "2020-01-01T01:01:00.000Z"),
+    )
+    for span_id, trace_id, started_at, finished_at in attempts:
+        writer.append(
+            "span_started", trace_id=trace_id, span_id=span_id,
+            parent_span_id=None, kind="workflow", name="plan",
+            logical_key="decoder-plan", status="running", timestamp=started_at,
+        )
+        child_id = f"{span_id}_interfaces"
+        writer.append(
+            "span_started", trace_id=trace_id, span_id=child_id,
+            parent_span_id=span_id, kind="workflow", name="design_interfaces",
+            logical_key="decoder-design-interfaces", status="running",
+            timestamp=started_at,
+        )
+        if finished_at:
+            writer.append(
+                "span_finished", trace_id=trace_id, span_id=child_id,
+                parent_span_id=span_id, kind="workflow", name="design_interfaces",
+                logical_key="decoder-design-interfaces", status="success",
+                timestamp=finished_at,
+            )
+            writer.append(
+                "span_finished", trace_id=trace_id, span_id=span_id,
+                parent_span_id=None, kind="workflow", name="plan",
+                logical_key="decoder-plan", status="success", timestamp=finished_at,
+            )
+
+    history = collect_run_history(tmp_path / "logs", [], [], [])
+
+    newer, older = history["roots"]
+    assert older["status"] == "interrupted"
+    assert older["recovery"]["status"] == "recovered"
+    assert older["recovery"]["by_span_id"] == newer["span_id"]
+    assert older["children"][0]["recovery"]["by_span_id"] == newer["children"][0]["span_id"]
+    assert newer["recovered_attempts"] == [{
+        "span_id": older["span_id"],
+        "status": "interrupted",
+        "started_at": "2020-01-01T00:00:00.000Z",
+    }]
+
+
+def test_history_does_not_recover_unrelated_failure(tmp_path: Path) -> None:
+    writer = ActivityWriter(tmp_path / "logs/activity", workspace_id="ws_test")
+    writer.append(
+        "span_started", trace_id="trc_failed", span_id="spn_failed",
+        parent_span_id=None, kind="workflow", name="plan",
+        logical_key="decoder-plan", status="running",
+        timestamp="2020-01-01T00:00:00.000Z",
+    )
+    writer.append(
+        "span_finished", trace_id="trc_failed", span_id="spn_failed",
+        parent_span_id=None, kind="workflow", name="plan",
+        logical_key="decoder-plan", status="failed",
+        timestamp="2020-01-01T00:01:00.000Z",
+    )
+    writer.append(
+        "span_started", trace_id="trc_other", span_id="spn_other",
+        parent_span_id=None, kind="workflow", name="feature_construct",
+        logical_key="decoder-feature-construct", status="running",
+        timestamp="2020-01-01T01:00:00.000Z",
+    )
+    writer.append(
+        "span_finished", trace_id="trc_other", span_id="spn_other",
+        parent_span_id=None, kind="workflow", name="feature_construct",
+        logical_key="decoder-feature-construct", status="success",
+        timestamp="2020-01-01T01:01:00.000Z",
+    )
+
+    history = collect_run_history(tmp_path / "logs", [], [], [])
+
+    failed = next(root for root in history["roots"] if root["span_id"] == "spn_failed")
+    assert "recovery" not in failed
 
 
 def test_history_hides_snapshot_maintenance_spans(tmp_path: Path) -> None:

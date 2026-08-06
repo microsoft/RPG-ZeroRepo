@@ -24,8 +24,15 @@ from common.activity_events import (  # noqa: E402
     record_artifact_changes,
     record_activity,
     record_completed_activity,
+    script_activity_mode,
     workspace_instance_id,
 )
+
+
+def test_script_activity_mode_records_run_batch_operation_without_arguments() -> None:
+    assert script_activity_mode("run_batch.py", ["--final-test", "--json"]) == "final-test"
+    assert script_activity_mode("run_batch.py", ["--loop", "--max-batches", "1"]) == "loop"
+    assert script_activity_mode("plan.py", ["--check-only"]) is None
 
 
 def test_concurrent_writers_use_distinct_shards_and_event_ids(tmp_path: Path) -> None:

@@ -40,6 +40,26 @@ _PARENT_SPAN_ID_ENV = "CMIND_PARENT_SPAN_ID"
 _WORKSPACE_ID_ENV = "CMIND_WORKSPACE_INSTANCE_ID"
 _WORKSPACE_ID_FILE_ENV = "CMIND_WORKSPACE_INSTANCE_FILE"
 
+_RUN_BATCH_MODES = (
+    ("--next", "next"),
+    ("--loop", "loop"),
+    ("--resume", "resume"),
+    ("--retry", "retry"),
+    ("--batch-id", "batch-id"),
+    ("--final-test", "final-test"),
+    ("--smoke-test", "smoke-test"),
+    ("--global-review", "global-review"),
+    ("--prune-failed", "prune-failed"),
+)
+
+
+def script_activity_mode(script: str, arguments: list[str]) -> str | None:
+    """Return a non-sensitive execution mode for supported script commands."""
+    if Path(script).name != "run_batch.py":
+        return None
+    argument_set = set(arguments)
+    return next((mode for flag, mode in _RUN_BATCH_MODES if flag in argument_set), None)
+
 
 def new_id(prefix: str) -> str:
     """Return a non-truncated 128-bit execution identifier."""

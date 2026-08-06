@@ -94,8 +94,14 @@ def test_writes_complete_static_report(tmp_path: Path) -> None:
     assert '"features"' not in report_js
     assert "Feature plan" not in report_js
     assert "Pipeline readiness and stage evidence" in report_js
+    assert "var rounded = Math.round(s), m = Math.floor(rounded / 60), r = rounded % 60" in report_js
     assert "no evidence" in report_js
     assert "Data coverage" in report_js
+    assert "function historyRecovered(node)" in report_js
+    assert 'pill("success", "recovered")' in report_js
+    assert '["resolution", pill("success", "recovered")]' in report_js
+    assert 'key === "script-run-batch"' in report_js
+    assert 'return "Decoder / Code Gen"' in report_js
     assert "duration = pipe.duration_s" in report_js
     assert '["status", pill(r.status, stageDisplayStatus(r))]' in report_js
     assert 'r.attempt != null ? r.attempt : "—"' in report_js
@@ -206,6 +212,11 @@ def test_writes_lazy_history_index_and_detail_files(tmp_path: Path) -> None:
             "finished_at": "2026-08-05T00:00:10Z",
             "duration_ms": 10000,
             "quality": "measured",
+            "recovered_attempts": [{
+                "span_id": "spn_older",
+                "status": "interrupted",
+                "started_at": "2026-08-04T23:00:00Z",
+            }],
             "children": [{
                 "span_id": "spn_child",
                 "trace_id": "trc_root",
@@ -247,6 +258,7 @@ def test_writes_lazy_history_index_and_detail_files(tmp_path: Path) -> None:
     index_text = outputs.history_index_js.read_text(encoding="utf-8")
     assert "window.CMIND_HISTORY_INDEX" in index_text
     assert "decoder-plan-skeleton" in index_text
+    assert "recovered_attempts" in index_text
     assert "artifact-data-tasks-json" not in index_text
     assert "script-summary-skeleton" not in index_text
     detail_text = outputs.history_detail_files[0].read_text(encoding="utf-8")

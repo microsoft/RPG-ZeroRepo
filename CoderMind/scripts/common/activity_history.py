@@ -15,6 +15,12 @@ from common.activity_events import (
 )
 
 
+_FAILURE_STATUSES = frozenset({
+    "failed", "error", "timed_out", "cancelled", "interrupted",
+})
+_SUCCESS_STATUSES = frozenset({"success", "completed", "passed", "ok"})
+
+
 def _parse_timestamp(value: Any) -> datetime:
     if isinstance(value, str) and value:
         try:
@@ -228,6 +234,59 @@ def _tree(spans: list[dict[str, Any]]) -> list[dict[str, Any]]:
     return roots
 
 
+def _annotate_recovered_attempts(roots: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Link failed history attempts to a later success for the same operation."""
+    grouped: dict[tuple[str, str], list[dict[str, Any]]] = defaultdict(list)
+
+    def visit(node: dict[str, Any]) -> None:
+        kind = str(node.get("kind") or "")
+        logical_key = str(node.get("logical_key") or "")
+        if kind and logical_key:
+            grouped[(kind, logical_key)].append(node)
+        for child in node.get("children") or []:
+            if isinstance(child, dict):
+                visit(child)
+
+    for root in roots:
+        visit(root)
+
+    for attempts in grouped.values():
+        attempts.sort(key=lambda item: (
+            _parse_timestamp(item.get("started_at")),
+            str(item.get("span_id") or ""),
+        ))
+        next_success: dict[str, Any] | None = None
+        for attempt in reversed(attempts):
+            status = str(attempt.get("status") or "").lower()
+            if status in _SUCCESS_STATUSES:
+                next_success = attempt
+                continue
+            if status not in _FAILURE_STATUSES or next_success is None:
+                continue
+            attempt_started = _parse_timestamp(attempt.get("started_at"))
+            success_started = _parse_timestamp(next_success.get("started_at"))
+            if success_started <= attempt_started:
+                continue
+            attempt["recovery"] = {
+                "status": "recovered",
+                "by_span_id": next_success.get("span_id"),
+                "by_started_at": next_success.get("started_at"),
+                "by_finished_at": next_success.get("finished_at"),
+            }
+            next_success.setdefault("recovered_attempts", []).append({
+                "span_id": attempt.get("span_id"),
+                "status": attempt.get("status"),
+                "started_at": attempt.get("started_at"),
+            })
+
+    for attempts in grouped.values():
+        for attempt in attempts:
+            recovered = attempt.get("recovered_attempts")
+            if isinstance(recovered, list):
+                recovered.sort(key=lambda item: _parse_timestamp(item.get("started_at")))
+    return roots
+
+
 def _virtual_call_roots(spans: list[dict[str, Any]]) -> list[dict[str, Any]]:
     grouped: dict[tuple[str, str], list[dict[str, Any]]] = defaultdict(list)
     retained: list[dict[str, Any]] = []
@@ -419,6 +478,8 @@ def _attach_workflow_helpers(roots: list[dict[str, Any]]) -> list[dict[str, Any]
     helper_owners = {
         "script-summary-skeleton": "decoder-build-skeleton",
         "script-generate-viz": "decoder-build-data-flow",
+        "script-plan": "decoder-plan",
+        "script-feature-construct": "decoder-feature-construct",
     }
     retained: list[dict[str, Any]] = []
     helpers: list[dict[str, Any]] = []
@@ -513,9 +574,11 @@ def collect_run_history(
         if not record.get("call_id") or str(record.get("call_id")) not in represented_calls
     ]
     spans = _virtual_rpg_edit_roots([*v2, *legacy_runs, *legacy_hooks, *legacy_mcp])
-    roots = _rollup_hook_workflows(
-        _attach_workflow_helpers(
-            _collapse_script_wrappers(_tree(_virtual_call_roots(spans)))
+    roots = _annotate_recovered_attempts(
+        _rollup_hook_workflows(
+            _attach_workflow_helpers(
+                _collapse_script_wrappers(_tree(_virtual_call_roots(spans)))
+            )
         )
     )
     activity_root = logs_dir / "activity"
