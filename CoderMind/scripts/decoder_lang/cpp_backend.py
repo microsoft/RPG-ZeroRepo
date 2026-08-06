@@ -21,7 +21,8 @@ _PLACEHOLDER_RE = re.compile(
     r"(?is)\b(?:TODO|PLACEHOLDER|NOT IMPLEMENTED|throw\s+std::logic_error|abort\s*\()"
 )
 _COMPILE_ONLY_COMMAND_RE = re.compile(
-    r"(?m)^\s*\S*(?:c\+\+|g\+\+|clang\+\+)(?:-[\w.]+)?(?=\s).*\s-c\s"
+    r"(?m)^\s*\S*(?:c\+\+|g\+\+|clang\+\+)(?:-[\w.]+)?(?=\s).*"
+    r"\s(?:-c|-fsyntax-only)(?:\s|$)"
 )
 _TEST_EXECUTION_RE = re.compile(
     r"(?im)(^|\s)(?:PASS|FAIL)(?:\s|:)|^\s*ok\b|^\s*1\.\.|"
@@ -232,14 +233,21 @@ class CppBackend:
             long_message=raw,
         )]
         fail_match = re.search(r"(\d+)\s+tests?\s+failed", raw)
+        failed_count = (
+            int(fail_match.group(1)) if fail_match
+            else (1 if status == "failed" else 0)
+        )
+        passed_count = 0
+        if status == "passed":
+            if observed is not None:
+                passed_count = max(observed - failed_count, 0)
+            elif _TEST_EXECUTION_RE.search(raw):
+                passed_count = 1
         return TestRunResult(
             status=status,
             exit_code=exit_code,
-            passed_count=0,
-            failed_count=(
-                int(fail_match.group(1)) if fail_match
-                else (1 if status == "failed" else 0)
-            ),
+            passed_count=passed_count,
+            failed_count=failed_count,
             error_count=0,
             skipped_count=0,
             duration_sec=0.0,

@@ -56,6 +56,7 @@ _ARTIFACT_SPECS = (
     ("rpg_json", "data", "rpg.json"),
     ("tasks", "data", "tasks.json"),
     ("code_gen_state", "data", "code_gen_state.jsonl"),
+    ("codegen_final_test", "logs", "codegen_final_test.json"),
     ("rpg_edit_plan", "data", "rpg_edit_plan.json"),
     ("rpg_edit_impact", "data", "rpg_edit_impact.json"),
     ("rpg_edit_validate", "data", "rpg_edit_validate.json"),
@@ -712,6 +713,7 @@ def collect_workspace_verification(
     pipeline: list[dict[str, Any]],
     rpg: dict[str, Any],
     tasks: dict[str, Any],
+    codegen_final_test: dict[str, Any],
 ) -> dict[str, Any]:
     """Summarize current workspace readiness separately from historical runs."""
     checks: list[dict[str, Any]] = []
@@ -748,6 +750,21 @@ def collect_workspace_verification(
                 "pending": tasks.get("pending"),
             },
             "source": "code_gen_state.jsonl",
+            "quality": "reported",
+        })
+    if codegen_final_test:
+        checks.append({
+            "name": "code_gen final test",
+            "status": "completed" if codegen_final_test.get("success") is True else "failed",
+            "detail": {
+                key: codegen_final_test.get(key)
+                for key in (
+                    "passed", "failed", "errors", "no_tests_executed",
+                    "toolchain_unavailable",
+                )
+                if codegen_final_test.get(key) is not None
+            },
+            "source": "codegen_final_test.json",
             "quality": "reported",
         })
 
@@ -855,7 +872,7 @@ def collect_workspace(sources: DashboardSources) -> tuple[dict[str, Any], dict[s
         tool_version = None
 
     workspace = {
-        "name": sources.workspace_root.name,
+        "name": os.environ.get("CMIND_REPO_NAME", "").strip() or sources.workspace_root.name,
         "path": str(sources.workspace_root),
         "tool_version": tool_version,
         "git": {
@@ -1039,11 +1056,72 @@ def collect_artifacts(sources: DashboardSources) -> list[dict[str, Any]]:
 def _latest_stage_by_name(runs: list[dict[str, Any]]) -> dict[str, tuple[dict[str, Any], str]]:
     latest: dict[str, tuple[dict[str, Any], str]] = {}
     for run in runs:
-        for stage in run.get("stages", []):
+        stages = run.get("stages", [])
+        for stage in stages:
             name = stage.get("name")
             if name and name not in latest:
                 latest[str(name)] = (stage, str(run.get("run_id") or ""))
+        command = run.get("command")
+        has_unfinished_stage = any(
+            stage.get("status") in {"not_started", "pending", "running", "in_progress", "unknown"}
+            for stage in stages
+        )
+        if command and command not in latest and not has_unfinished_stage:
+            latest[str(command)] = ({
+                "name": command,
+                "status": run.get("display_status") or run.get("status") or "unknown",
+                "duration_s": run.get("duration_s"),
+                "attempt": run.get("attempt"),
+                "error": run.get("error"),
+            }, str(run.get("run_id") or ""))
     return latest
+
+
+def _codegen_final_test_passed(sources: DashboardSources) -> bool:
+    state_path = sources.data_dir / "code_gen_state.jsonl"
+    result_path = sources.logs_dir / "codegen_final_test.json"
+    try:
+        state_lines = [
+            line for line in state_path.read_text(encoding="utf-8").splitlines()
+            if line.strip()
+        ]
+        state = json.loads(state_lines[-1])
+        result = json.loads(result_path.read_text(encoding="utf-8"))
+    except (OSError, IndexError, json.JSONDecodeError):
+        return False
+    if not isinstance(state, dict) or not isinstance(result, dict):
+        return False
+    total = int(state.get("total_tasks") or 0)
+    completed = int(state.get("completed_tasks") or 0)
+    failed = int(state.get("failed_tasks") or 0)
+    return total > 0 and completed >= total and failed == 0 and result.get("success") is True
+
+
+def _load_codegen_final_test(sources: DashboardSources) -> dict[str, Any]:
+    try:
+        result = json.loads(
+            (sources.logs_dir / "codegen_final_test.json").read_text(encoding="utf-8")
+        )
+    except (OSError, json.JSONDecodeError):
+        return {}
+    return result if isinstance(result, dict) else {}
+
+
+def _codegen_duration_s(sources: DashboardSources) -> float | None:
+    state_path = sources.data_dir / "code_gen_state.jsonl"
+    try:
+        states = [
+            json.loads(line)
+            for line in state_path.read_text(encoding="utf-8").splitlines()
+            if line.strip()
+        ]
+        state = states[-1]
+        started = datetime.fromisoformat(str(state["started_at"]).replace("Z", "+00:00"))
+        updated = datetime.fromisoformat(str(state["last_updated"]).replace("Z", "+00:00"))
+    except (OSError, IndexError, KeyError, TypeError, ValueError, json.JSONDecodeError):
+        return None
+    duration = (updated - started).total_seconds()
+    return duration if duration >= 0 else None
 
 
 def collect_pipeline(
@@ -1057,6 +1135,8 @@ def collect_pipeline(
     mode = "decoder" if decoder_present else "encoder" if rpg_data or runs else "unknown"
     specs = _DECODER_PIPELINE if mode == "decoder" else _ENCODER_PIPELINE
     latest_stages = _latest_stage_by_name(runs)
+    codegen_final_test_passed = _codegen_final_test_passed(sources)
+    codegen_duration_s = _codegen_duration_s(sources)
     pipeline: list[dict[str, Any]] = []
 
     for sequence, (step_id, label, artifact_label) in enumerate(specs, start=1):
@@ -1074,14 +1154,38 @@ def collect_pipeline(
             else:
                 status = "completed" if raw_status == "success" else raw_status
                 quality = "measured"
+            duration_s = stage.get("duration_s")
+            if step_id == "code_gen" and duration_s is None:
+                duration_s = codegen_duration_s
+            attempt = stage.get("attempt")
+            error = stage.get("error")
+            if (
+                step_id == "code_gen"
+                and codegen_final_test_passed
+                and raw_status in {
+                    "not_started", "pending", "running", "in_progress", "unknown",
+                    "interrupted",
+                }
+            ):
+                status = "completed"
+                quality = "measured"
+                error = None
         else:
             run_id = None
+            duration_s = None
+            if step_id == "code_gen":
+                duration_s = codegen_duration_s
+            attempt = None
+            error = None
             if step_id == "dep_graph" and mode == "encoder":
                 exists = isinstance(rpg_data.get("dep_graph"), dict)
             else:
                 exists = artifact.get("status") == "available"
             status = "completed" if exists else "not_started"
             quality = "inferred"
+            if step_id == "code_gen" and codegen_final_test_passed:
+                status = "completed"
+                quality = "measured"
         pipeline.append({
             "id": step_id,
             "label": label,
@@ -1090,6 +1194,9 @@ def collect_pipeline(
             "quality": quality,
             "run_id": run_id,
             "artifact": artifact_label,
+            "duration_s": duration_s,
+            "attempt": attempt,
+            "error": error,
         })
     return mode, pipeline
 
@@ -1611,7 +1718,9 @@ def build_dashboard_snapshot(
     automation = collect_automation_activity(history)
     for run in runs:
         run["verification"], run["next_actions"] = collect_run_verification(run)
-    verification = collect_workspace_verification(pipeline, rpg, tasks)
+    verification = collect_workspace_verification(
+        pipeline, rpg, tasks, _load_codegen_final_test(sources),
+    )
     if current_run and current_run.get("display_status") in {
         "failed", "interrupted", "cancelled", "timed_out", "completed_with_warnings",
     }:

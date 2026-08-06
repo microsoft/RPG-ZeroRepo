@@ -96,6 +96,14 @@ def test_writes_complete_static_report(tmp_path: Path) -> None:
     assert "Pipeline readiness and stage evidence" in report_js
     assert "no evidence" in report_js
     assert "Data coverage" in report_js
+    assert "duration = pipe.duration_s" in report_js
+    assert '["status", pill(r.status, stageDisplayStatus(r))]' in report_js
+    assert 'r.attempt != null ? r.attempt : "—"' in report_js
+    assert 'ws.name || (R.rpg && R.rpg.repo_name)' in report_js
+    assert '"code generation tasks", "code_gen final test"' in report_js
+    assert ".history-row{grid-template-columns:18px minmax(0,1fr) auto 14px" in outputs.report_css.read_text(encoding="utf-8")
+    assert ".drawer table.kv td:last-child{overflow-wrap:anywhere;word-break:break-word}" in outputs.report_css.read_text(encoding="utf-8")
+    assert ".drawer table.kv td:first-child{width:140px;white-space:normal;overflow-wrap:anywhere}" in outputs.report_css.read_text(encoding="utf-8")
     assert "artifact present" in report_js
     assert 'data-pipeline-jump="' in report_js
     assert 'id="pipeline-' in report_js
@@ -134,7 +142,10 @@ def test_writes_complete_static_report(tmp_path: Path) -> None:
     assert "old12345" in rpg_html
     assert "Current Changes" in rpg_html
     assert "@media (max-width: 600px)" in rpg_html
-    assert "#search { width: 62px; min-width: 62px" in rpg_html
+    assert "#header { height: 136px; padding: 6px; gap: 4px; }" in rpg_html
+    assert "#search { width: 94px; min-width: 94px" in rpg_html
+    assert "#changes-panel { top: 136px; width: min(300px, 82vw); }" in rpg_html
+    assert "tab === 'feat' ? 'inline-flex' : 'none'" in rpg_html
     assert "'arrow-rel-' + relation" in rpg_html
     assert "drawn relations" in rpg_html
     assert "Directed relations" in rpg_html
@@ -153,6 +164,11 @@ def test_writes_complete_static_report(tmp_path: Path) -> None:
     assert ".change-graph-link.focus-related" in rpg_html
     assert ".change-graph-link.focus-dim" in rpg_html
     assert ".change-graph-node.focus-neighbor" in rpg_html
+    assert ".node .node-label { pointer-events: visiblePainted; cursor: pointer; }" in rpg_html
+    assert "function featApplySelectionHighlight()" in rpg_html
+    assert "const sameFeatureFocus = scope === 'feature'" in rpg_html
+    assert ".classed('feat-related'" in rpg_html
+    assert ".classed('feat-dim'" in rpg_html
     assert ".change-graph-node.focus-dim" in rpg_html
     assert "const sameDependencyFocus" in rpg_html
     assert "click.change-deselect" in rpg_html

@@ -113,6 +113,29 @@ class CBackendTests(unittest.TestCase):
 
         self.assertEqual(result.status, "errored")
 
+    def test_make_test_syntax_only_output_is_not_pass(self) -> None:
+        raw = "cc -I. -std=c99 -Wall -Wextra -fsyntax-only src/main.c tests/test_task.c\n"
+
+        result = self.backend.parse_test_output(raw, 0)
+
+        self.assertEqual(result.status, "errored")
+
+    def test_executed_test_binary_reports_one_pass_when_count_unknown(self) -> None:
+        result = self.backend.parse_test_output(
+            "./build/tasklite_tests\nall tests passed\n", 0,
+        )
+
+        self.assertEqual(result.status, "passed")
+        self.assertEqual(result.passed_count, 1)
+
+    def test_ctest_reports_observed_pass_count(self) -> None:
+        result = self.backend.parse_test_output(
+            "100% tests passed, 0 tests failed out of 19\n", 0,
+        )
+
+        self.assertEqual(result.status, "passed")
+        self.assertEqual(result.passed_count, 19)
+
     def test_make_test_nothing_to_do_is_not_pass(self) -> None:
         result = self.backend.parse_test_output("make: Nothing to be done for 'test'.\n", 0)
 
@@ -262,6 +285,29 @@ class CppBackendTests(unittest.TestCase):
         result = self.backend.parse_test_output(raw, 0)
 
         self.assertEqual(result.status, "errored")
+
+    def test_make_test_syntax_only_output_is_not_pass(self) -> None:
+        raw = "c++ -std=c++17 -fsyntax-only src/main.cpp tests/test_task.cpp\n"
+
+        result = self.backend.parse_test_output(raw, 0)
+
+        self.assertEqual(result.status, "errored")
+
+    def test_executed_test_binary_reports_one_pass_when_count_unknown(self) -> None:
+        result = self.backend.parse_test_output(
+            "./build/tasklite_tests\nall tests passed\n", 0,
+        )
+
+        self.assertEqual(result.status, "passed")
+        self.assertEqual(result.passed_count, 1)
+
+    def test_ctest_reports_observed_pass_count(self) -> None:
+        result = self.backend.parse_test_output(
+            "100% tests passed, 0 tests failed out of 19\n", 0,
+        )
+
+        self.assertEqual(result.status, "passed")
+        self.assertEqual(result.passed_count, 19)
 
     def test_make_test_nothing_to_do_is_not_pass(self) -> None:
         result = self.backend.parse_test_output("make: Nothing to be done for 'test'.\n", 0)

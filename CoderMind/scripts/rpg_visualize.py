@@ -338,9 +338,22 @@ svg {{ width: 100vw; height: 100vh; }}
 #canvas {{ cursor: grab; }}
 #canvas:active {{ cursor: grabbing; }}
 
-.link {{ fill: none; stroke: #21262d; stroke-width: 1; }}
+.link {{ fill: none; stroke: #21262d; stroke-width: 1; transition: opacity .14s, stroke-width .14s, stroke .14s; }}
+.link.feat-related {{ stroke: #58a6ff; stroke-width: 2.4; opacity: .95; }}
+.link.feat-dim {{ opacity: .08; }}
+.semantic-edge {{ transition: stroke-opacity .14s, stroke-width .14s; }}
+.semantic-edge.feat-related {{ stroke-opacity: .98 !important; stroke-width: 2.8 !important; }}
+.semantic-edge.feat-dim {{ stroke-opacity: .06 !important; }}
+.node {{ transition: opacity .14s; }}
 .node circle {{ stroke: #30363d; stroke-width: 1.5; cursor: pointer; }}
 .node text {{ font-size: 13px; fill: #c9d1d9; pointer-events: none; }}
+.node .node-label {{ pointer-events: visiblePainted; cursor: pointer; }}
+.node.feat-selected > .node-dot {{ stroke: #f0883e !important; stroke-width: 3.5 !important; filter: drop-shadow(0 0 5px rgba(240,136,62,.75)); }}
+.node.feat-selected > .node-label {{ fill: #fff; font-weight: 800; }}
+.node.feat-related {{ opacity: 1; }}
+.node.feat-related > .node-dot {{ stroke: #58a6ff; stroke-width: 2.5; }}
+.node.feat-related > .node-label {{ fill: #e6edf3; font-weight: 650; }}
+.node.feat-dim {{ opacity: .18; }}
 .node-collapsed circle {{ fill: #1f6feb !important; }}
 
 .edge-imports {{ stroke: #f0883e; stroke-opacity: 0.5; }}
@@ -467,10 +480,25 @@ g.change-modified > .change-status-glyph {{ fill: #1f2937 !important; }}
 #controls button {{ padding: 3px 7px; white-space: nowrap; }}
 #search {{ width: 120px; min-width: 80px; }}
 @media (max-width: 600px) {{
-  #controls {{ right: 6px; max-width: calc(100vw - 12px); gap: 2px; }}
+  #header {{ height: 136px; padding: 6px; gap: 4px; }}
+  #header-row1 {{ grid-template-columns: minmax(0,1fr); gap: 4px; min-height: 55px; }}
+  #header-row1 h1 {{ overflow: hidden; text-overflow: ellipsis; }}
+  #tabs {{ width: 100%; }}
+  #tabs button {{ flex: 1; padding: 3px 5px; }}
+  #stats-feat, #stats-dep, #stats-map {{ display: none !important; }}
+  #header-row2 {{ min-height: 30px; padding: 3px 0 0; gap: 6px; padding-right: 0; }}
+  #header-row2 .hdr-group {{ min-width: 0; width: 100%; }}
+  #mode-seg {{ flex: 1; }}
+  #mode-seg button {{ flex: 1; padding: 4px 6px; }}
+  #controls {{ top: 101px; left: 6px; right: 6px; width: auto; max-width: none; height: 29px;
+    gap: 2px; overflow-x: auto; overflow-y: hidden; scrollbar-width: none; }}
+  #controls::-webkit-scrollbar {{ display: none; }}
   #controls > span {{ gap: 2px; }}
   #controls button {{ padding: 3px; font-size: 11px; }}
-  #search {{ width: 62px; min-width: 62px; padding: 4px 5px; }}
+  #search {{ width: 94px; min-width: 94px; padding: 4px 5px; }}
+  #changes-panel {{ top: 136px; width: min(300px, 82vw); }}
+  #canvas-overlay {{ top: 146px; }}
+  #d3-offline {{ inset: 136px 0 0; }}
 }}
 .hdr-group {{ display: flex; align-items: center; gap: 8px; }}
 .hdr-label {{ color: #6e7681; font-size: 10px; text-transform: uppercase; letter-spacing: .06em; }}
@@ -626,6 +654,8 @@ body.cp-open #canvas-overlay {{ left: 12px; }}
 :root[data-theme="light"] .dep-node text,
 :root[data-theme="light"] .map-feat-node text,
 :root[data-theme="light"] .map-dep-node text {{ fill: #334155 !important; }}
+:root[data-theme="light"] .node.feat-selected > .node-label {{ fill: #1d4ed8 !important; paint-order: stroke; stroke: #fff; stroke-width: 3px; }}
+:root[data-theme="light"] .node.feat-related > .node-label {{ fill: #0f172a !important; font-weight: 700; }}
 :root[data-theme="light"] .change-graph-node .node-label {{ fill: #263548 !important; stroke: #f6f8fb !important; stroke-width: 4px; font-weight: 650; }}
 :root[data-theme="light"] .change-graph-node circle {{ stroke: #64748b; }}
 :root[data-theme="light"] .edge-default,
@@ -665,6 +695,11 @@ body.cp-open #canvas-overlay {{ left: 12px; }}
 :root[data-theme="light"] #d3-offline strong {{ color: #1f2937; }}
 :root[data-theme="light"] #d3-offline p {{ color: #475569; }}
 :root[data-theme="light"] #d3-offline code {{ color: #1d4ed8; }}
+@media (max-width: 600px) {{
+  #changes-panel {{ top: 136px; width: min(300px, 82vw); }}
+  #canvas-overlay {{ top: 146px; }}
+  #d3-offline {{ inset: 136px 0 0; }}
+}}
 </style>
 </head>
 <body>
@@ -894,7 +929,7 @@ const zoomChange = d3.zoom().scaleExtent([0.08, 5]).on('zoom', e => gChange.attr
 let changeSimulation = null;
 const gRemovedRail = svg.append('g').attr('class', 'removed-rail').style('display', 'none');
 
-let featSelectedNode = null;
+let featSelectedNodeId = null;
 const root = d3.hierarchy(treeData, d => d.children);
 root.descendants().forEach(d => {{
   if (d.depth >= 1 && d.children) {{
@@ -911,6 +946,38 @@ function getNodeColor(d) {{
   return nodeTypeColors[tn] || nodeTypeColors.default;
 }}
 
+function featSelectionState() {{
+  const selectedId = featSelectedNodeId == null ? null : String(featSelectedNodeId);
+  const relatedIds = new Set();
+  if (!selectedId) return {{selectedId, relatedIds}};
+  const selected = nodeById[selectedId];
+  if (selected) {{
+    if (selected.parent) relatedIds.add(String(selected.parent.data.id));
+    [...(selected.children || []), ...(selected._children || [])].forEach(child => relatedIds.add(String(child.data.id)));
+  }}
+  semanticEdges.forEach(edge => {{
+    const sourceId = String(edge.src), targetId = String(edge.dst);
+    if (sourceId === selectedId) relatedIds.add(targetId);
+    if (targetId === selectedId) relatedIds.add(sourceId);
+  }});
+  relatedIds.delete(selectedId);
+  return {{selectedId, relatedIds}};
+}}
+
+function featApplySelectionHighlight() {{
+  const {{selectedId, relatedIds}} = featSelectionState();
+  nodeLayer.selectAll('g.node')
+    .classed('feat-selected', node => !!selectedId && String(node.data.id) === selectedId)
+    .classed('feat-related', node => !!selectedId && relatedIds.has(String(node.data.id)))
+    .classed('feat-dim', node => !!selectedId && String(node.data.id) !== selectedId && !relatedIds.has(String(node.data.id)));
+  linkLayer.selectAll('path.link')
+    .classed('feat-related', edge => !!selectedId && (String(edge.source.data.id) === selectedId || String(edge.target.data.id) === selectedId))
+    .classed('feat-dim', edge => !!selectedId && String(edge.source.data.id) !== selectedId && String(edge.target.data.id) !== selectedId);
+  edgeLayer.selectAll('path.semantic-edge')
+    .classed('feat-related', edge => !!selectedId && (String(edge.src) === selectedId || String(edge.dst) === selectedId))
+    .classed('feat-dim', edge => !!selectedId && String(edge.src) !== selectedId && String(edge.dst) !== selectedId);
+}}
+
 function update(source) {{
   const treeDataLayout = treemap(root);
   const nodes = treeDataLayout.descendants();
@@ -919,6 +986,7 @@ function update(source) {{
 
   nodeById = {{}};
   nodes.forEach(d => {{ nodeById[d.data.id] = d; }});
+  if (featSelectedNodeId && !nodeById[String(featSelectedNodeId)]) featSelectedNodeId = null;
 
   const node = nodeLayer.selectAll('g.node').data(nodes, d => d.data.id);
   const nodeEnter = node.enter().append('g')
@@ -929,15 +997,9 @@ function update(source) {{
       const changeKind = externalKind(String(d.data.id), externalChanges.feature);
       if (changeKind) {{ focusChangeNode(String(d.data.id), 'feature'); return; }}
       // Single click: select/deselect node
-      const circle = d3.select(event.currentTarget).select('.node-dot');
-      if (featSelectedNode === d) {{
-        featSelectedNode = null;
-        nodeLayer.selectAll('.node-dot').attr('stroke-width', 1.5).attr('stroke', '#30363d');
-      }} else {{
-        featSelectedNode = d;
-        nodeLayer.selectAll('.node-dot').attr('stroke-width', 1.5).attr('stroke', '#30363d');
-        circle.attr('stroke', '#f0883e').attr('stroke-width', 2.5);
-      }}
+      const nodeId = String(d.data.id);
+      featSelectedNodeId = featSelectedNodeId === nodeId ? null : nodeId;
+      featApplySelectionHighlight();
     }})
     .on('dblclick', (event, d) => {{
       event.stopPropagation();
@@ -965,10 +1027,10 @@ function update(source) {{
 
   const nodeUpdate = nodeEnter.merge(node);
   const featureFocusId = externalChanges.focus?.scope === 'feature' ? String(externalChanges.focus.node_id) : null;
+  nodeUpdate.attr('class', d => 'node' + (d._children ? ' node-collapsed' : '')
+    + (featureFocusId === String(d.data.id) ? ' change-focused' : ''));
   nodeUpdate.transition().duration(300)
-    .attr('transform', d => `translate(${{d.y}},${{d.x}})`)
-    .attr('class', d => 'node' + (d._children ? ' node-collapsed' : '')
-      + (featureFocusId === String(d.data.id) ? ' change-focused' : ''));
+    .attr('transform', d => `translate(${{d.y}},${{d.x}})`);
   nodeUpdate.select('.node-dot')
     .attr('r', d => d._children ? 5 : (d.children ? 4 : 3))
     .attr('fill', getNodeColor);
@@ -998,6 +1060,7 @@ function update(source) {{
     }}).remove();
 
   drawSemanticEdges();
+  featApplySelectionHighlight();
   applyExternalChangeHighlights();
   if (externalChanges.active) setTimeout(applyExternalChangeHighlights, 350);
   nodes.forEach(d => {{ d.x0 = d.x; d.y0 = d.y; }});
@@ -1008,9 +1071,10 @@ function diagonal(s, d) {{
 }}
 
 // Click background to deselect feat node
-svg.on('click.feat-deselect', () => {{
-  featSelectedNode = null;
-  nodeLayer.selectAll('.node-dot').attr('stroke-width', 1.5).attr('stroke', '#30363d');
+svg.on('click.feat-deselect', event => {{
+  if (activeTab !== 'feat' || event.target !== svg.node()) return;
+  featSelectedNodeId = null;
+  featApplySelectionHighlight();
 }});
 
 function drawSemanticEdges() {{
@@ -1029,13 +1093,14 @@ function drawSemanticEdges() {{
     // so far-apart leaf edges bow out more and don't overlap nearby ones.
     const vertDist = Math.abs(sy - dy);
     const bulge = 60 + vertDist * 0.35;
-    edgeLayer.append('path')
+    edgeLayer.append('path').datum(e)
       .attr('class', 'semantic-edge ' + cls)
       .attr('d', `M${{sx}},${{sy}} Q${{Math.max(sx, dx) + bulge}},${{midY}} ${{dx}},${{dy}}`)
       .attr('fill', 'none')
       .attr('stroke-width', 1.2)
       .attr('marker-end', `url(#arrow-${{cls}})`);
   }});
+  featApplySelectionHighlight();
 }}
 
 function showTooltipFeat(event, d) {{
@@ -2208,9 +2273,9 @@ function switchTab(tab) {{
   document.getElementById('stats-feat').style.display = tab === 'feat' ? 'flex' : 'none';
   document.getElementById('stats-dep').style.display = tab === 'dep' ? 'flex' : 'none';
   document.getElementById('stats-map').style.display = tab === 'map' ? 'flex' : 'none';
-  document.getElementById('feat-controls').style.display = tab === 'feat' ? 'inline' : 'none';
-  document.getElementById('dep-controls').style.display = tab === 'dep' ? 'inline' : 'none';
-  document.getElementById('map-controls').style.display = tab === 'map' ? 'inline' : 'none';
+  document.getElementById('feat-controls').style.display = tab === 'feat' ? 'inline-flex' : 'none';
+  document.getElementById('dep-controls').style.display = tab === 'dep' ? 'inline-flex' : 'none';
+  document.getElementById('map-controls').style.display = tab === 'map' ? 'inline-flex' : 'none';
 
   gChange.style('display', 'none');
   document.getElementById('stats-feat').innerHTML = originalGraphUi.featStats;
@@ -2322,6 +2387,8 @@ function clearExternalChangeHighlights() {{
   [nodeLayer.selectAll('g.node'), depNodeG.selectAll('g.dep-node'), depHullG.selectAll('path.dep-hull'),
     depLabelG.selectAll('text.dep-hull-label'), mapFeatNodeLayer.selectAll('g.map-feat-node'), mapDepNodeLayer.selectAll('g.map-dep-node')]
     .forEach(selection => selection.classed('change-added', false).classed('change-modified', false).classed('change-dim', false));
+  featSelectedNodeId = null;
+  featApplySelectionHighlight();
   depSelectedNodes.clear();
   depUpdateEdgeVisibility();
   depUpdateNodeHighlight();
@@ -2556,7 +2623,9 @@ function focusChangeNode(id, scope) {{
   const kind = sets.added.has(String(id)) ? 'added' : sets.modified.has(String(id)) ? 'modified' : removedSet.has(String(id)) ? 'removed' : 'context';
   const sameDependencyFocus = scope === 'dependency' && activeTab === 'dep'
     && externalChanges.focus?.scope === 'dependency' && String(externalChanges.focus.node_id) === String(id);
-  externalChanges.focus = sameDependencyFocus ? null : {{scope, node_id: String(id), kind}};
+  const sameFeatureFocus = scope === 'feature' && activeTab === 'feat'
+    && externalChanges.focus?.scope === 'feature' && String(externalChanges.focus.node_id) === String(id);
+  externalChanges.focus = (sameDependencyFocus || sameFeatureFocus) ? null : {{scope, node_id: String(id), kind}};
   if (scope === 'dependency' && activeTab === 'dep') {{
     drawChangeGraph();
     if (typeof renderChangesPanel === 'function') renderChangesPanel();
@@ -2564,6 +2633,12 @@ function focusChangeNode(id, scope) {{
   }}
   clearGraphFocusVisuals();
   if (scope === 'feature' && activeTab === 'feat') {{
+    featSelectedNodeId = externalChanges.focus ? String(id) : null;
+    if (!externalChanges.focus) {{
+      update(root);
+      if (typeof renderChangesPanel === 'function') renderChangesPanel();
+      return;
+    }}
     if (kind === 'removed') {{
       drawFeatRemovedGhosts();
       const el = featGhostLayer.selectAll('.feat-ghost').filter(function() {{ return this.getAttribute('data-ghost-id') === String(id); }}).node();

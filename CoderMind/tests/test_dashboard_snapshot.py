@@ -200,6 +200,106 @@ def test_decoder_pipeline_and_code_gen_state(tmp_path):
     assert task_check["status"] == "failed"
 
 
+def test_codegen_final_test_closes_stale_running_pipeline_stage(tmp_path):
+    sources = _sources(tmp_path)
+    sources.workspace_root.mkdir(parents=True)
+    sources.data_dir.mkdir(parents=True)
+    sources.logs_dir.mkdir(parents=True)
+    (sources.data_dir / "code_gen_state.jsonl").write_text(json.dumps({
+        "total_tasks": 3,
+        "completed_tasks": 3,
+        "failed_tasks": 0,
+        "started_at": "2026-08-05T00:00:00Z",
+        "last_updated": "2026-08-05T00:02:30Z",
+    }) + "\n", encoding="utf-8")
+    (sources.logs_dir / "codegen_final_test.json").write_text(
+        '{"success": true, "passed": 12, "failed": 0, "errors": 0}\n',
+        encoding="utf-8",
+    )
+    _write_events(sources.run_events_file, [
+        {
+            "event_type": "run_started", "run_id": "run-1",
+            "command": "code_gen", "status": "running",
+            "started_at": "2026-08-05T00:00:00Z",
+        },
+        {
+            "event_type": "stage_started", "run_id": "run-1",
+            "command": "code_gen", "stage_id": "stage-1",
+            "stage": "code_gen", "status": "running",
+            "started_at": "2026-08-05T00:00:01Z",
+        },
+    ])
+
+    snapshot = build_dashboard_snapshot(sources)
+
+    codegen_step = next(step for step in snapshot["pipeline"] if step["id"] == "code_gen")
+    assert codegen_step["status"] == "completed"
+    assert codegen_step["quality"] == "measured"
+    assert codegen_step["error"] is None
+    assert codegen_step["duration_s"] == 150.0
+    final_check = next(
+        check for check in snapshot["verification"]["checks"]
+        if check["name"] == "code_gen final test"
+    )
+    assert final_check == {
+        "name": "code_gen final test",
+        "status": "completed",
+        "detail": {"passed": 12, "failed": 0, "errors": 0},
+        "source": "codegen_final_test.json",
+        "quality": "reported",
+    }
+    artifacts = {artifact["label"]: artifact for artifact in snapshot["artifacts"]}
+    assert artifacts["codegen_final_test"]["status"] == "available"
+
+
+def test_codegen_duration_remains_unknown_without_state_timestamps(tmp_path):
+    sources = _sources(tmp_path)
+    sources.workspace_root.mkdir(parents=True)
+    sources.data_dir.mkdir(parents=True)
+    (sources.data_dir / "code_gen_state.jsonl").write_text(json.dumps({
+        "total_tasks": 3,
+        "completed_tasks": 1,
+        "failed_tasks": 0,
+    }) + "\n", encoding="utf-8")
+
+    snapshot = build_dashboard_snapshot(sources)
+
+    codegen_step = next(step for step in snapshot["pipeline"] if step["id"] == "code_gen")
+    assert codegen_step["duration_s"] is None
+
+
+def test_codegen_tasks_without_final_test_remain_running(tmp_path):
+    sources = _sources(tmp_path)
+    sources.workspace_root.mkdir(parents=True)
+    sources.data_dir.mkdir(parents=True)
+    (sources.data_dir / "code_gen_state.jsonl").write_text(json.dumps({
+        "total_tasks": 3,
+        "completed_tasks": 3,
+        "failed_tasks": 0,
+    }) + "\n", encoding="utf-8")
+    _write_events(sources.run_events_file, [{
+        "event_type": "stage_started", "run_id": "run-1",
+        "command": "code_gen", "stage_id": "stage-1",
+        "stage": "code_gen", "status": "running",
+    }])
+
+    snapshot = build_dashboard_snapshot(sources)
+
+    codegen_step = next(step for step in snapshot["pipeline"] if step["id"] == "code_gen")
+    assert codegen_step["status"] == "running"
+    assert codegen_step["quality"] == "measured"
+
+
+def test_workspace_name_prefers_logical_repository_name(tmp_path, monkeypatch):
+    sources = _sources(tmp_path)
+    sources.workspace_root.mkdir(parents=True)
+    monkeypatch.setenv("CMIND_REPO_NAME", "todo-list-app")
+
+    snapshot = build_dashboard_snapshot(sources)
+
+    assert snapshot["workspace"]["name"] == "todo-list-app"
+
+
 def test_pipeline_uses_available_artifact_when_stage_is_stale_pending(tmp_path):
     sources = _sources(tmp_path)
     sources.workspace_root.mkdir(parents=True)
@@ -226,6 +326,27 @@ def test_pipeline_uses_available_artifact_when_stage_is_stale_pending(tmp_path):
     assert tasks_step["status"] == "completed"
     assert tasks_step["quality"] == "inferred"
     assert snapshot["verification"]["next_actions"][0]["command"] == "/cmind.code_gen"
+
+
+def test_pipeline_uses_parent_run_when_internal_stage_names_differ(tmp_path):
+    sources = _sources(tmp_path)
+    sources.workspace_root.mkdir(parents=True)
+    sources.data_dir.mkdir(parents=True)
+    (sources.data_dir / "skeleton.json").write_text("{}", encoding="utf-8")
+    _write_events(sources.run_events_file, [
+        {"event_type": "run_started", "run_id": "run-1", "command": "build_skeleton", "status": "running", "started_at": "2026-08-05T00:00:00Z"},
+        {"event_type": "stage_started", "run_id": "run-1", "command": "build_skeleton", "stage_id": "stage-1", "stage": "build_rpg", "status": "running", "started_at": "2026-08-05T00:00:01Z"},
+        {"event_type": "stage_finished", "run_id": "run-1", "command": "build_skeleton", "stage_id": "stage-1", "stage": "build_rpg", "status": "success", "finished_at": "2026-08-05T00:00:02Z"},
+        {"event_type": "run_finished", "run_id": "run-1", "command": "build_skeleton", "status": "success", "finished_at": "2026-08-05T00:00:03Z", "duration_s": 3.0},
+    ])
+
+    snapshot = build_dashboard_snapshot(sources)
+
+    skeleton_step = next(step for step in snapshot["pipeline"] if step["id"] == "build_skeleton")
+    assert skeleton_step["status"] == "completed"
+    assert skeleton_step["quality"] == "measured"
+    assert skeleton_step["run_id"] == "run-1"
+    assert skeleton_step["duration_s"] == 3.0
 
 
 def test_collects_mcp_and_hook_automation_separately_from_pipeline() -> None:

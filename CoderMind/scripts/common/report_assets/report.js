@@ -101,6 +101,7 @@
       attempt = run.stage.attempt; error = run.stage.error;
     } else if (pipe) {
       status = pipe.status; quality = pipe.quality || "inferred"; runId = pipe.run_id;
+      duration = pipe.duration_s; attempt = pipe.attempt; error = pipe.error;
     }
     return { id: stageId, status: status, kind: statusKind(status), quality: quality, duration_s: duration, run_id: runId, attempt: attempt, error: error };
   }
@@ -153,13 +154,18 @@
     if (run) {
       var rr = (R.runs || []).filter(function (x) { return x.run_id === run.run_id; })[0] || {};
       checks = (rr.verification || []).filter(function (c) { return c.name === stageId || c.name === label; });
+    } else {
+      checks = ((R.verification && R.verification.checks) || []).filter(function (c) {
+        return c.name === stageId || c.name === label ||
+          (stageId === "code_gen" && ["code generation tasks", "code_gen final test"].indexOf(c.name) >= 0);
+      });
     }
     var body = '<div class="drawer-section">' + kvTable([
-      ["status", pill(r.status)],
+      ["status", pill(r.status, stageDisplayStatus(r))],
       ["pipeline", CATALOG[pipelineKey].label],
       ["duration", fmtDur(r.duration_s)],
       ["evidence", qBadge(stageEvidence(r)) || "—"],
-      ["attempt", r.attempt || (r.kind === "pending" ? "—" : 1)],
+      ["attempt", r.attempt != null ? r.attempt : "—"],
       ["run", r.run_id ? '<span class="mono">' + esc(r.run_id) + "</span>" : "—"],
       ["error", r.error ? esc(typeof r.error === "object" ? (r.error.message || JSON.stringify(r.error)) : r.error) : "—"]
     ]) + "</div>";
@@ -220,7 +226,7 @@
     var ws = R.workspace || {}, cur = R.current_state || {}, git = ws.git || {};
     var latestAutomation = (R.automation && R.automation.latest) || {};
     var displayedStatus = (R.runs || []).length ? cur.status : (latestAutomation.status || cur.status);
-    $("#brandRepo").textContent = (R.rpg && R.rpg.repo_name) || ws.name || "CoderMind";
+    $("#brandRepo").textContent = ws.name || (R.rpg && R.rpg.repo_name) || "CoderMind";
     $("#brandMeta").textContent = "run report · " + (ws.tool_version ? "v" + ws.tool_version : "");
     var modeEl = $("#modePill");
     modeEl.textContent = activeMode;

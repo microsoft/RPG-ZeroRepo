@@ -217,6 +217,15 @@ class TestCheckEncode:
 # ============================================================================
 
 class TestRunEncode:
+    def test_repo_name_precedence(self, monkeypatch):
+        from rpg_encoder.run_encode import _resolve_repo_name
+
+        monkeypatch.setenv("CMIND_REPO_NAME", "logical-project")
+        assert _resolve_repo_name("/tmp/workdir") == "logical-project"
+        assert _resolve_repo_name("/tmp/workdir", "explicit-project") == "explicit-project"
+        monkeypatch.delenv("CMIND_REPO_NAME")
+        assert _resolve_repo_name("/tmp/workdir") == "workdir"
+
     def test_missing_repo_dir(self):
         """Should return error when repo dir doesn't exist."""
         from rpg_encoder.run_encode import run_encode

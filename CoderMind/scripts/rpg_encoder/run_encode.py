@@ -31,6 +31,16 @@ from common.run_events import record_run, record_stage  # noqa: E402
 from common.trajectory import Trajectory  # noqa: E402
 
 
+def _resolve_repo_name(repo_dir: str, repo_name: str | None = None) -> str:
+    """Resolve explicit, environment-provided, then directory repository names."""
+    return (
+        (repo_name or "").strip()
+        or os.environ.get("CMIND_REPO_NAME", "").strip()
+        or os.path.basename(repo_dir)
+        or "unknown"
+    )
+
+
 def _run_encode(
     repo_dir: str | None = None,
     repo_name: str | None = None,
@@ -59,8 +69,7 @@ def _run_encode(
     if not os.path.isdir(repo_dir):
         return {"status": "error", "error": f"Repository directory not found: {repo_dir}"}
 
-    if repo_name is None:
-        repo_name = os.path.basename(repo_dir) or "unknown"
+    repo_name = _resolve_repo_name(repo_dir, repo_name)
 
     if output is None:
         output = str(RPG_FILE)
