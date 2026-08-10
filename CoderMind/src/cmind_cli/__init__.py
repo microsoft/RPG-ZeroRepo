@@ -4647,6 +4647,18 @@ def update(
             )
 
 
+def _is_read_only_script(path: Path, args: List[str]) -> bool:
+    return (
+        path.stem.startswith("check_")
+        or path.stem.endswith("_validation")
+        or path.stem == "rpg_version"
+        or (
+            path.name in {"plan.py", "feature_construct.py"}
+            and "--check-only" in args
+        )
+    )
+
+
 @app.command(
     context_settings={
         "allow_extra_args": True,
@@ -4739,11 +4751,7 @@ def script(
             log_path = logs_dir / f"{script_stem}.log"
 
     activity_context = None
-    read_only_script = (
-        path.stem.startswith("check_")
-        or path.stem.endswith("_validation")
-        or path.stem == "rpg_version"
-    )
+    read_only_script = _is_read_only_script(path, list(ctx.args))
     if ws_root is not None and path.name != "generate_dashboard_snapshot.py" and not read_only_script:
         scripts_dir = str(_assets.scripts_dir())
         if scripts_dir not in sys.path:
@@ -4881,7 +4889,7 @@ def script(
     # produce identical history entries.
     from . import _inner_git, _assets
     ws_root = _inner_git.find_workspace_root()
-    if ws_root is not None:
+    if ws_root is not None and not read_only_script:
         try:
             commit_relpath = str(path.relative_to(_assets.scripts_dir())).replace("\\", "/")
         except ValueError:
@@ -4896,7 +4904,12 @@ def script(
     # Keep the workspace report current after each successful pipeline script.
     # Invoke the generator directly (not through ``cmind script``) to avoid
     # recursion and preserve the original command's exit status on report errors.
-    if proc.returncode == 0 and ws_root is not None and path.name != "generate_dashboard_snapshot.py":
+    if (
+        proc.returncode == 0
+        and ws_root is not None
+        and path.name != "generate_dashboard_snapshot.py"
+        and not read_only_script
+    ):
         generator = _resolve_script_path("generate_dashboard_snapshot.py")
         if generator is not None:
             try:

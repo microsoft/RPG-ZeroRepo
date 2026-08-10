@@ -13,6 +13,7 @@ Key components:
 import json
 import logging
 import ast
+import hashlib
 import re
 from typing import Dict, List, Optional, Tuple, Any, Set, Iterator
 from collections import defaultdict, deque
@@ -46,6 +47,8 @@ from .interface_prompts import (
     SUBTREE_INTERFACE_PROMPT,
 )
 from common.import_normalizer import build_import_convention_snippet
+from common.json_io import atomic_write_json
+from common.progress import update_progress
 
 
 # ============================================================================
@@ -2145,6 +2148,7 @@ class InterfaceOrchestrator:
         self.step_id = step_id
         self.output_path = output_path
         self.backend = get_backend(target_language)
+        self._resume_fingerprint: Optional[str] = None
     
     def design_all_interfaces(
         self,
@@ -2175,6 +2179,12 @@ class InterfaceOrchestrator:
         # If no subtree order, extract from skeleton
         if not subtree_order:
             subtree_order = self._extract_subtree_names(skeleton)
+        self._resume_fingerprint = self._input_fingerprint(
+            skeleton,
+            data_flow,
+            base_classes,
+            data_structures or [],
+        )
         
         self.logger.info(f"[InterfaceOrchestrator] Processing {len(subtree_order)} subtrees")
         self.logger.info(f"[InterfaceOrchestrator] Subtree order: {subtree_order}")
@@ -2234,6 +2244,13 @@ class InterfaceOrchestrator:
                 )
                 continue
             self.logger.info(f"[InterfaceOrchestrator] Processing subtree: {subtree_name}")
+            update_progress(
+                activity="design_interfaces",
+                current_subtree=subtree_name,
+                subtree_index=subtree_index,
+                subtree_total=len(subtree_order),
+                completed_subtrees=len(all_interfaces),
+            )
             
             # Find files for this subtree
             file_nodes = self._find_files_for_subtree(skeleton, subtree_name)
@@ -2387,6 +2404,13 @@ class InterfaceOrchestrator:
                 ),
                 partial=True,
             )
+            update_progress(
+                activity="interface_checkpoint",
+                current_subtree=subtree_name,
+                subtree_index=subtree_index,
+                subtree_total=len(subtree_order),
+                completed_subtrees=len(all_interfaces),
+            )
             self._print_coverage_progress(
                 coverage_status,
                 len(all_interfaces),
@@ -2429,6 +2453,7 @@ class InterfaceOrchestrator:
             "meta": {
                 "primary_language": self.backend.name,
                 "target_languages": [self.backend.name],
+                "input_fingerprint": self._resume_fingerprint,
             },
             "subtrees": all_interfaces,
             "subtree_order": subtree_order,
@@ -2527,6 +2552,29 @@ class InterfaceOrchestrator:
             return None
         return Path(f"{self.output_path}.partial")
 
+    def _input_fingerprint(
+        self,
+        skeleton: Dict[str, Any],
+        data_flow: Dict[str, Any],
+        base_classes: List[Dict[str, Any]],
+        data_structures: List[Dict[str, Any]],
+    ) -> str:
+        payload = {
+            "version": 1,
+            "target_language": self.backend.name,
+            "skeleton": skeleton,
+            "data_flow": data_flow,
+            "base_classes": base_classes,
+            "data_structures": data_structures,
+        }
+        encoded = json.dumps(
+            payload,
+            sort_keys=True,
+            separators=(",", ":"),
+            ensure_ascii=False,
+        ).encode("utf-8")
+        return hashlib.sha256(encoded).hexdigest()
+
     def _save_interfaces(self, result: Dict[str, Any], partial: bool = False) -> None:
         """Save current interfaces result to output_path (if configured).
         
@@ -2545,15 +2593,26 @@ class InterfaceOrchestrator:
                 k: v for k, v in result.items()
                 if not k.startswith("_")
             }
-            with open(output, "w", encoding="utf-8") as f:
-                json.dump(serializable, f, indent=2, ensure_ascii=False)
+            if partial and self._resume_fingerprint:
+                serializable["_resume"] = {
+                    "version": 1,
+                    "input_fingerprint": self._resume_fingerprint,
+                    "completed_subtrees": list(result.get("subtrees", {})),
+                }
+            atomic_write_json(output, serializable)
             self.logger.info(f"[InterfaceOrchestrator] Saved interfaces to {output}")
             if not partial:
                 partial_path = self._partial_output_path()
                 if partial_path and partial_path.exists():
                     partial_path.unlink()
         except Exception as e:
-            self.logger.warning(f"[InterfaceOrchestrator] Failed to save interfaces: {e}")
+            update_progress(
+                activity="interface_checkpoint_failed",
+                checkpoint_status="failed",
+                checkpoint_error=type(e).__name__,
+            )
+            self.logger.error(f"[InterfaceOrchestrator] Failed to save interfaces: {e}")
+            raise RuntimeError(f"failed to save interface checkpoint: {e}") from e
 
     @staticmethod
     def _subtree_feature_count(file_nodes: List[Dict[str, Any]]) -> int:
@@ -2589,18 +2648,34 @@ class InterfaceOrchestrator:
         if partial_path is not None:
             candidates.append(partial_path)
         candidates.append(Path(self.output_path))
-        path = next((candidate for candidate in candidates if candidate.exists()), None)
-        if path is None:
-            return None
-        try:
-            with path.open("r", encoding="utf-8") as handle:
-                data = json.load(handle)
-        except Exception as exc:
-            self.logger.warning(
-                f"[InterfaceOrchestrator] Failed to load existing interfaces: {exc}"
-            )
-            return None
-        return data if isinstance(data, dict) else None
+        for path in candidates:
+            if not path.exists():
+                continue
+            try:
+                with path.open("r", encoding="utf-8") as handle:
+                    data = json.load(handle)
+            except Exception as exc:
+                self.logger.warning(
+                    f"[InterfaceOrchestrator] Failed to load {path}: {exc}"
+                )
+                continue
+            if not isinstance(data, dict):
+                continue
+            if self._resume_fingerprint:
+                metadata = data.get("meta") or {}
+                resume = data.get("_resume") or {}
+                stored_fingerprint = (
+                    resume.get("input_fingerprint")
+                    or metadata.get("input_fingerprint")
+                )
+                if stored_fingerprint != self._resume_fingerprint:
+                    self.logger.info(
+                        "[InterfaceOrchestrator] Ignoring incompatible checkpoint: %s",
+                        path,
+                    )
+                    continue
+            return data
+        return None
 
     def _restore_completed_subtrees(
         self,

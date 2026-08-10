@@ -21,10 +21,16 @@ from typing import Any, Dict, List, Optional, Tuple
 from dataclasses import dataclass, field, asdict
 
 from common.llm_types import Memory
+from common.progress import update_progress
 from common.run_events import event_context_environment, record_llm_call
 from common.session_manager import create_session_manager
 from . import paths as _paths
 from .paths import REPO_DIR as _REPO_DIR, WORKSPACE_ROOT as _WORKSPACE_ROOT
+
+
+_PROCESS_TERMINATE_GRACE_SEC = 10
+_DEFAULT_LLM_TIMEOUT_SEC = 1800
+_DEFAULT_LLM_MAX_ATTEMPTS = 3
 
 
 def _set_pdeathsig() -> None:
@@ -34,6 +40,55 @@ def _set_pdeathsig() -> None:
         ctypes.CDLL("libc.so.6").prctl(1, _s.SIGTERM)  # PR_SET_PDEATHSIG = 1
     except Exception:
         pass
+
+
+def _signal_process_group(
+    proc: subprocess.Popen[Any], signum: int, *, force: bool = False,
+) -> None:
+    if _os.name != "nt" and hasattr(_os, "killpg") and hasattr(_os, "getpgid"):
+        try:
+            _os.killpg(_os.getpgid(proc.pid), signum)
+            return
+        except (ProcessLookupError, PermissionError, OSError):
+            pass
+    try:
+        if force:
+            proc.kill()
+        elif _os.name == "nt":
+            proc.terminate()
+        else:
+            proc.send_signal(signum)
+    except (ProcessLookupError, PermissionError, OSError):
+        pass
+
+
+def _terminate_cli_process(
+    proc: subprocess.Popen[Any],
+    grace_sec: float = _PROCESS_TERMINATE_GRACE_SEC,
+) -> None:
+    """Terminate an AI CLI process group without any unbounded waits."""
+    if proc.poll() is not None:
+        return
+    wait_timeout = max(float(grace_sec), 0.1)
+    _signal_process_group(proc, _signal.SIGTERM)
+    try:
+        proc.wait(timeout=wait_timeout)
+        return
+    except subprocess.TimeoutExpired:
+        pass
+
+    _signal_process_group(
+        proc,
+        getattr(_signal, "SIGKILL", _signal.SIGTERM),
+        force=True,
+    )
+    try:
+        proc.wait(timeout=wait_timeout)
+    except subprocess.TimeoutExpired:
+        try:
+            proc.kill()
+        except (ProcessLookupError, PermissionError, OSError):
+            pass
 
 
 # ----------------------------------------------------------------------------
@@ -99,6 +154,43 @@ def _load_ai_cli_cmd() -> str:
         return _BAKED_IN_VALUE
 
     return ""
+
+
+def _load_execution_int(config_key: str, env_name: str, fallback: int) -> int:
+    raw = _os.environ.get(env_name)
+    if raw:
+        try:
+            value = int(raw)
+            if value > 0:
+                return value
+        except ValueError:
+            pass
+    try:
+        workspace = _paths._find_workspace_root()
+        with (workspace / ".cmind" / "config.toml").open("rb") as handle:
+            config = tomllib.load(handle)
+        value = (config.get("execution") or {}).get(config_key)
+        if isinstance(value, int) and not isinstance(value, bool) and value > 0:
+            return value
+    except (OSError, tomllib.TOMLDecodeError):
+        pass
+    return fallback
+
+
+def _resolve_execution_limit(
+    explicit: Optional[int],
+    config_key: str,
+    env_name: str,
+    fallback: int,
+) -> int:
+    value = (
+        explicit
+        if explicit is not None
+        else _load_execution_int(config_key, env_name, fallback)
+    )
+    if value <= 0:
+        raise ValueError(f"{config_key} must be greater than zero")
+    return value
 
 
 # Resolved once at import for backward-compat with callers that referenced
@@ -312,8 +404,8 @@ class LLMClient:
         self,
         prompt: str,
         purpose: str = "general",
-        max_retries: int = 3,
-        timeout: Optional[int] = 1800,
+        max_retries: Optional[int] = None,
+        timeout: Optional[int] = None,
         metadata: Dict[str, Any] = None
     ) -> str:
         """Generate response from LLM.
@@ -341,6 +433,18 @@ class LLMClient:
                 "`cmind init --ai <name>` in this workspace, or set the "
                 "CMIND_AI_CLI_CMD environment variable."
             )
+        max_retries = _resolve_execution_limit(
+            max_retries,
+            "llm_max_attempts",
+            "CMIND_LLM_MAX_ATTEMPTS",
+            _DEFAULT_LLM_MAX_ATTEMPTS,
+        )
+        timeout = _resolve_execution_limit(
+            timeout,
+            "llm_timeout_sec",
+            "CMIND_LLM_TIMEOUT_SEC",
+            _DEFAULT_LLM_TIMEOUT_SEC,
+        )
 
         # Create call record
         self._call_counter += 1
@@ -373,6 +477,14 @@ class LLMClient:
             for attempt in range(max_retries):
                 try:
                     self.logger.debug(f"Calling LLM (attempt {attempt + 1})")
+                    update_progress(
+                        activity="llm_call",
+                        llm_purpose=purpose,
+                        llm_attempt=attempt + 1,
+                        llm_max_attempts=max_retries,
+                        llm_timeout_sec=timeout,
+                        llm_deadline_epoch=time.time() + timeout,
+                    )
                     
                     # Build command with any extra args from session manager.
                     # On retries, refresh_for_retry() regenerates any
@@ -387,6 +499,12 @@ class LLMClient:
                     # group so killpg kills the whole tree on parent exit.
                     # preexec_fn=_set_pdeathsig handles the SIGKILL case via
                     # PR_SET_PDEATHSIG (kernel sends SIGTERM to child on parent death).
+                    process_options: Dict[str, Any] = {}
+                    if _os.name == "nt":
+                        process_options["creationflags"] = subprocess.CREATE_NEW_PROCESS_GROUP
+                    else:
+                        process_options["start_new_session"] = True
+                        process_options["preexec_fn"] = _set_pdeathsig
                     proc = subprocess.Popen(
                         cmd,
                         stdin=trace_ctx.stdin,
@@ -395,18 +513,12 @@ class LLMClient:
                         text=True,
                         env=trace_ctx.env,
                         cwd=_REPO_DIR,
-                        start_new_session=True,
-                        preexec_fn=_set_pdeathsig,
+                        **process_options,
                     )
                     try:
                         stdout, stderr = proc.communicate(timeout=timeout)
                     except BaseException:
-                        # Kill the entire process group (agent + any pytest children)
-                        try:
-                            _os.killpg(_os.getpgid(proc.pid), _signal.SIGTERM)
-                        except Exception:
-                            proc.kill()
-                        proc.wait()
+                        _terminate_cli_process(proc)
                         raise
                     result = subprocess.CompletedProcess(
                         cmd, proc.returncode, stdout, stderr
@@ -419,6 +531,11 @@ class LLMClient:
                     
                     response = result.stdout.strip()
                     if response:
+                        update_progress(
+                            activity="llm_complete",
+                            llm_purpose=purpose,
+                            llm_attempt=attempt + 1,
+                        )
                         break
                     else:
                         error = "LLM returned empty response"
@@ -427,9 +544,20 @@ class LLMClient:
                 except subprocess.TimeoutExpired:
                     error = f"LLM call timed out after {timeout}s"
                     self.logger.warning(f"LLM call timed out (attempt {attempt + 1})")
+                    update_progress(
+                        activity="llm_timeout",
+                        llm_purpose=purpose,
+                        llm_attempt=attempt + 1,
+                    )
                 except Exception as e:
                     error = str(e)
                     self.logger.warning(f"LLM call error: {e}")
+                    update_progress(
+                        activity="llm_error",
+                        llm_purpose=purpose,
+                        llm_attempt=attempt + 1,
+                        llm_error=type(e).__name__,
+                    )
 
         # Session trace captured automatically by context manager
         captured_path = trace_ctx.captured_path
@@ -493,8 +621,8 @@ class LLMClient:
         self,
         prompt: str,
         purpose: str = "general",
-        max_retries: int = 3,
-        timeout: Optional[int] = 1800,
+        max_retries: Optional[int] = None,
+        timeout: Optional[int] = None,
         metadata: Dict[str, Any] = None
     ) -> Tuple[str, LLMCallRecord]:
         """Generate response from LLM and return both response and call record.
@@ -555,8 +683,8 @@ class LLMClient:
         self,
         memory: Memory,
         purpose: str = "general",
-        max_retries: int = 3,
-        timeout: Optional[int] = 1800,
+        max_retries: Optional[int] = None,
+        timeout: Optional[int] = None,
         metadata: Dict[str, Any] = None,
     ) -> Optional[str]:
         """Generate from a Memory object by flattening to a single prompt.
@@ -616,8 +744,8 @@ class LLMClient:
         self,
         prompt: str,
         purpose: str = "general",
-        max_retries: int = 3,
-        timeout: Optional[int] = 1800,
+        max_retries: Optional[int] = None,
+        timeout: Optional[int] = None,
         metadata: Dict[str, Any] = None,
         parsed_result: Dict[str, Any] = None
     ) -> str:
@@ -842,9 +970,9 @@ class LLMClient:
         system_prompt: str,
         user_prompt: str,
         response_model: type,
-        max_retries: int = 3,
+        max_retries: Optional[int] = None,
         purpose: str = "structured_call",
-        timeout: Optional[int] = 1800,
+        timeout: Optional[int] = None,
     ) -> Tuple[str, Optional[Any], str]:
         """Call LLM and return structured output using a Pydantic model.
 
@@ -868,6 +996,18 @@ class LLMClient:
         combined_prompt = f"{system_prompt}\n\n{user_prompt}"
         last_think = ""
         last_response = ""
+        max_retries = _resolve_execution_limit(
+            max_retries,
+            "llm_max_attempts",
+            "CMIND_LLM_MAX_ATTEMPTS",
+            _DEFAULT_LLM_MAX_ATTEMPTS,
+        )
+        timeout = _resolve_execution_limit(
+            timeout,
+            "llm_timeout_sec",
+            "CMIND_LLM_TIMEOUT_SEC",
+            _DEFAULT_LLM_TIMEOUT_SEC,
+        )
 
         for attempt in range(max_retries):
             try:

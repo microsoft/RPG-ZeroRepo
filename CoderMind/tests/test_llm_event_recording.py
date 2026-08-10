@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import signal
+import subprocess
 import sys
 from contextlib import contextmanager
 from pathlib import Path
@@ -14,7 +16,12 @@ if str(_SCRIPTS) not in sys.path:
 import common.run_events as run_events
 import code_gen.sub_agent as sub_agent
 from common.llm_api_client import APILLMClient, LLMConfig, LLMProvider
-from common.llm_client import LLMClient
+from common.llm_client import (
+    LLMClient,
+    _load_execution_int,
+    _resolve_execution_limit,
+    _terminate_cli_process,
+)
 from common.llm_types import LLMResponse, LLMUsage, Memory
 from common.session_manager import CopilotSessionManager, TraceContext
 
@@ -33,6 +40,112 @@ class _FakeSessionManager:
         context = TraceContext()
         yield context
         context.captured_path = Path("/workspace/logs/copilot/process-1.log")
+
+
+def test_cli_process_cleanup_escalates_to_sigkill(monkeypatch):
+    class StuckProcess:
+        pid = 321
+        returncode = None
+        wait_calls = 0
+
+        def poll(self):
+            return self.returncode
+
+        def wait(self, timeout):
+            self.wait_calls += 1
+            if self.wait_calls == 1:
+                raise subprocess.TimeoutExpired("copilot", timeout)
+            self.returncode = -signal.SIGKILL
+            return self.returncode
+
+        def send_signal(self, signum):
+            raise AssertionError(f"unexpected fallback signal {signum}")
+
+        def kill(self):
+            raise AssertionError("unexpected direct kill fallback")
+
+    signals = []
+    monkeypatch.setattr("common.llm_client._os.getpgid", lambda pid: pid)
+    monkeypatch.setattr(
+        "common.llm_client._os.killpg",
+        lambda pgid, signum: signals.append(signum),
+    )
+
+    _terminate_cli_process(StuckProcess(), grace_sec=0.1)
+
+    assert signals == [signal.SIGTERM, signal.SIGKILL]
+
+
+def test_cli_process_signal_falls_back_without_killpg(monkeypatch):
+    class FakeProcess:
+        pid = 321
+
+        def __init__(self):
+            self.actions = []
+
+        def terminate(self):
+            self.actions.append("terminate")
+
+        def kill(self):
+            self.actions.append("kill")
+
+        def send_signal(self, signum):
+            self.actions.append(("signal", signum))
+
+    from common import llm_client
+
+    process = FakeProcess()
+    monkeypatch.setattr(llm_client._os, "name", "nt")
+
+    llm_client._signal_process_group(process, signal.SIGTERM)
+    llm_client._signal_process_group(process, signal.SIGTERM, force=True)
+
+    assert process.actions == ["terminate", "kill"]
+
+
+def test_execution_limits_resolve_explicit_env_and_workspace_config(
+    tmp_path, monkeypatch,
+):
+    config_dir = tmp_path / ".cmind"
+    config_dir.mkdir()
+    (config_dir / "config.toml").write_text(
+        "[execution]\nllm_timeout_sec = 120\nllm_max_attempts = 4\n"
+    )
+    monkeypatch.setattr(
+        "common.llm_client._paths._find_workspace_root", lambda: tmp_path,
+    )
+    monkeypatch.delenv("CMIND_LLM_TIMEOUT_SEC", raising=False)
+
+    assert _load_execution_int("llm_timeout_sec", "CMIND_LLM_TIMEOUT_SEC", 1800) == 120
+
+    monkeypatch.setenv("CMIND_LLM_TIMEOUT_SEC", "45")
+    assert _load_execution_int("llm_timeout_sec", "CMIND_LLM_TIMEOUT_SEC", 1800) == 45
+    assert _resolve_execution_limit(
+        15, "llm_timeout_sec", "CMIND_LLM_TIMEOUT_SEC", 1800,
+    ) == 15
+
+
+def test_cli_call_uses_resolved_environment_timeout(monkeypatch):
+    observed = {}
+
+    class CapturingProcess(_FakeProcess):
+        def communicate(self, timeout=None):
+            observed["timeout"] = timeout
+            return super().communicate(timeout=timeout)
+
+    monkeypatch.setenv("CMIND_LLM_TIMEOUT_SEC", "37")
+    monkeypatch.setenv("CMIND_LLM_MAX_ATTEMPTS", "1")
+    monkeypatch.setattr(
+        "common.llm_client.create_session_manager",
+        lambda **kwargs: _FakeSessionManager(),
+    )
+    monkeypatch.setattr(
+        "common.llm_client.subprocess.Popen",
+        MagicMock(return_value=CapturingProcess()),
+    )
+
+    assert LLMClient(tool="copilot").generate("prompt") == "answer"
+    assert observed["timeout"] == 37
 
 
 def test_copilot_model_calls_disable_tools(tmp_path, monkeypatch):

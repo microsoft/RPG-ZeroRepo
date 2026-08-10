@@ -14,7 +14,11 @@ would require real LLM calls; this test focuses on deterministic logic.
 from __future__ import annotations
 
 import importlib.util
+import os
+import signal
+import subprocess
 import sys
+import json
 from pathlib import Path
 
 import pytest
@@ -178,6 +182,330 @@ class TestBuildArgs:
         args = plan._build_args_for(plan.STAGES[0], ns)
         assert "--no-trajectory" in args
 
+    def test_stage_timeout_defaults_and_overrides(self) -> None:
+        defaults = plan._parse_args([])
+        assert plan._stage_timeout_for(plan.STAGES[0], defaults) == 2700
+        assert plan._stage_timeout_for(plan.STAGES[3], defaults) == 5400
+        assert defaults.no_progress_timeout_sec == 1200
+
+        overrides = plan._parse_args([
+            "--stage-timeout-sec", "30",
+            "--interfaces-timeout-sec", "60",
+            "--terminate-grace-sec", "2",
+        ])
+        assert plan._stage_timeout_for(plan.STAGES[0], overrides) == 30
+        assert plan._stage_timeout_for(plan.STAGES[3], overrides) == 60
+        assert overrides.terminate_grace_sec == 2
+
+    @pytest.mark.parametrize(
+        "flag",
+        ["--stage-timeout-sec", "--interfaces-timeout-sec", "--terminate-grace-sec"],
+    )
+    def test_timeout_options_must_be_positive(self, flag: str) -> None:
+        with pytest.raises(SystemExit):
+            plan._parse_args([flag, "0"])
+
+    def test_workspace_config_and_environment_supply_execution_defaults(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        cmind_dir = tmp_path / ".cmind"
+        cmind_dir.mkdir()
+        (cmind_dir / "config.toml").write_text(
+            "[execution]\n"
+            "llm_timeout_sec = 40\n"
+            "llm_max_attempts = 1\n"
+            "terminate_grace_sec = 4\n"
+            "no_progress_timeout_sec = 55\n"
+            "[plan]\n"
+            "stage_timeout_sec = 80\n"
+            "interfaces_timeout_sec = 160\n"
+        )
+        monkeypatch.setattr(plan, "CMIND_DIR", cmind_dir)
+        configured = plan._parse_args([])
+
+        assert configured.llm_timeout_sec == 40
+        assert configured.llm_max_attempts == 1
+        assert configured.terminate_grace_sec == 4
+        assert configured.no_progress_timeout_sec == 55
+        assert configured.stage_timeout_sec == 80
+        assert configured.interfaces_timeout_sec == 160
+
+        monkeypatch.setenv("CMIND_PLAN_STAGE_TIMEOUT_SEC", "25")
+        monkeypatch.setenv("CMIND_LLM_TIMEOUT_SEC", "15")
+        overridden = plan._parse_args([])
+        assert overridden.stage_timeout_sec == 25
+        assert overridden.llm_timeout_sec == 15
+
+
+class TestPlanLock:
+    def test_rejects_second_writer_and_releases_automatically(self, tmp_path: Path) -> None:
+        path = tmp_path / ".plan.lock"
+        with plan.PlanLock(path) as first:
+            first.update(stage="interfaces")
+            with pytest.raises(plan.PlanAlreadyRunning) as caught:
+                with plan.PlanLock(path):
+                    pass
+            assert caught.value.metadata["pid"] == os.getpid()
+            assert caught.value.metadata["stage"] == "interfaces"
+
+        with plan.PlanLock(path):
+            pass
+
+        assert plan.PlanLock.active_metadata(path) is None
+
+    def test_status_probe_reads_active_owner(self, tmp_path: Path) -> None:
+        path = tmp_path / ".plan.lock"
+        with plan.PlanLock(path) as lock:
+            lock.update(stage="tasks", stage_status="running")
+            active = plan.PlanLock.active_metadata(path)
+
+        assert active is not None
+        assert active["pid"] == os.getpid()
+        assert active["stage"] == "tasks"
+
+    def test_direct_interface_stage_rejects_duplicate_writer(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys,
+    ) -> None:
+        design_interfaces = _load_script("design_interfaces")
+        lock_path = tmp_path / ".design_interfaces.lock"
+        monkeypatch.setattr(design_interfaces, "_INTERFACES_LOCK_PATH", lock_path)
+        calls = []
+
+        @design_interfaces._exclusive_interfaces_run
+        def guarded() -> int:
+            calls.append("ran")
+            return 0
+
+        with design_interfaces.ProcessLock(lock_path):
+            assert guarded() == design_interfaces._LOCKED_EXIT_CODE
+
+        assert calls == []
+        assert "already active" in capsys.readouterr().err
+
+
+class TestStageSupervision:
+    def test_proc_parent_parser_ignores_process_name_spacing(self, tmp_path: Path) -> None:
+        proc_dir = tmp_path / "123"
+        proc_dir.mkdir()
+        (proc_dir / "status").write_text(
+            "Name:\tworker name with spaces\nState:\tS (sleeping)\nPPid:\t42\n"
+        )
+
+        assert plan._read_proc_parent_pid(proc_dir) == 42
+
+    def test_process_signal_falls_back_without_killpg(self, monkeypatch) -> None:
+        class FakeProcess:
+            pid = 123
+
+            def __init__(self):
+                self.actions = []
+
+            def terminate(self):
+                self.actions.append("terminate")
+
+            def kill(self):
+                self.actions.append("kill")
+
+            def send_signal(self, signum):
+                self.actions.append(("signal", signum))
+
+        process = FakeProcess()
+        monkeypatch.setattr(plan.os, "name", "nt")
+
+        plan._signal_process_group(process, signal.SIGTERM)
+        plan._signal_process_group(process, signal.SIGTERM, force=True)
+
+        assert process.actions == ["terminate", "kill"]
+
+    def test_no_progress_watchdog_stops_stage(self, monkeypatch) -> None:
+        class HungProcess:
+            pid = 123
+
+            def wait(self, timeout):
+                raise subprocess.TimeoutExpired("stage", timeout)
+
+        clock = iter((0.0, 0.0, 2.0, 2.0))
+        terminated = []
+        monkeypatch.setattr(plan.time, "monotonic", lambda: next(clock))
+        monkeypatch.setattr(plan.subprocess, "Popen", lambda *args, **kwargs: HungProcess())
+        monkeypatch.setattr(
+            plan,
+            "_terminate_process_group",
+            lambda proc, grace: terminated.append((proc.pid, grace)),
+        )
+
+        result = plan._run_stage(
+            ["cmind", "script"],
+            "plan_tasks.py",
+            [],
+            timeout_sec=100,
+            terminate_grace_sec=3,
+            no_progress_timeout_sec=1,
+        )
+
+        assert result.returncode == 124
+        assert result.timed_out is True
+        assert result.timeout_reason == "no_progress"
+        assert terminated == [(123, 3)]
+
+    def test_termination_escalates_to_sigkill(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        class FakeProcess:
+            pid = 123
+            returncode = None
+            wait_calls = 0
+
+            def poll(self):
+                return self.returncode
+
+            def wait(self, timeout):
+                self.wait_calls += 1
+                if self.wait_calls == 1:
+                    raise subprocess.TimeoutExpired("stage", timeout)
+                self.returncode = -signal.SIGKILL
+                return self.returncode
+
+            def send_signal(self, signum):
+                raise AssertionError(f"unexpected fallback signal {signum}")
+
+            def kill(self):
+                raise AssertionError("unexpected direct kill fallback")
+
+        signals = []
+        monkeypatch.setattr(plan.os, "getpgid", lambda pid: pid)
+        monkeypatch.setattr(plan.os, "killpg", lambda pgid, signum: signals.append(signum))
+
+        plan._terminate_process_group(FakeProcess(), 0.1)
+
+        assert signals == [signal.SIGTERM, signal.SIGKILL]
+
+    def test_termination_signals_detached_descendant_groups(
+        self, monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        class FakeProcess:
+            pid = 123
+            returncode = None
+            wait_calls = 0
+
+            def poll(self):
+                return self.returncode
+
+            def wait(self, timeout):
+                self.wait_calls += 1
+                if self.wait_calls == 1:
+                    raise subprocess.TimeoutExpired("stage", timeout)
+                self.returncode = -signal.SIGKILL
+                return self.returncode
+
+            def kill(self):
+                raise AssertionError("unexpected direct kill fallback")
+
+        snapshots = iter(({123, 456}, {456}))
+        signals = []
+        monkeypatch.setattr(
+            plan,
+            "_descendant_process_groups",
+            lambda pid: set(next(snapshots)),
+        )
+        monkeypatch.setattr(
+            plan,
+            "_signal_groups",
+            lambda groups, signum: signals.append((set(groups), signum)),
+        )
+
+        plan._terminate_process_group(FakeProcess(), 0.1)
+
+        assert signals == [
+            ({123, 456}, signal.SIGTERM),
+            ({123, 456}, signal.SIGKILL),
+        ]
+
+    def test_timeout_with_new_valid_artifact_recovers(self, monkeypatch, capsys) -> None:
+        states = _states(["update", "update", "update", "update", "init"])
+        monkeypatch.setattr(plan, "probe", lambda invoker: states)
+        monkeypatch.setattr(plan, "POST_STEPS", ())
+        monkeypatch.setattr(
+            plan,
+            "_run_stage",
+            lambda *args, **kwargs: plan.StageRunResult(124, True, 1.0),
+        )
+        monkeypatch.setattr(
+            plan,
+            "_run_check",
+            lambda invoker, script: {"type": "update", "message": "valid"},
+        )
+
+        args = plan._parse_args(["--stage-timeout-sec", "1"])
+        assert plan._run_pipeline(args, ["cmind", "script"], None) == 0
+        assert "artifact is valid; continuing" in capsys.readouterr().out
+
+    def test_timeout_with_invalid_artifact_fails(self, monkeypatch) -> None:
+        states = _states(["update", "update", "update", "update", "init"])
+        monkeypatch.setattr(plan, "probe", lambda invoker: states)
+        monkeypatch.setattr(
+            plan,
+            "_run_stage",
+            lambda *args, **kwargs: plan.StageRunResult(124, True, 1.0),
+        )
+        monkeypatch.setattr(
+            plan,
+            "_run_check",
+            lambda invoker, script: {"type": "init", "message": "missing"},
+        )
+
+        args = plan._parse_args(["--stage-timeout-sec", "1"])
+        assert plan._run_pipeline(args, ["cmind", "script"], None) == 124
+
+    def test_force_does_not_recover_from_preexisting_artifact(self, monkeypatch) -> None:
+        states = _states(["update"] * 5)
+        monkeypatch.setattr(plan, "probe", lambda invoker: states)
+        monkeypatch.setattr(
+            plan,
+            "_run_stage",
+            lambda *args, **kwargs: plan.StageRunResult(124, True, 1.0),
+        )
+        monkeypatch.setattr(
+            plan,
+            "_run_check",
+            lambda invoker, script: {"type": "update", "message": "old artifact"},
+        )
+
+        args = plan._parse_args(["--force", "--stage-timeout-sec", "1"])
+        assert plan._run_pipeline(args, ["cmind", "script"], None) == 124
+
+    def test_pipeline_forwards_llm_execution_budget(self, monkeypatch) -> None:
+        states = _states(["update", "update", "update", "update", "init"])
+        monkeypatch.setattr(plan, "probe", lambda invoker: states)
+        monkeypatch.setattr(plan, "POST_STEPS", ())
+        observed = []
+
+        def run_stage(*args, **kwargs):
+            observed.append(kwargs["env_overrides"])
+            return plan.StageRunResult(0, False, 1.0)
+
+        monkeypatch.setattr(plan, "_run_stage", run_stage)
+        monkeypatch.setattr(
+            plan,
+            "_run_check",
+            lambda invoker, script: {"type": "update", "message": "valid"},
+        )
+
+        args = plan._parse_args([
+            "--llm-timeout-sec", "45",
+            "--llm-max-attempts", "1",
+        ])
+        assert plan._run_pipeline(args, ["cmind", "script"], None) == 0
+        assert observed == [{
+            "CMIND_LLM_TIMEOUT_SEC": "45",
+            "CMIND_LLM_MAX_ATTEMPTS": "1",
+        }]
+
+    def test_json_probe_includes_active_run(self, capsys) -> None:
+        active = {"pid": 123, "stage": "interfaces", "stage_status": "running"}
+        plan._emit_check_only_json(_states(["update"] * 5), active)
+
+        payload = json.loads(capsys.readouterr().out)
+        assert payload["active_run"] == active
+
 
 # ---------------------------------------------------------------------------
 # Stage table sanity — guard against silent registry drift.
@@ -196,6 +524,50 @@ class TestCheckerContracts:
         result = checker.inspect_state(*args)
         assert result["type"] == "init"
         assert "state" not in result
+
+    def test_interfaces_checker_rejects_failed_global_review(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        checker = _load_script("check_interfaces")
+        skeleton = tmp_path / "skeleton.json"
+        interfaces = tmp_path / "interfaces.json"
+        rpg = tmp_path / "rpg.json"
+        skeleton.write_text(json.dumps({
+            "root": {
+                "type": "directory",
+                "children": [{
+                    "type": "file",
+                    "path": "src/app.py",
+                    "feature_paths": ["App/run"],
+                }],
+            },
+        }))
+        interfaces.write_text(json.dumps({
+            "subtrees": {
+                "App": {
+                    "interfaces": {
+                        "src/app.py": {
+                            "units": ["function run"],
+                            "units_to_features": {"function run": ["App/run"]},
+                            "units_to_code": {"function run": "def run(): ..."},
+                        },
+                    },
+                },
+            },
+            "global_review": {
+                "passed": False,
+                "feature_orphans_count": 3,
+                "orphan_units_count": 2,
+            },
+        }))
+        rpg.write_text(json.dumps({"root": {"node_type": "root", "children": []}}))
+        monkeypatch.setattr(checker, "REPO_RPG_FILE", rpg)
+
+        result = checker.check_state(skeleton, interfaces)
+
+        assert result["type"] == "warning"
+        assert result["output_valid"] is True
+        assert "3 orphan feature(s), 2 orphan unit(s)" in result["message"]
 
 
 class TestStageRegistry:

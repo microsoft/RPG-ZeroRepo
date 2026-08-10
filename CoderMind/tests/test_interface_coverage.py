@@ -5,6 +5,8 @@ import json
 import sys
 from pathlib import Path
 
+import pytest
+
 _REPO = Path(__file__).resolve().parents[1]
 _SCRIPTS = _REPO / "scripts"
 
@@ -581,3 +583,62 @@ def test_interface_orchestrator_writes_partial_resume_file(tmp_path) -> None:
 
     assert output_path.exists()
     assert not Path(f"{output_path}.partial").exists()
+
+
+def test_interface_checkpoint_rejects_changed_inputs(tmp_path: Path) -> None:
+    output_path = tmp_path / "interfaces.json"
+    orchestrator = InterfaceOrchestrator(
+        llm_client=object(),
+        output_path=str(output_path),
+        target_language="python",
+    )
+    first_skeleton = {
+        "root": {
+            "type": "directory",
+            "children": [
+                {"type": "file", "path": "core.py", "feature_paths": ["Core/run"]},
+            ],
+        }
+    }
+    changed_skeleton = {
+        "root": {
+            "type": "directory",
+            "children": [
+                {"type": "file", "path": "core.py", "feature_paths": ["Core/run"]},
+                {"type": "file", "path": "ui.py", "feature_paths": ["UI/show"]},
+            ],
+        }
+    }
+    orchestrator._resume_fingerprint = orchestrator._input_fingerprint(
+        first_skeleton, {}, [], [],
+    )
+    orchestrator._save_interfaces({
+        "meta": {"input_fingerprint": orchestrator._resume_fingerprint},
+        "subtrees": {},
+    }, partial=True)
+
+    orchestrator._resume_fingerprint = orchestrator._input_fingerprint(
+        changed_skeleton, {}, [], [],
+    )
+
+    assert orchestrator._load_existing_interfaces() is None
+
+
+def test_interface_checkpoint_write_failure_preserves_previous_file(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from common import json_io
+
+    output_path = tmp_path / "interfaces.json"
+    output_path.write_text('{"status":"previous"}\n')
+
+    def fail_replace(source, destination):
+        raise OSError("synthetic replace failure")
+
+    monkeypatch.setattr(json_io.os, "replace", fail_replace)
+
+    with pytest.raises(OSError, match="synthetic replace failure"):
+        json_io.atomic_write_json(output_path, {"status": "new"})
+
+    assert json.loads(output_path.read_text()) == {"status": "previous"}
+    assert not list(tmp_path.glob("*.tmp"))

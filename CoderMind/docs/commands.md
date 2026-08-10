@@ -236,6 +236,13 @@ step. This is the recommended entry point for Phase 2.
 4. **Verify** — after every stage's build script, the corresponding
    `check_*.py` script re-runs to validate the produced artifact. If
    verification fails the pipeline stops and prints recovery hints.
+5. **Supervise** — a workspace lock rejects duplicate mutating Plan runs.
+   Each stage has a hard deadline and bounded process-tree cleanup. If a
+   previously incomplete stage times out after producing a valid artifact,
+   Plan records it as recovered and continues.
+6. **Checkpoint** — interface design atomically saves every completed
+   subtree with an input fingerprint. A resumed run reuses only checkpoints
+   produced from the same skeleton, data flow, and base-class inputs.
 
 **Resume semantics:** if you press Ctrl-C halfway through, running
 `/cmind.plan` again automatically resumes from the first incomplete
@@ -250,6 +257,18 @@ rebuilt too so artifacts never drift apart.
   override iteration counts for the corresponding stage.
 - `--verbose` — forward `--verbose` to every sub-script.
 - `--no-trajectory` — forward `--no-trajectory` where supported.
+- `--stage-timeout-sec N` — hard deadline for each non-interface stage
+   (default `2700`).
+- `--interfaces-timeout-sec N` — hard deadline for interface design
+   (default `5400`).
+- `--terminate-grace-sec N` — grace period before escalating from
+   `SIGTERM` to `SIGKILL` (default `15`).
+- `--llm-timeout-sec N` — timeout for each LLM attempt (default `900`).
+- `--llm-max-attempts N` — maximum attempts for each LLM request
+   (default `2`).
+- `--no-progress-timeout-sec N` — stop a stage whose structured progress
+   has not changed for `N` seconds. The default is the larger of 1200
+   seconds and the LLM timeout plus 300 seconds.
 
 **Examples:**
 
@@ -258,12 +277,21 @@ rebuilt too so artifacts never drift apart.
 /cmind.plan --verbose
 /cmind.plan --force                    # rebuild everything
 /cmind.plan --max-iter-skeleton 15
+/cmind.plan --interfaces-timeout-sec 7200 --llm-timeout-sec 1200
 ```
 
 To inspect progress without running anything:
 
 ```bash
 cmind script plan.py --check-only
+```
+
+The JSON form includes `active_run`, which identifies the PID and current
+stage of an active Plan owner. During interface and LLM work it also reports
+the current subtree, LLM attempt, deadlines, and last progress timestamp:
+
+```bash
+cmind script plan.py --check-only --json
 ```
 
 ---

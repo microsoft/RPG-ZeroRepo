@@ -21,9 +21,9 @@ non-interactive run with automatic resume on failure.
 
 > [!WARNING]
 > A full pipeline run can take from a few minutes to over an hour
-> depending on project size. Set your terminal timeout to at least
-> **240 minutes** before running. Do **not** interrupt it; if you
-> must, re-run this command and it will resume from where it stopped.
+> depending on project size. The orchestrator permits only one mutating
+> Plan run per workspace and enforces per-stage deadlines. If interrupted
+> or timed out, re-run this command to resume from validated artifacts.
 
 ### Step 1: Probe progress
 
@@ -40,6 +40,8 @@ Parse the JSON. The fields you need:
 * `next`  — name of the first not-done stage (or `null` if all done)
 * `stages[*].name`, `stages[*].type` (`update` / `warning` / `init` /
   `error`), `stages[*].done`
+* `active_run` — lock owner metadata (`pid`, current `stage`, and status),
+  or `null` when no Plan run is active
 
 Treat `warning` as **not done**. A warning means the artifact exists but
 violates a cross-stage contract (for example, `interfaces.json` does not
@@ -137,6 +139,15 @@ cmind script plan.py
 # Debug a single stage interactively.
 cmind script <stage>.py --verbose
 ```
+
+Exit `75` means another Plan process owns this workspace; do not start a
+duplicate. Exit `124` means a stage exceeded its deadline and its checker
+did not find a newly valid artifact. A timed-out stage whose artifact is
+valid is reported as recovered and the pipeline continues automatically.
+Interface design checkpoints each completed subtree atomically and only
+reuses a checkpoint when its planning-input fingerprint still matches.
+The no-progress watchdog reports the current subtree and LLM attempt through
+the `active_run` object returned by `--check-only --json`.
 
 ### Step 5: On success
 

@@ -21,8 +21,10 @@ Output:
 import json
 import logging
 import argparse
+import sys
 import threading
 import time
+from functools import wraps
 from pathlib import Path
 from typing import Callable, Dict, Any, List, Optional, Set
 
@@ -53,8 +55,12 @@ from common.paths import (
     DATA_FLOW_FILE as INPUT_DATA_FLOW,
     BASE_CLASSES_FILE as INPUT_BASE_CLASSES,
     INTERFACES_FILE as OUTPUT_FILE,
+    LOGS_DIR,
     REPO_RPG_FILE,
 )
+from common.process_lock import LockHeldError, ProcessLock
+from common.json_io import atomic_write_json
+from common.progress import configured_progress_path, read_progress
 from common import print_unicode_table, get_repo_info_from_files
 import re
 from common import get_project_background_context
@@ -69,11 +75,58 @@ def _start_heartbeat(label: str, interval_sec: int = 120):
     def run() -> None:
         while not stop.wait(interval_sec):
             elapsed = int(time.monotonic() - started)
-            print(f"[heartbeat] {label} still running ({elapsed}s elapsed)", flush=True)
+            detail = ""
+            progress_path = configured_progress_path()
+            progress = read_progress(progress_path) if progress_path else None
+            if progress:
+                subtree = progress.get("current_subtree")
+                subtree_index = progress.get("subtree_index")
+                subtree_total = progress.get("subtree_total")
+                attempt = progress.get("llm_attempt")
+                max_attempts = progress.get("llm_max_attempts")
+                parts = []
+                if subtree:
+                    parts.append(
+                        f"subtree={subtree} ({subtree_index or '?'}/{subtree_total or '?'})"
+                    )
+                if attempt:
+                    parts.append(f"llm_attempt={attempt}/{max_attempts or '?'}")
+                if parts:
+                    detail = "; " + ", ".join(parts)
+            print(
+                f"[heartbeat] {label} still running ({elapsed}s elapsed){detail}",
+                flush=True,
+            )
 
     thread = threading.Thread(target=run, name=f"{label}-heartbeat", daemon=True)
     thread.start()
     return stop, thread
+
+
+_INTERFACES_LOCK_PATH = LOGS_DIR / ".design_interfaces.lock"
+_LOCKED_EXIT_CODE = 75
+
+
+def _exclusive_interfaces_run(func: Callable[..., int]) -> Callable[..., int]:
+    @wraps(func)
+    def wrapped(*args: Any, **kwargs: Any) -> int:
+        try:
+            with ProcessLock(_INTERFACES_LOCK_PATH) as lock:
+                lock.update(stage="interfaces", stage_status="running")
+                return func(*args, **kwargs)
+        except LockHeldError as exc:
+            owner = exc.metadata
+            print(
+                "Another interface-design process is already active in this "
+                f"workspace (pid={owner.get('pid', 'unknown')}, "
+                f"started_at={owner.get('started_at', 'unknown')}).",
+                file=sys.stderr,
+            )
+            return _LOCKED_EXIT_CODE
+
+    return wrapped
+
+
 from decoder_lang import get_backend
 from func_design.interface_review import review_orphan_units
 
@@ -1079,7 +1132,10 @@ class InterfaceDesigner:
             dependency_collector=dependency_collector,
             data_structures=data_structures_list
         )
-        result["meta"] = metadata_with_languages(metadata_source)
+        result["meta"] = {
+            **(result.get("meta") or {}),
+            **metadata_with_languages(metadata_source),
+        }
         
         # =====================================================================
         # Post-process invocation edges (normalise + resolve)
@@ -1568,6 +1624,7 @@ class InterfaceDesigner:
 # Main Entry Point
 # ============================================================================
 
+@_exclusive_interfaces_run
 def main():
     """Main entry point."""
     parser = argparse.ArgumentParser(
@@ -1701,10 +1758,7 @@ def main():
 
         # Save output (interfaces.json)
         output_path = Path(args.output)
-        output_path.parent.mkdir(parents=True, exist_ok=True)
-
-        with open(output_path, "w", encoding="utf-8") as f:
-            json.dump(result, f, indent=2, ensure_ascii=False)
+        atomic_write_json(output_path, result)
 
         logger.info(f"[OK] Interfaces saved to: {output_path}")
         designer.print_summary(result)

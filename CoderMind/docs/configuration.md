@@ -68,9 +68,39 @@ The values written to `ai_cli_cmd` mirror the per-AI substitutions performed by 
 
 Only `copilot` and `claude` are currently verified end-to-end; the others are scaffolded but may need integration adjustments.
 
-### Other config keys
+### Execution limits
 
-The `[cmind]` table currently holds only `ai_cli_cmd`. Future releases will add timeouts, retry budgets, and model overrides under the same namespace; older keys remain forward-compatible.
+Long-running LLM workflows can set workspace defaults in the optional
+`[execution]` table:
+
+```toml
+[execution]
+llm_timeout_sec = 900
+llm_max_attempts = 2
+terminate_grace_sec = 15
+no_progress_timeout_sec = 1200
+
+[plan]
+stage_timeout_sec = 2700
+interfaces_timeout_sec = 5400
+```
+
+`llm_timeout_sec` limits one AI CLI attempt; `llm_max_attempts` controls
+the total attempt budget. Explicit method or Plan CLI arguments take
+priority, followed by `CMIND_LLM_TIMEOUT_SEC` /
+`CMIND_LLM_MAX_ATTEMPTS`, then workspace configuration. Direct LLM calls
+retain compatibility defaults of 1800 seconds and three attempts when no
+override is present; `/cmind.plan` uses the safer defaults shown above.
+
+Plan also recognizes these environment overrides for automation:
+
+- `CMIND_PLAN_STAGE_TIMEOUT_SEC`
+- `CMIND_PLAN_INTERFACES_TIMEOUT_SEC`
+- `CMIND_TERMINATE_GRACE_SEC`
+- `CMIND_NO_PROGRESS_TIMEOUT_SEC`
+
+The no-progress watchdog observes structured stage, subtree-checkpoint,
+and LLM-attempt updates. It is distinct from the absolute stage deadline.
 
 ## Initialization Options
 

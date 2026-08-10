@@ -104,6 +104,14 @@ def get_all_features_from_interfaces(interfaces_path: Path) -> Set[str]:
     return features
 
 
+def get_global_review(interfaces_path: Path) -> Dict[str, Any]:
+    """Return global-review metadata when the artifact contains it."""
+    with open(interfaces_path, 'r', encoding='utf-8') as f:
+        data = json.load(f)
+    review = data.get("global_review")
+    return review if isinstance(review, dict) else {}
+
+
 def cross_validate_features(skeleton_features: Set[str], interfaces_features: Set[str]) -> Dict[str, Any]:
     """Cross-validate features between skeleton and interfaces.
     
@@ -358,13 +366,23 @@ def check_state(input_path: Path, output_path: Path) -> Dict[str, Any]:
     interfaces_features = get_all_features_from_interfaces(output_path)
     cross_validation = cross_validate_features(skeleton_features, interfaces_features)
     result["cross_validation"] = cross_validation
+    global_review = get_global_review(output_path)
+    result["global_review"] = global_review
     
     # Validate RPG feature paths
     rpg_validation = validate_rpg_feature_paths(REPO_RPG_FILE)
     result["rpg_validation"] = rpg_validation
     
     # Determine type based on cross-validation and RPG validation
-    if not cross_validation["is_consistent"]:
+    if global_review and global_review.get("passed") is False:
+        orphan_features = global_review.get("feature_orphans_count", 0)
+        orphan_units = global_review.get("orphan_units_count", 0)
+        result["type"] = "warning"
+        result["message"] = (
+            "interfaces.json global review failed: "
+            f"{orphan_features} orphan feature(s), {orphan_units} orphan unit(s)."
+        )
+    elif not cross_validation["is_consistent"]:
         warning_count = len(cross_validation["warnings"])
         result["type"] = "warning"
         result["message"] = f"interfaces.json exists but has {warning_count} feature mismatches with skeleton."
