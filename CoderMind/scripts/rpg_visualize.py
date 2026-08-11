@@ -3124,8 +3124,13 @@ window.addEventListener('message', event => {{
 }});
 
 // ── Search ──
+function searchText(value) {{
+  if (Array.isArray(value)) return value.join(' / ').toLowerCase();
+  return String(value == null ? '' : value).toLowerCase();
+}}
+
 document.getElementById('search').addEventListener('input', function() {{
-  const q = this.value.toLowerCase().trim();
+  const q = searchText(this.value).trim();
 
   if (activeTab === 'feat') {{
     if (q.length < 2) {{
@@ -3133,8 +3138,8 @@ document.getElementById('search').addEventListener('input', function() {{
       return;
     }}
     root.descendants().forEach(d => {{
-      const name = (d.data.name || d.data.id || '').toLowerCase();
-      const path = (d.data.meta?.path || '').toLowerCase();
+      const name = searchText(d.data.name || d.data.id);
+      const path = searchText(d.data.meta?.path);
       if (name.includes(q) || path.includes(q)) {{
         let p = d.parent;
         while (p) {{
@@ -3145,8 +3150,8 @@ document.getElementById('search').addEventListener('input', function() {{
     }});
     update(root);
     nodeLayer.selectAll('g.node').each(function(d) {{
-      const name = (d.data.name || d.data.id || '').toLowerCase();
-      const path = (d.data.meta?.path || '').toLowerCase();
+      const name = searchText(d.data.name || d.data.id);
+      const path = searchText(d.data.meta?.path);
       const match = name.includes(q) || path.includes(q);
       d3.select(this).select('circle')
         .attr('stroke', match ? '#f0883e' : '#30363d')
@@ -3162,9 +3167,9 @@ document.getElementById('search').addEventListener('input', function() {{
       return;
     }}
     depNodeEls.each(function(d) {{
-      const name = (d.name || d.id || '').toLowerCase();
-      const mod = (d.module || '').toLowerCase();
-      const match = name.includes(q) || mod.includes(q) || d.id.toLowerCase().includes(q);
+      const name = searchText(d.name || d.id);
+      const mod = searchText(d.module);
+      const match = name.includes(q) || mod.includes(q) || searchText(d.id).includes(q);
       d3.select(this).select('circle')
         .attr('stroke', match ? '#f0883e' : '#30363d')
         .attr('stroke-width', match ? 3 : 1.5);
@@ -3172,10 +3177,10 @@ document.getElementById('search').addEventListener('input', function() {{
     }});
     depLinkEls.style('opacity', d => {{
       if (!showEdges) return 0;
-      const sn = (d.source.name || d.source.id || '').toLowerCase();
-      const tn = (d.target.name || d.target.id || '').toLowerCase();
-      const si = (d.source.id || '').toLowerCase();
-      const ti = (d.target.id || '').toLowerCase();
+      const sn = searchText(d.source.name || d.source.id);
+      const tn = searchText(d.target.name || d.target.id);
+      const si = searchText(d.source.id);
+      const ti = searchText(d.target.id);
       return (sn.includes(q) || tn.includes(q) || si.includes(q) || ti.includes(q)) ? 0.7 : 0.03;
     }});
   }} else if (activeTab === 'map') {{
@@ -3185,11 +3190,11 @@ document.getElementById('search').addEventListener('input', function() {{
       return;
     }}
     mapFeatNodeLayer.selectAll('g.map-feat-node').each(function(d) {{
-      const match = (d.data.name||d.data.id||'').toLowerCase().includes(q);
+      const match = searchText(d.data.name || d.data.id).includes(q);
       d3.select(this).style('opacity', match ? 1 : 0.15);
     }});
     mapDepNodeLayer.selectAll('g.map-dep-node').each(function(d) {{
-      const match = (d.data.name||d.data.id||'').toLowerCase().includes(q);
+      const match = searchText(d.data.name || d.data.id).includes(q);
       d3.select(this).style('opacity', match ? 1 : 0.15);
     }});
   }}
