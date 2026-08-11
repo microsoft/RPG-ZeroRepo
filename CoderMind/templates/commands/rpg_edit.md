@@ -307,13 +307,7 @@ git add -A && git commit --amend --no-edit
 
 **Step 5d — Test and review (still on the branch):**
 
-1. **Smoke test** — verify imports and entry point:
-
-```bash
-cmind script smoke_test.py --json
-```
-
-1. **Impact review** — run targeted tests and verify affected functionality:
+1. **Impact review** — run targeted tests, one advisory smoke scan, and verify affected functionality:
 
 ```bash
 cmind script rpg_edit/review.py --json
@@ -324,6 +318,7 @@ home-dir locations and automatically:
 
 - Derives test patterns from `code_changes` in the plan
 - Runs pytest on matching test files
+- Runs one advisory smoke scan and records it under RPG Edit
 - Dispatches a sub-agent to verify affected callers (if impact is large enough)
 
 Check the output `type` field:

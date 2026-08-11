@@ -11,6 +11,7 @@ import textwrap
 import unittest
 from pathlib import Path
 from tempfile import TemporaryDirectory
+from unittest.mock import patch
 
 _SCRIPTS = Path(__file__).resolve().parents[1] / "scripts"
 if str(_SCRIPTS) not in sys.path:
@@ -93,6 +94,46 @@ class TestPythonOnlyLayersSkipped(unittest.TestCase):
             res = smoke_test.run_smoke_test(repo_path=repo)
             self.assertTrue(res.layers["imports"].get("skipped"))
             self.assertTrue(res.layers["stubs"].get("skipped"))
+
+
+class TestPythonSourceDiscovery(unittest.TestCase):
+    def test_setup_py_is_not_imported_as_application_source(self):
+        with TemporaryDirectory() as d:
+            repo = Path(d)
+            (repo / "src" / "pkg").mkdir(parents=True)
+            module = repo / "src" / "pkg" / "app.py"
+            module.write_text("VALUE = 1\n")
+            setup = repo / "setup.py"
+            setup.write_text("raise RuntimeError('must not import setup.py')\n")
+
+            discovered = smoke_test._find_source_files(repo)
+
+            self.assertIn(module, discovered)
+            self.assertNotIn(setup, discovered)
+
+
+class TestSmokeCliModes(unittest.TestCase):
+    def test_advisory_mode_preserves_findings_but_exits_successfully(self):
+        result = smoke_test.SmokeResult(success=False, project_type="python")
+        result.add_finding(smoke_test.SmokeFinding(
+            layer="stubs",
+            severity="error",
+            check="stub_detected",
+            message="baseline stub",
+        ))
+
+        with patch.object(sys, "argv", ["smoke_test.py", "--json", "--advisory"]), patch.object(
+            smoke_test, "run_smoke_test", return_value=result,
+        ), patch("common.logging_setup.setup_file_logging"):
+            self.assertEqual(smoke_test.main(), 0)
+
+    def test_strict_mode_still_fails_for_findings(self):
+        result = smoke_test.SmokeResult(success=False, project_type="python")
+
+        with patch.object(sys, "argv", ["smoke_test.py", "--json"]), patch.object(
+            smoke_test, "run_smoke_test", return_value=result,
+        ), patch("common.logging_setup.setup_file_logging"):
+            self.assertEqual(smoke_test.main(), 1)
 
 
 if __name__ == "__main__":

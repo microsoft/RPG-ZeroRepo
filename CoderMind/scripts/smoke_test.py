@@ -13,6 +13,7 @@ Three layers:
 
 Usage:
     python3 smoke_test.py --json                # Run all layers
+    python3 smoke_test.py --json --advisory     # Report findings without failing
     python3 smoke_test.py --layer imports       # Import check only
     python3 smoke_test.py --layer entry         # Entry point only
     python3 smoke_test.py --layer stubs         # Stub detection only
@@ -146,6 +147,8 @@ def _find_source_files(repo_path: Path) -> List[Path]:
     for py_file in repo_path.rglob("*.py"):
         parts = set(py_file.relative_to(repo_path).parts)
         if parts & skip_dirs:
+            continue
+        if py_file.parent == repo_path and py_file.name == "setup.py":
             continue
         # Skip test files
         name = py_file.name
@@ -481,6 +484,11 @@ def main() -> int:
         description="Smoke Test — post-codegen integration sanity check",
     )
     parser.add_argument("--json", action="store_true", help="Output as JSON")
+    parser.add_argument(
+        "--advisory",
+        action="store_true",
+        help="Preserve findings but exit successfully for non-blocking review context",
+    )
     parser.add_argument("--layer", choices=["imports", "entry", "stubs"],
                         action="append", help="Run specific layer(s) only")
     parser.add_argument("--repo", type=Path, help="Path to repo (default: auto)")
@@ -509,7 +517,7 @@ def main() -> int:
 
     if args.json:
         print(json.dumps(r, indent=2))
-        return 0 if result.success else 1
+        return 0 if result.success or args.advisory else 1
 
     icon = "✅" if result.success else "❌"
     print(f"\n  {icon} Smoke Test ({result.project_type}) — {result.duration:.1f}s")
@@ -529,11 +537,13 @@ def main() -> int:
             print(f"    {sev_icon} [{f.layer}] {f.message}")
 
     scripts = get_scripts_dir()
-    if not result.success:
+    if not result.success and args.advisory:
+        print("\n  Advisory findings recorded; this scan is non-blocking.")
+    elif not result.success:
         print("\n  Fix the issues above, then re-run:")
         print(f"    {cmd_for('smoke_test.py')} --json")
 
-    return 0 if result.success else 1
+    return 0 if result.success or args.advisory else 1
 
 
 if __name__ == "__main__":

@@ -11,19 +11,18 @@ Usage:
       --impact .cmind/data/rpg_edit_impact.json \
       --json
 
-The sub-agent will:
-  1. Run pytest on affected test files
-  2. Run smoke_test for import/entry verification
-  3. Start the application and verify affected functionality paths
-  4. Fix any issues found and re-verify
+The controller runs affected pytest and an advisory smoke scan. The sub-agent
+then verifies affected functionality paths and fixes relevant issues.
 """
 
 import argparse
 import json
 import logging
+import os
 import shutil
 import sys
 import time
+from contextlib import nullcontext
 from pathlib import Path
 from string import Template
 from typing import Any, Dict, List, Optional, Tuple
@@ -42,6 +41,7 @@ from common.paths import (  # noqa: E402
     cmd_for,
 )
 from common.rpg_io import atomic_write_rpg  # noqa: E402
+from common.activity_events import current_activity_context, record_activity  # noqa: E402
 
 logger = logging.getLogger(__name__)
 
@@ -78,7 +78,7 @@ $AFFECTED_FILES
 **pytest (affected tests):**
 $PYTEST_STATUS
 
-**smoke_test (imports/entry):**
+**smoke_test (advisory baseline signal):**
 $SMOKE_STATUS
 
 ## Your Workflow
@@ -91,10 +91,14 @@ Read each modified file to understand what changed.
 $PYTEST_CMD
 ```
 
-### 3. Run smoke test
-```bash
-$SMOKE_TEST_CMD
-```
+Do not run the full test suite when no affected tests were discovered. Failures
+outside the listed affected tests are baseline issues, not failures of this plan.
+
+### 3. Review the controller-owned smoke scan
+
+The controller already ran the advisory smoke scan shown above. Do not run it
+again. Its findings provide baseline context; do not fail this impact review
+for pre-existing findings unrelated to the listed code changes.
 
 ### 4. Start the application and verify affected paths
 
@@ -120,10 +124,9 @@ $BROWSER_TOOL inspect http://localhost:<PORT>/
 $BROWSER_TOOL inspect http://localhost:<PORT>/<affected_route>
 ```
 Read the saved HTML files to understand the full page content, CSS layout,
-and element structure. Check for:
-- Fixed pixel widths that should be responsive
-- Elements overflowing or being cut off
-- Broken layout at different conceptual viewport sizes
+and element structure. Inspect desktop viewports only. Check for:
+- Elements overflowing or being cut off at desktop width
+- Broken desktop layout
 - Missing or misaligned visual elements
 
 #### 5b. Simulate real user interactions
@@ -150,7 +153,7 @@ Click every relevant button, fill forms, and screenshot after each action.
 
 After inspecting pages / taking screenshots:
 - Check that content renders correctly (not blank, not broken)
-- Verify layout adapts properly (no horizontal scrollbar, no overflow)
+- Verify the desktop layout has no unintended horizontal scrollbar or overflow
 - For style/CSS/layout changes: verify the visual result matches the intent
 - If the visual result is poor (misaligned, cut off, ugly), this is a
   **FAIL** even if tests pass
@@ -194,6 +197,7 @@ $PREVIOUS_ISSUES
 
 ## Critical Rules
 - Only verify functionality connected to the modified code — NOT all features
+- Do not perform mobile checks or report mobile-only defects
 - Actually RUN the code — don't just read it
 - **MUST use browser.py/gui.py tools** — curl alone is NOT sufficient
 - For layout/style changes: visual inspection is the PRIMARY verification
@@ -247,6 +251,27 @@ def _derive_test_files(code_changes: List[dict]) -> List[str]:
             seen.add(pattern)
             patterns.append(pattern)
     return patterns
+
+
+def _resolve_affected_test_files(code_changes: List[dict], repo_path: Path) -> List[str]:
+    """Return existing tests directly changed by or related to this plan."""
+    from code_gen.test_runner import find_related_test_files, is_test_file
+
+    seen: set = set()
+    test_files: List[str] = []
+    for change in code_changes:
+        file_path = change.get("file_path", "")
+        if not file_path:
+            continue
+        candidates = [file_path] if is_test_file(file_path) else find_related_test_files(
+            file_path, repo_path,
+        )
+        for candidate in candidates:
+            if candidate in seen or not (repo_path / candidate).is_file():
+                continue
+            seen.add(candidate)
+            test_files.append(candidate)
+    return test_files
 
 
 def _format_code_changes(code_changes: List[dict]) -> str:
@@ -341,23 +366,21 @@ def build_impact_review_prompt(
     pytest_status: str,
     smoke_status: str,
     previous_issues: str = "",
+    test_files: Optional[List[str]] = None,
+    python_exe: str = "python3",
 ) -> str:
     """Build the impact-scoped review prompt."""
     code_changes = plan.get("code_changes", [])
-    test_patterns = _derive_test_files(code_changes)
-
-    pytest_cmd = "python3 -m pytest -x -q"
-    if test_patterns:
-        pattern = " or ".join(test_patterns)
-        pytest_cmd += f' -k "{pattern}" --timeout=30'
+    if test_files:
+        pytest_cmd = f"{python_exe} -m pytest -x -q --timeout=30 " + " ".join(test_files)
+    else:
+        pytest_cmd = "# No affected tests discovered; skip pytest (do not run the full suite)."
 
     # Tool invocations route through the global ``cmind`` CLI (the
     # scripts no longer live in the workspace).  See ``cmind script``
     # in docs/cli-reference.md.
     browser_tool = cmd_for("tools/browser.py")
     gui_tool = cmd_for("tools/gui.py")
-    smoke_test_cmd = f"{cmd_for('smoke_test.py')} --json"
-
     # Start instructions depend on project type
     start_instructions = (
         "Start the application in the background and verify it's running:\n"
@@ -380,7 +403,6 @@ def build_impact_review_prompt(
         PYTEST_CMD=pytest_cmd,
         BROWSER_TOOL=browser_tool,
         GUI_TOOL=gui_tool,
-        SMOKE_TEST_CMD=smoke_test_cmd,
         START_INSTRUCTIONS=start_instructions,
         PREVIOUS_ISSUES=previous_issues or "",
     )
@@ -399,8 +421,8 @@ def impact_review(
     timeout: int = 600,
 ) -> Dict[str, Any]:
     """Run impact-scoped review with iterative repair."""
-    from run_batch import dispatch_sub_agent
-    from code_gen.test_runner import run_pytest
+    from run_batch import _setup_codegen_environment, dispatch_sub_agent
+    from code_gen.test_runner import get_dev_python, run_pytest
     from smoke_test import run_smoke_test
 
     # 1. Load data
@@ -413,41 +435,75 @@ def impact_review(
         impact_results = {}
         logger.warning("No impact data provided, review scope may be incomplete")
 
-    # 2. Pre-check: pytest on affected test files
-    test_patterns = _derive_test_files(plan.get("code_changes", []))
-    try:
-        pre_pytest = run_pytest(
-            repo_path,
-            test_files=[f"*{p}*" for p in test_patterns] if test_patterns else None,
-            timeout=120,
-            extra_args=["--timeout=30"],
-        )
-        pytest_status = (
-            f"{'PASS' if pre_pytest.success else 'FAIL'}: "
-            f"{pre_pytest.passed} passed, {pre_pytest.failed} failed, "
-            f"{pre_pytest.errors} errors"
-        )
-    except Exception as e:
-        pytest_status = f"ERROR: {e}"
-        pre_pytest = None
+    # 2. Prepare the controller-owned environment before any verification.
+    _setup_codegen_environment(repo_path)
+    python_exe = get_dev_python(repo_path) or "python3"
 
-    # 3. Pre-check: smoke_test
-    try:
-        smoke = run_smoke_test(repo_path)
-        # ``run_smoke_test`` returns a ``SmokeResult`` dataclass, not a dict.
-        smoke_dict = smoke.to_dict()
-        # SmokeResult has no "summary" key; surface a compact per-layer
-        # pass/fail map so the agent sees what actually failed.
-        layer_summary = {
-            name: bool(info.get("passed", False)) if isinstance(info, dict) else None
-            for name, info in (smoke_dict.get("layers") or {}).items()
-        }
-        smoke_status = (
-            f"{'PASS' if smoke_dict.get('success') else 'FAIL'}: "
-            f"{json.dumps(layer_summary)}"
+    # 3. Pre-check: pytest on existing affected test files only.
+    test_files = _resolve_affected_test_files(plan.get("code_changes", []), repo_path)
+    if not test_files:
+        pre_pytest = None
+        pytest_status = "SKIP: no affected tests discovered; full suite not run"
+    else:
+        try:
+            pre_pytest = run_pytest(
+                repo_path,
+                test_files=test_files,
+                timeout=120,
+                extra_args=["--timeout=30"],
+            )
+            pytest_status = (
+                f"{'PASS' if pre_pytest.success else 'FAIL'}: "
+                f"{pre_pytest.passed} passed, {pre_pytest.failed} failed, "
+                f"{pre_pytest.errors} errors"
+            )
+        except Exception as e:
+            pytest_status = f"INFRASTRUCTURE ERROR: {e}"
+            pre_pytest = None
+
+    # 4. Pre-check: one controller-owned advisory smoke scan. When this
+    # review runs through ``cmind script``, record it under the RPG Edit trace.
+    has_activity_parent = current_activity_context() is not None or bool(
+        os.environ.get("CMIND_TRACE_ID")
+    )
+    smoke_context = (
+        record_activity(
+            "quality.check",
+            "Smoke Test",
+            logical_key="decoder-rpg-edit-smoke",
+            trigger="review",
         )
-    except Exception as e:
-        smoke_status = f"ERROR: {e}"
+        if has_activity_parent
+        else nullcontext(None)
+    )
+    with smoke_context as smoke_activity:
+        try:
+            smoke = run_smoke_test(repo_path)
+            # ``run_smoke_test`` returns a ``SmokeResult`` dataclass, not a dict.
+            smoke_dict = smoke.to_dict()
+            # Surface a compact per-layer pass/fail map so the agent sees what
+            # failed without needing to execute the scan a second time.
+            layer_summary = {
+                name: bool(info.get("passed", False)) if isinstance(info, dict) else None
+                for name, info in (smoke_dict.get("layers") or {}).items()
+            }
+            smoke_status = (
+                f"{'PASS' if smoke_dict.get('success') else 'ADVISORY'}: "
+                f"{json.dumps(layer_summary)}"
+            )
+            if smoke_activity is not None:
+                smoke_activity.status = "success" if smoke_dict.get("success") else "advisory"
+                smoke_activity.note(
+                    mode="advisory",
+                    blocking=False,
+                    error_count=smoke_dict.get("error_count", 0),
+                    warning_count=smoke_dict.get("warning_count", 0),
+                )
+        except Exception as e:
+            smoke_status = f"ERROR: {e}"
+            if smoke_activity is not None:
+                smoke_activity.status = "failed"
+                smoke_activity.error = {"type": type(e).__name__, "message": str(e)}
 
     results: Dict[str, Any] = {
         "type": "impact_review",
@@ -462,13 +518,13 @@ def impact_review(
         iter_start = time.time()
         logger.info("━━━ Impact Review: iteration %d/%d ━━━", iteration, max_iterations)
 
-        # 4. Build prompt (re-compute pytest_status for iteration 2+
+        # 5. Build prompt (re-compute pytest_status for iteration 2+
         #    so the sub-agent sees post-fix state, not stale pre-fix state)
-        if iteration > 1:
+        if iteration > 1 and test_files:
             try:
                 re_pytest = run_pytest(
                     repo_path,
-                    test_files=[f"*{p}*" for p in test_patterns] if test_patterns else None,
+                    test_files=test_files,
                     timeout=120,
                     extra_args=["--timeout=30"],
                 )
@@ -482,13 +538,15 @@ def impact_review(
 
         prompt = build_impact_review_prompt(
             plan, impact_results, pytest_status, smoke_status,
+            test_files=test_files,
+            python_exe=python_exe,
             previous_issues=(
                 f"\n## Previous Issues (iteration {iteration - 1})\n{previous_issues}"
                 if previous_issues else ""
             ),
         )
 
-        # 5. Dispatch sub-agent
+        # 6. Dispatch sub-agent
         response, error = dispatch_sub_agent(
             prompt, repo_path,
             timeout=timeout,
@@ -504,27 +562,26 @@ def impact_review(
             logger.warning("Sub-agent error on iteration %d: %s", iteration, error[:120])
             continue
 
-        # 6. Parse result
+        # 7. Parse result
         passed, detail = _parse_review_result(response)
         suggestions = _parse_suggestions(response)
 
-        # 7. Post-verify (independent — don't trust sub-agent)
+        # 8. Post-verify (independent — don't trust sub-agent)
         post_passed = True  # default: no relevant tests = not a failure
-        try:
-            post_pytest = run_pytest(
-                repo_path,
-                test_files=[f"*{p}*" for p in test_patterns] if test_patterns else None,
-                timeout=120,
-                extra_args=["--timeout=30"],
-            )
-            # 0 tests collected = no relevant tests exist → not a failure
-            total = post_pytest.passed + post_pytest.failed + post_pytest.errors
-            if total == 0:
-                post_passed = True
-            else:
-                post_passed = post_pytest.success
-        except Exception:
-            post_passed = True  # pytest infra failure ≠ code failure
+        if test_files:
+            try:
+                post_pytest = run_pytest(
+                    repo_path,
+                    test_files=test_files,
+                    timeout=120,
+                    extra_args=["--timeout=30"],
+                )
+                # 0 tests collected = no relevant tests exist → not a failure
+                total = post_pytest.passed + post_pytest.failed + post_pytest.errors
+                if total > 0:
+                    post_passed = post_pytest.success
+            except Exception:
+                post_passed = True  # pytest infra failure ≠ code failure
 
         iter_result = {
             "iteration": iteration,

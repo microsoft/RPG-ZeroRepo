@@ -46,7 +46,6 @@ from common.paths import (  # noqa: E402
     RPG_EDIT_PLAN_FILE,
     DATA_DIR,
     WORKSPACE_ROOT,
-    cmd_for,
 )
 from common.logging_setup import setup_file_logging  # noqa: E402
 from common.rpg_io import atomic_write_rpg  # noqa: E402
@@ -85,9 +84,8 @@ For each entry in "Code Changes to Apply":
 3. Ensure the result matches the RPG target state above
 
 After all changes are applied:
-1. Run: $SMOKE_TEST_CMD
-2. Run: $PYTEST_CMD
-3. If tests fail, fix the code and re-run
+1. Run: $PYTEST_CMD
+2. If tests fail, fix the code and re-run
 
 ## Constraints
 - Do NOT modify files outside "Code Changes to Apply"
@@ -124,9 +122,8 @@ Continue from where the previous iteration left off.
 Only modify files listed in "Remaining Changes" above.
 
 After all changes:
-1. Run: $SMOKE_TEST_CMD
-2. Run: $PYTEST_CMD
-3. If tests fail, fix the code
+1. Run: $PYTEST_CMD
+2. If tests fail, fix the code
 
 ## Constraints
 - Do NOT commit. The driver script will commit.
@@ -175,15 +172,12 @@ def _derive_test_files(code_changes: List[dict]) -> List[str]:
     return patterns
 
 
-def _build_validation_cmds(code_changes: List[dict]) -> Tuple[str, str]:
-    """Build absolute-path smoke_test and pytest commands.
+def _build_pytest_cmd(code_changes: List[dict]) -> str:
+    """Build the affected pytest command for the code agent.
 
     SubAgent inherits the parent's cwd (workspace root == REPO_DIR), but
-    we still use absolute paths to keep the prompt cwd-agnostic — it
-    must work no matter where the user runs the slash command from.
+    the final controller-owned Impact Review performs the broad smoke scan.
     """
-    smoke = f"{cmd_for('smoke_test.py')} --json"
-
     patterns = _derive_test_files(code_changes)
     if patterns:
         pattern_expr = " or ".join(patterns)
@@ -192,7 +186,7 @@ def _build_validation_cmds(code_changes: List[dict]) -> Tuple[str, str]:
         )
     else:
         pytest_cmd = "python3 -m pytest -x -q --timeout=30"
-    return smoke, pytest_cmd
+    return pytest_cmd
 
 
 def _derive_summary(plan: dict) -> str:
@@ -449,12 +443,11 @@ def _build_initial_prompt(
     impact_text: str,
     remaining: List[dict],
 ) -> str:
-    smoke_cmd, pytest_cmd = _build_validation_cmds(remaining)
+    pytest_cmd = _build_pytest_cmd(remaining)
     return CODE_PROMPT_INITIAL.safe_substitute(
         RPG_TARGET_NODES=rpg_nodes_text,
         CODE_CHANGES=_format_code_changes(remaining),
         IMPACT_CONTEXT=impact_text,
-        SMOKE_TEST_CMD=smoke_cmd,
         PYTEST_CMD=pytest_cmd,
     )
 
@@ -466,7 +459,7 @@ def _build_continue_prompt(
     iteration: int,
     total: int,
 ) -> str:
-    smoke_cmd, pytest_cmd = _build_validation_cmds(remaining)
+    pytest_cmd = _build_pytest_cmd(remaining)
     done_text = "\n".join(f"- {f}" for f in done_files) or "(none)"
     error_section = ""
     if last_error:
@@ -481,7 +474,6 @@ def _build_continue_prompt(
         DONE_FILES=done_text,
         REMAINING_CHANGES=_format_code_changes(remaining),
         ERROR_SECTION=error_section,
-        SMOKE_TEST_CMD=smoke_cmd,
         PYTEST_CMD=pytest_cmd,
     )
 

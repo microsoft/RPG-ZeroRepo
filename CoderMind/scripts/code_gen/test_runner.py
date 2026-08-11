@@ -761,7 +761,7 @@ def get_dev_python(repo_root: Path) -> Optional[str]:
 def ensure_dev_venv(repo_root: Path) -> Tuple[bool, Path]:
     """Lazily create the dev venv if it doesn't exist.
 
-    Installs pytest into it on creation.
+    Installs the baseline test and packaging tools into it on creation.
     
     Returns:
         Tuple of (created_new, venv_path)
@@ -790,8 +790,11 @@ def ensure_dev_venv(repo_root: Path) -> Tuple[bool, Path]:
         _logger.error("Failed to create dev venv: %s", exc)
         return False, venv_path
 
-    # Install pytest into the new venv
-    install_packages_into_venv(["pytest", "pytest-timeout"], repo_root)
+    # Smoke checks may inspect legacy setup.py metadata, so the isolated
+    # environment needs setuptools even when project imports do not declare it.
+    install_packages_into_venv(
+        ["pytest", "pytest-timeout", "setuptools"], repo_root,
+    )
     return True, venv_path
 
 
