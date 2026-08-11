@@ -98,6 +98,13 @@ def test_writes_complete_static_report(tmp_path: Path) -> None:
     assert "no evidence" in report_js
     assert "Data coverage" in report_js
     assert "function historyRecovered(node)" in report_js
+    assert "function historyAdvisory(node)" in report_js
+    assert 'pill("advisory", "advisory")' in report_js
+    assert 'lines.push("Recorded result: " + node.status)' in report_js
+    assert '"advisory", "completed_with_warnings"' in report_js
+    assert "Each row is an individual activity, not the overall pipeline result" in report_js
+    assert "This check is advisory and non-blocking" in report_js
+    assert 'String(childName).replace(/\\.py$/i, "")' in report_js
     assert 'pill("success", "recovered")' in report_js
     assert '["resolution", pill("success", "recovered")]' in report_js
     assert 'key === "script-run-batch"' in report_js
@@ -244,6 +251,16 @@ def test_writes_lazy_history_index_and_detail_files(tmp_path: Path) -> None:
                 "name": "summary_skeleton.py",
                 "status": "success",
                 "children": [],
+            }, {
+                "span_id": "spn_smoke",
+                "trace_id": "trc_root",
+                "parent_span_id": "spn_root",
+                "kind": "command.script",
+                "logical_key": "script-smoke-test",
+                "name": "smoke_test.py",
+                "status": "advisory",
+                "details": {"grouped_as": "rpg_edit_check", "mode": "advisory"},
+                "children": [],
             }],
         }],
     }
@@ -261,6 +278,8 @@ def test_writes_lazy_history_index_and_detail_files(tmp_path: Path) -> None:
     assert "recovered_attempts" in index_text
     assert "artifact-data-tasks-json" not in index_text
     assert "script-summary-skeleton" not in index_text
+    assert "script-smoke-test" in index_text
+    assert '"mode":"advisory"' in index_text
     detail_text = outputs.history_detail_files[0].read_text(encoding="utf-8")
     assert "window.CMIND_HISTORY_DETAILS" in detail_text
     assert "spn_child" in detail_text

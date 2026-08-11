@@ -55,7 +55,10 @@ _RUN_BATCH_MODES = (
 
 def script_activity_mode(script: str, arguments: list[str]) -> str | None:
     """Return a non-sensitive execution mode for supported script commands."""
-    if Path(script).name != "run_batch.py":
+    script_name = Path(script).name
+    if script_name == "smoke_test.py" and "--advisory" in arguments:
+        return "advisory"
+    if script_name != "run_batch.py":
         return None
     argument_set = set(arguments)
     return next((mode for flag, mode in _RUN_BATCH_MODES if flag in argument_set), None)

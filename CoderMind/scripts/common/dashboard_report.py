@@ -95,19 +95,26 @@ def _history_summary(root: dict[str, Any], detail_path: str) -> dict[str, Any]:
         child
         for child in all_children
         if isinstance(child, dict)
-        and child.get("kind") not in {
-            "artifact.write", "command.script", "tool.llm", "tool.script", "report.snapshot",
-        }
+        and (
+            child.get("kind") not in {
+                "artifact.write", "command.script", "tool.llm", "tool.script", "report.snapshot",
+            }
+            or (child.get("details") or {}).get("grouped_as") == "rpg_edit_check"
+        )
     ]
-    summary["children"] = [
-        {
+    summary_children = []
+    for child in children:
+        child_summary = {
             key: child.get(key)
             for key in keys
             if child.get(key) is not None
         }
-        for child in children
-        if isinstance(child, dict)
-    ]
+        if isinstance(child.get("metrics"), dict):
+            child_summary["metrics"] = child["metrics"]
+        if isinstance(child.get("details"), dict):
+            child_summary["details"] = child["details"]
+        summary_children.append(child_summary)
+    summary["children"] = summary_children
     summary["child_count"] = len(children)
     summary["evidence_count"] = len(all_children) - len(children)
     summary["detail_path"] = detail_path

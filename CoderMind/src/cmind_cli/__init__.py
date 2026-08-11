@@ -4659,6 +4659,15 @@ def _is_read_only_script(path: Path, args: List[str]) -> bool:
     )
 
 
+def _script_activity_status(return_code: int, mode: Optional[str]) -> str:
+    """Map process outcome and execution mode to a history status."""
+    if return_code != 0:
+        return "failed"
+    if mode == "advisory":
+        return "advisory"
+    return "success"
+
+
 @app.command(
     context_settings={
         "allow_extra_args": True,
@@ -4855,14 +4864,15 @@ def script(
             cmd = [sys.executable, str(path), *ctx.args]
             proc = subprocess.run(cmd, env=env)
         if script_activity is not None:
-            script_activity.status = "success" if proc.returncode == 0 else "failed"
+            activity_mode = script_activity_mode(relative_script, list(ctx.args))
+            script_activity.status = _script_activity_status(proc.returncode, activity_mode)
             if proc.returncode != 0:
                 script_activity.error = {"type": "ScriptExitError", "message": f"exit {proc.returncode}"}
             script_activity.note(
                 script=relative_script,
                 exit_code=proc.returncode,
                 argument_count=len(ctx.args),
-                mode=script_activity_mode(relative_script, list(ctx.args)),
+                mode=activity_mode,
                 rpg_edit_session_id=rpg_edit_session_id,
             )
             changed_artifacts = (
@@ -4909,33 +4919,10 @@ def script(
         and ws_root is not None
         and path.name != "generate_dashboard_snapshot.py"
         and not read_only_script
+        and not env.get(_DEFER_DASHBOARD_REFRESH_ENV)
     ):
-        generator = _resolve_script_path("generate_dashboard_snapshot.py")
-        if generator is not None:
-            try:
-                refresh = subprocess.run(
-                    [sys.executable, str(generator)],
-                    cwd=ws_root,
-                    env=env,
-                    stdout=subprocess.PIPE,
-                    stderr=subprocess.STDOUT,
-                    timeout=120,
-                )
-                refresh_output = refresh.stdout or b""
-                refresh_failed = refresh.returncode != 0
-            except (OSError, subprocess.TimeoutExpired) as exc:
-                refresh_output = f"dashboard refresh error: {exc}\n".encode("utf-8", errors="replace")
-                refresh_failed = True
-            from . import _storage
-            refresh_log = _storage.workspace_logs_dir(ws_root) / "generate_dashboard_snapshot.log"
-            try:
-                refresh_log.parent.mkdir(parents=True, exist_ok=True)
-                with refresh_log.open("ab") as handle:
-                    handle.write(refresh_output)
-            except OSError:
-                pass
-            if refresh_failed:
-                console.print("[yellow]warning:[/yellow] dashboard report refresh failed; see generate_dashboard_snapshot.log")
+        if not _refresh_dashboard_report(ws_root, env):
+            console.print("[yellow]warning:[/yellow] dashboard report refresh failed; see generate_dashboard_snapshot.log")
 
     raise typer.Exit(proc.returncode)
 
@@ -4971,6 +4958,37 @@ def _resolve_script_path(relpath: str) -> Optional[Path]:
     return candidate
 
 
+def _refresh_dashboard_report(workspace: Path, env: Dict[str, str]) -> bool:
+    """Refresh the static dashboard and persist generator output."""
+    generator = _resolve_script_path("generate_dashboard_snapshot.py")
+    if generator is None:
+        return False
+    try:
+        refresh = subprocess.run(
+            [sys.executable, str(generator)],
+            cwd=workspace,
+            env=env,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            timeout=120,
+        )
+        refresh_output = refresh.stdout or b""
+        refresh_failed = refresh.returncode != 0
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        refresh_output = f"dashboard refresh error: {exc}\n".encode("utf-8", errors="replace")
+        refresh_failed = True
+
+    from . import _storage
+    refresh_log = _storage.workspace_logs_dir(workspace) / "generate_dashboard_snapshot.log"
+    try:
+        refresh_log.parent.mkdir(parents=True, exist_ok=True)
+        with refresh_log.open("ab") as handle:
+            handle.write(refresh_output)
+    except OSError:
+        pass
+    return not refresh_failed
+
+
 # ---------------------------------------------------------------------------
 # Git-hook dispatch: ``cmind hook <name>``
 # ---------------------------------------------------------------------------
@@ -4986,6 +5004,7 @@ _HOOK_LOG_FILENAME = "hooks.log"
 _HOOK_BACKGROUND_LOG = "update_rpg.log"
 _HOOK_LOCK_DIRNAME = ".update_rpg.lock"
 _HOOK_LOCK_STALE_SECONDS = 60 * 60  # 60 minutes -- matches the old shell impl
+_DEFER_DASHBOARD_REFRESH_ENV = "CMIND_DEFER_DASHBOARD_REFRESH"
 
 
 def _hook_log_line(log_path: Path, msg: str) -> None:
@@ -5024,12 +5043,14 @@ def _hook_run_foreground(
 ) -> int:
     """Run ``cmind script <script_args>`` and tee output into ``log_path``."""
     _hook_log_line(log_path, f"{label}: start ({' '.join(script_args)})")
+    foreground_env = env.copy()
+    foreground_env[_DEFER_DASHBOARD_REFRESH_ENV] = "1"
     try:
         with open(log_path, "a", encoding="utf-8") as fh:
             proc = subprocess.run(
                 ["cmind", "script", *script_args],
                 cwd=str(workspace),
-                env=env,
+                env=foreground_env,
                 stdout=fh, stderr=subprocess.STDOUT,
                 timeout=300,
             )
@@ -5228,6 +5249,10 @@ def hook(name: str = typer.Argument(..., help="Hook name: post-commit | post-mer
             else:
                 _hook_log_line(log_path, f"unknown hook name: {name!r}")
                 raise typer.Exit(0)
+
+        if name in {"post-commit", "post-merge"}:
+            if not _refresh_dashboard_report(ws, env):
+                _hook_log_line(log_path, "dashboard refresh failed after hook completion")
 
     except typer.Exit:
         raise

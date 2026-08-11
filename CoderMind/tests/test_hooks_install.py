@@ -22,6 +22,7 @@ import sys
 from pathlib import Path
 
 import pytest
+import typer
 
 # Ensure src/ and scripts/ are importable
 _project_root = Path(__file__).resolve().parent.parent
@@ -49,6 +50,71 @@ def project(tmp_path):
     for pkg in ("common", "rpg"):
         (scripts_dir / pkg).mkdir()
     return tmp_path
+
+
+def test_post_merge_refreshes_dashboard_after_activity_finishes(tmp_path, monkeypatch):
+    from cmind_cli import _storage
+
+    workspace = tmp_path / "workspace"
+    logs_dir = tmp_path / "home" / "logs"
+    workspace.mkdir()
+    logs_dir.mkdir(parents=True)
+
+    monkeypatch.chdir(workspace)
+    monkeypatch.setattr(_storage, "find_workspace_root_from", lambda path: workspace)
+    monkeypatch.setattr(_storage, "home_workspace_dir", lambda path: logs_dir.parent)
+    monkeypatch.setattr(_storage, "workspace_logs_dir", lambda path: logs_dir)
+    monkeypatch.setattr(cmind_cli, "_short_head_sha", lambda path: "abc1234")
+    monkeypatch.setattr(cmind_cli, "_hook_run_foreground", lambda *args, **kwargs: 0)
+
+    observed = {}
+
+    def refresh(path, env):
+        events = []
+        for event_file in (logs_dir / "activity").rglob("*.jsonl"):
+            events.extend(json.loads(line) for line in event_file.read_text().splitlines())
+        observed["events"] = events
+        return True
+
+    monkeypatch.setattr(cmind_cli, "_refresh_dashboard_report", refresh)
+
+    with pytest.raises(typer.Exit) as exit_info:
+        cmind_cli.hook("post-merge")
+
+    assert exit_info.value.exit_code == 0
+    assert any(
+        event["event_type"] == "span_finished"
+        and event["kind"] == "hook.workflow"
+        and event["status"] == "success"
+        for event in observed["events"]
+    )
+
+
+def test_hook_foreground_defers_child_dashboard_refresh(tmp_path, monkeypatch):
+    captured = {}
+
+    def run(command, **kwargs):
+        captured.update(kwargs)
+        return subprocess.CompletedProcess(command, 0)
+
+    monkeypatch.setattr(subprocess, "run", run)
+
+    result = cmind_cli._hook_run_foreground(
+        tmp_path,
+        tmp_path / "hooks.log",
+        {"PATH": "/bin"},
+        ["update_graphs.py", "sync"],
+        "sync",
+    )
+
+    assert result == 0
+    assert captured["env"][cmind_cli._DEFER_DASHBOARD_REFRESH_ENV] == "1"
+
+
+def test_advisory_script_status_is_warning_not_failure():
+    assert cmind_cli._script_activity_status(0, "advisory") == "advisory"
+    assert cmind_cli._script_activity_status(1, "advisory") == "failed"
+    assert cmind_cli._script_activity_status(0, None) == "success"
 
 
 # ---------------------------------------------------------------------------

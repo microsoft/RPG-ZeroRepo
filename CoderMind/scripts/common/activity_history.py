@@ -59,6 +59,7 @@ def _activity_spans(
         "attempts_used", "file_path", "result_type", "script", "exit_code",
         "prev_ref", "previous_commit", "new_commit",
         "argument_count", "rpg_edit_session_id", "git_sha", "hook_type",
+        "blocking", "error_count", "warning_count",
     )
     for span_id, raw in by_span.items():
         status = raw.get("status") or "running"
@@ -519,6 +520,77 @@ def _attach_workflow_helpers(roots: list[dict[str, Any]]) -> list[dict[str, Any]
     return retained
 
 
+def _attach_rpg_edit_checks(roots: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Project smoke checks as direct children of their RPG Edit workflow.
+
+    New controller-owned checks retain the RPG Edit trace but may be nested
+    beneath the review command wrapper. Older agent-invoked smoke commands
+    lost trace context, so recover those only when their timestamp is contained
+    by one unambiguous RPG Edit workflow interval.
+    """
+    check_keys = {"decoder-rpg-edit-smoke", "script-smoke-test"}
+
+    def extract_checks(node: dict[str, Any]) -> list[dict[str, Any]]:
+        retained_children: list[dict[str, Any]] = []
+        found: list[dict[str, Any]] = []
+        for child in node.get("children") or []:
+            found.extend(extract_checks(child))
+            if child.get("logical_key") in check_keys:
+                found.append(child)
+            else:
+                retained_children.append(child)
+        node["children"] = retained_children
+        return found
+
+    owners = [root for root in roots if root.get("logical_key") == "decoder-rpg-edit"]
+    retained_roots = [root for root in roots if root.get("logical_key") not in check_keys]
+    orphan_checks = [root for root in roots if root.get("logical_key") in check_keys]
+
+    for owner in owners:
+        checks = extract_checks(owner)
+        for check in checks:
+            check["parent_span_id"] = owner.get("span_id")
+            details = check.setdefault("details", {})
+            details["grouped_as"] = "rpg_edit_check"
+            details.setdefault("blocking", False)
+        owner.setdefault("children", []).extend(checks)
+
+    for check in orphan_checks:
+        check_started = _parse_timestamp(check.get("started_at"))
+        candidates = [
+            owner
+            for owner in owners
+            if _parse_timestamp(owner.get("started_at")) <= check_started
+            <= _parse_timestamp(owner.get("finished_at"))
+        ]
+        if len(candidates) != 1:
+            retained_roots.append(check)
+            continue
+        owner = candidates[0]
+        check["parent_span_id"] = owner.get("span_id")
+        details = check.setdefault("details", {})
+        details["grouped_as"] = "rpg_edit_check"
+        details.setdefault("blocking", False)
+        owner.setdefault("children", []).append(check)
+
+    for owner in owners:
+        owner["children"].sort(key=lambda item: (
+            _parse_timestamp(item.get("started_at")),
+            item.get("sequence") is None,
+            int(item.get("sequence") or 0),
+            str(item.get("span_id")),
+        ))
+        owner.setdefault("metrics", {})["checks"] = sum(
+            child.get("logical_key") in check_keys for child in owner["children"]
+        )
+
+    retained_roots.sort(
+        key=lambda item: (_parse_timestamp(item.get("started_at")), str(item.get("span_id"))),
+        reverse=True,
+    )
+    return retained_roots
+
+
 def _count_nodes(spans: list[dict[str, Any]]) -> int:
     return sum(1 + _count_nodes(span.get("children") or []) for span in spans)
 
@@ -576,8 +648,10 @@ def collect_run_history(
     spans = _virtual_rpg_edit_roots([*v2, *legacy_runs, *legacy_hooks, *legacy_mcp])
     roots = _annotate_recovered_attempts(
         _rollup_hook_workflows(
-            _attach_workflow_helpers(
-                _collapse_script_wrappers(_tree(_virtual_call_roots(spans)))
+            _attach_rpg_edit_checks(
+                _attach_workflow_helpers(
+                    _collapse_script_wrappers(_tree(_virtual_call_roots(spans)))
+                )
             )
         )
     )

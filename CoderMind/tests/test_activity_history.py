@@ -11,8 +11,18 @@ _SCRIPTS = _REPO / "scripts"
 if str(_SCRIPTS) not in sys.path:
     sys.path.insert(0, str(_SCRIPTS))
 
-from common.activity_events import ActivityWriter, record_activity, record_completed_activity  # noqa: E402
+from common.activity_events import (  # noqa: E402
+    ActivityWriter,
+    record_activity,
+    record_completed_activity,
+    script_activity_mode,
+)
 from common.activity_history import collect_run_history  # noqa: E402
+
+
+def test_smoke_advisory_activity_mode_is_explicit() -> None:
+    assert script_activity_mode("smoke_test.py", ["--json", "--advisory"]) == "advisory"
+    assert script_activity_mode("smoke_test.py", ["--json"]) is None
 
 
 def test_history_prefers_v2_and_builds_parent_child_tree(tmp_path: Path) -> None:
@@ -248,6 +258,60 @@ def test_history_attaches_summary_script_as_workflow_evidence(tmp_path: Path) ->
     assert root["logical_key"] == "decoder-build-skeleton"
     helper = next(child for child in root["children"] if child["logical_key"] == "script-summary-skeleton")
     assert helper["details"]["grouped_as"] == "workflow_evidence"
+
+
+def test_history_attaches_orphan_smoke_as_direct_rpg_edit_child(tmp_path: Path) -> None:
+    writer = ActivityWriter(tmp_path / "logs/activity", workspace_id="ws_test")
+    phase_common = {
+        "trace_id": "trc_rpg_edit",
+        "parent_span_id": None,
+        "kind": "command.script",
+    }
+    phases = (
+        ("spn_validate", "validate", "2026-08-05T00:00:00.000Z", "2026-08-05T00:00:01.000Z"),
+        ("spn_review", "review", "2026-08-05T00:00:10.000Z", "2026-08-05T00:00:20.000Z"),
+    )
+    for span_id, phase, started_at, finished_at in phases:
+        writer.append(
+            "span_started", span_id=span_id, name=f"rpg_edit/{phase}.py",
+            logical_key=f"decoder-rpg-edit-{phase}", status="running",
+            timestamp=started_at, **phase_common,
+        )
+        writer.append(
+            "span_finished", span_id=span_id, name=f"rpg_edit/{phase}.py",
+            logical_key=f"decoder-rpg-edit-{phase}", status="success",
+            timestamp=finished_at,
+            fields={"started_at": started_at, "finished_at": finished_at, "duration_ms": 1000},
+            **phase_common,
+        )
+    writer.append(
+        "span_started", trace_id="trc_lost", span_id="spn_smoke",
+        parent_span_id=None, kind="command.script", name="smoke_test.py",
+        logical_key="script-smoke-test", status="running",
+        timestamp="2026-08-05T00:00:05.000Z",
+    )
+    writer.append(
+        "span_finished", trace_id="trc_lost", span_id="spn_smoke",
+        parent_span_id=None, kind="command.script", name="smoke_test.py",
+        logical_key="script-smoke-test", status="advisory",
+        timestamp="2026-08-05T00:00:06.000Z",
+        fields={
+            "started_at": "2026-08-05T00:00:05.000Z",
+            "finished_at": "2026-08-05T00:00:06.000Z",
+            "duration_ms": 1000,
+            "mode": "advisory",
+        },
+    )
+
+    history = collect_run_history(tmp_path / "logs", [], [], [])
+
+    assert history["summary"]["root_count"] == 1
+    rpg_edit = history["roots"][0]
+    smoke = next(child for child in rpg_edit["children"] if child["logical_key"] == "script-smoke-test")
+    assert smoke["parent_span_id"] == rpg_edit["span_id"]
+    assert smoke["details"]["grouped_as"] == "rpg_edit_check"
+    assert smoke["details"]["blocking"] is False
+    assert smoke["status"] == "advisory"
 
 
 @pytest.mark.parametrize(

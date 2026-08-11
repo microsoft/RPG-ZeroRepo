@@ -37,7 +37,7 @@
     if (["success", "completed", "ok", "passed", "available", "true"].indexOf(s) >= 0) return "ok";
     if (["running", "in_progress"].indexOf(s) >= 0) return "running";
     if (["failed", "error", "false", "timed_out", "cancelled", "interrupted"].indexOf(s) >= 0) return "fail";
-    if (["completed_with_warnings", "warning", "warn", "partial", "invalid", "unreadable", "degraded"].indexOf(s) >= 0) return "warn";
+    if (["advisory", "completed_with_warnings", "warning", "warn", "partial", "invalid", "unreadable", "degraded"].indexOf(s) >= 0) return "warn";
     return "pending";
   }
   function pill(status, labelOverride) {
@@ -619,7 +619,11 @@
       .replace(/\bRpg\b/g, "RPG").replace(/\bMcp\b/g, "MCP").replace(/\bLlm\b/g, "LLM");
   }
   function historyDisplayName(node, child) {
-    if (child) return humanizeHistoryName(node.name || node.logical_key);
+    if (child) {
+      var childName = node.name || node.logical_key;
+      if (node.kind === "command.script") childName = String(childName).replace(/\.py$/i, "");
+      return humanizeHistoryName(childName);
+    }
     var key = String(node.logical_key || "");
     var prefix = key.indexOf("encoder-") === 0 ? "Encoder / " : key.indexOf("decoder-") === 0 ? "Decoder / " : "";
     var name = node.name || key.replace(/^(encoder|decoder)-/, "");
@@ -646,24 +650,35 @@
   function historyRecovered(node) {
     return !!(node && node.recovery && node.recovery.status === "recovered");
   }
+  function historyAdvisory(node) {
+    var details = (node && node.details) || {};
+    return details.mode === "advisory" || details.blocking === false;
+  }
   function historyStatusKind(node) {
-    return historyRecovered(node) ? "ok" : statusKind(node && node.status);
+    return historyRecovered(node) ? "ok" : historyAdvisory(node) ? "warn" : statusKind(node && node.status);
   }
   function historyStatusPill(node) {
-    return historyRecovered(node) ? pill("success", "recovered") : pill((node && node.status) || "unknown");
+    return historyRecovered(node) ? pill("success", "recovered")
+      : historyAdvisory(node) ? pill("advisory", "advisory")
+      : pill((node && node.status) || "unknown");
   }
   function historyTooltip(node) {
-    var lines = [historyDisplayName(node, false), "Status: " + (node.status || "unknown"),
+    var lines = [historyDisplayName(node, false), "Status: " + (historyAdvisory(node) ? "advisory" : (node.status || "unknown")),
       "Started: " + historyTime(node.started_at), "Finished: " + historyTime(node.finished_at),
       "Duration: " + historyDuration(node.duration_ms), "Trigger: " + (node.trigger || "unknown"),
       "Evidence: " + (node.quality || "unknown")];
+    if (historyAdvisory(node)) {
+      lines.push("Semantics: non-blocking advisory; not the overall pipeline result");
+      if (node.status && node.status !== "advisory") lines.push("Recorded result: " + node.status);
+    }
     if (historyRecovered(node)) lines.push("Resolution: recovered by a later successful attempt at "
       + historyTime(node.recovery.by_finished_at || node.recovery.by_started_at));
     return lines.join("\n");
   }
   function historyMatches(root) {
     var key = String(root.logical_key || "").toLowerCase(), kind = String(root.kind || "");
-    var failed = statusKind(root.status) === "fail" || (root.children || []).some(function (child) { return statusKind(child.status) === "fail"; });
+    var failed = (!historyAdvisory(root) && statusKind(root.status) === "fail")
+      || (root.children || []).some(function (child) { return !historyAdvisory(child) && statusKind(child.status) === "fail"; });
     var filterMatch = historyFilter === "all"
       || (historyFilter === "encoder" && key.indexOf("encoder-") === 0)
       || (historyFilter === "decoder" && key.indexOf("decoder-") === 0)
@@ -754,7 +769,11 @@
     }).join("") + '</div>';
   }
   function openHistoryDrawer(root, target) {
-    var statusRows = [["status", pill(target.status)]];
+    var details = target.details || {};
+    var statusRows = [["status", historyStatusPill(target)]];
+    if (historyAdvisory(target) && target.status !== "advisory") {
+      statusRows.push(["recorded result", pill(target.status)]);
+    }
     if (historyRecovered(target)) statusRows.push(
       ["resolution", pill("success", "recovered")],
       ["recovered by", '<span class="mono">' + esc(historyTime(target.recovery.by_finished_at || target.recovery.by_started_at)) + '</span>']
@@ -769,8 +788,8 @@
       ["attempt", target.attempt == null ? "—" : target.attempt], ["evidence", qBadge(target.quality) || "—"],
       ["logical key", '<span class="mono">' + esc(target.logical_key || "—") + '</span>'],
       ["trace", '<span class="mono">' + esc(target.trace_id || root.trace_id || "—") + '</span>']])) + '</div>';
+    if (details.mode === "advisory" || details.blocking === false) body += '<div class="note warn"><span class="i">i</span><span>This check is advisory and non-blocking. Its findings do not represent the overall pipeline result.</span></div>';
     if (target.error) body += '<div class="note warn"><span class="i">⚠</span><span>' + esc(typeof target.error === "object" ? (target.error.message || JSON.stringify(target.error)) : target.error) + '</span></div>';
-    var details = target.details || {};
     var metrics = target.metrics || {};
     if (metrics.prev_ref || metrics.previous_commit || metrics.new_commit) {
       body += '<div class="drawer-section"><h4>Processed Git range</h4>' + kvTable([
@@ -817,7 +836,7 @@
     var maxMb = ((Number(retention.max_bytes) || 0) / 1048576).toFixed(0);
     var controls = [["all", "All"], ["encoder", "Encoder"], ["decoder", "Decoder"], ["hooks", "Hooks"], ["mcp", "MCP"], ["failures", "Failures"]]
       .map(function (item) { return '<button class="' + (historyFilter === item[0] ? "active" : "") + '" data-history-filter="' + item[0] + '">' + item[1] + '</button>'; }).join("");
-    $("#view-runs").innerHTML = '<div class="page-head history-head"><div><div class="eyebrow">History</div><h2>Run History</h2><p>All recorded CoderMind activity in this workspace. Pipeline shows only the latest state.</p></div></div>'
+    $("#view-runs").innerHTML = '<div class="page-head history-head"><div><div class="eyebrow">History</div><h2>Run History</h2><p>Each row is an individual activity, not the overall pipeline result. Pipeline shows only the latest state.</p></div></div>'
       + '<div class="history-toolbar"><div class="seg history-filters">' + controls + '</div><label class="history-search"><span>⌕</span><input id="historySearch" value="' + esc(historySearch) + '" placeholder="Search runs and stages"></label></div>'
       + '<div class="note history-retention"><span class="i">ℹ</span><span>History is retained automatically for <b>' + num(retention.days || 90) + ' days</b> or <b>' + esc(maxMb) + ' MB</b>. Current activity storage: <b>' + esc(usedMb) + ' MB</b>.</span></div>'
       + '<div class="surface history-surface"><div class="surface-head"><h3>Execution tree</h3><span class="hint" id="historyCount">' + num(filteredHistoryRoots().length) + ' roots · newest first</span></div><div id="historyTree">' + historyTreeHtml() + '</div></div>'
