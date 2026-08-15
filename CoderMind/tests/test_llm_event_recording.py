@@ -192,6 +192,34 @@ def test_structured_call_prefers_final_schema_valid_result(monkeypatch):
     assert result.value == 42
 
 
+def test_parse_result_json_repairs_missing_commas():
+    client = LLMClient(tool="copilot")
+
+    result = client.parse_result_json(
+        '<result_json>{"items":[{"name":"one"} {"name":"two"}]}</result_json>'
+    )
+
+    assert result == {"items": [{"name": "one"}, {"name": "two"}]}
+
+
+def test_structured_call_normalizes_model_specific_payload(monkeypatch):
+    class Result(BaseModel):
+        value: int
+
+        @classmethod
+        def normalize_llm_payload(cls, payload):
+            return {"value": payload["count"]}
+
+    client = LLMClient(tool="copilot")
+    monkeypatch.setattr(client, "generate", lambda **kwargs: '<result_json>{"count":7}</result_json>')
+    monkeypatch.setattr(client, "update_last_parsed_result", lambda parsed: None)
+
+    _, result, _ = client.call_structured("system", "user", Result, max_retries=1)
+
+    assert result is not None
+    assert result.value == 7
+
+
 def test_code_gen_sub_agent_explicitly_enables_tools(tmp_path, monkeypatch):
     captured = {}
 

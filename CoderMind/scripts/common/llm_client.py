@@ -15,6 +15,7 @@ import signal as _signal
 import subprocess
 import time
 import tomllib
+import json5
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
@@ -24,6 +25,7 @@ from common.llm_types import Memory
 from common.progress import update_progress
 from common.run_events import event_context_environment, record_llm_call
 from common.session_manager import create_session_manager
+from json_repair import repair_json
 from . import paths as _paths
 from .paths import REPO_DIR as _REPO_DIR, WORKSPACE_ROOT as _WORKSPACE_ROOT
 
@@ -871,6 +873,26 @@ class LLMClient:
         except json.JSONDecodeError as first_err:
             self.logger.debug(f"First parse attempt failed: {first_err}")
 
+        # JSON5 covers comments, trailing commas, and Python-style quoting.
+        # It intentionally rejects structural omissions such as missing commas.
+        try:
+            data = json5.loads(json_str)
+            if "parameters" in data:
+                return data["parameters"]
+            return data
+        except (ValueError, TypeError) as json5_err:
+            self.logger.debug(f"JSON5 parse attempt failed: {json5_err}")
+
+        # Model output occasionally omits a comma or leaves an inner quote
+        # unescaped. Repair the original text before applying legacy regexes.
+        try:
+            data = json.loads(repair_json(json_str))
+            if "parameters" in data:
+                return data["parameters"]
+            return data
+        except (json.JSONDecodeError, TypeError, ValueError) as repair_err:
+            self.logger.debug(f"JSON repair attempt failed: {repair_err}")
+
         # ----- JSON repair pass -----
         # Remove trailing commas before closing brackets
         json_str = re.sub(r",\s*}", "}", json_str)
@@ -1040,6 +1062,9 @@ class LLMClient:
                     if not parsed_data:
                         continue
                     parsed_any = True
+                    normalizer = getattr(response_model, "normalize_llm_payload", None)
+                    if callable(normalizer):
+                        parsed_data = normalizer(parsed_data)
                     result = self.validate_structure(parsed_data, response_model)
                     if result is not None:
                         self.update_last_parsed_result(parsed_data)

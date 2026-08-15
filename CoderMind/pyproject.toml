@@ -29,6 +29,7 @@ dependencies = [
     "rapidfuzz",
     "libcst",
     "json5",
+    "json-repair",
     "tiktoken",
     "tqdm",
     "openai>=1.0.0",

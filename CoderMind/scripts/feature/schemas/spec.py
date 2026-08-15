@@ -29,7 +29,9 @@ Downstream consumers MUST tolerate missing/empty evidence
 
 from __future__ import annotations
 
-from typing import List, Literal
+import re
+from copy import deepcopy
+from typing import Any, List, Literal
 
 from pydantic import BaseModel, Field, model_validator
 
@@ -265,6 +267,65 @@ class FeatureSpecOutput(BaseModel):
             "repository."
         ),
     )
+
+    @classmethod
+    def normalize_llm_payload(cls, payload: Any) -> Any:
+        """Repair safe omissions in model output before strict validation.
+
+        Evidence is optional, so incomplete citations must not invalidate an
+        otherwise useful requirement tree. Repository identity is mandatory but
+        can be derived without guesswork from the model's own metadata.
+        """
+        if not isinstance(payload, dict):
+            return payload
+        data = deepcopy(payload)
+
+        def normalize_evidence(item: Any) -> None:
+            if not isinstance(item, dict):
+                return
+            evidence = item.get("evidence")
+            if isinstance(evidence, list):
+                valid = []
+                for citation in evidence:
+                    if not isinstance(citation, dict):
+                        continue
+                    required = ("id", "source", "line_start", "line_end")
+                    if any(citation.get(key) in (None, "") for key in required):
+                        continue
+                    try:
+                        citation = dict(citation)
+                        citation["line_start"] = int(citation["line_start"])
+                        citation["line_end"] = int(citation["line_end"])
+                    except (TypeError, ValueError):
+                        continue
+                    if citation["line_start"] < 1 or citation["line_end"] < 1:
+                        continue
+                    valid.append(citation)
+                item["evidence"] = valid
+            for child in item.get("children") or []:
+                normalize_evidence(child)
+
+        for key in ("background_and_overview", "non_functional_requirements", "functional_requirements"):
+            for item in data.get(key) or []:
+                normalize_evidence(item)
+
+        meta = data.get("meta") if isinstance(data.get("meta"), dict) else {}
+        if not data.get("repository_name"):
+            source_documents = meta.get("source_documents") or []
+            source = str(source_documents[0]) if source_documents else "generated-project"
+            name = re.sub(r"\.[^.]+$", "", source).lower()
+            name = re.sub(r"[^a-z0-9]+", "-", name).strip("-")
+            data["repository_name"] = name or "generated-project"
+        if not data.get("repository_purpose"):
+            purpose = meta.get("project_notes")
+            if not isinstance(purpose, str) or not purpose.strip():
+                background = data.get("background_and_overview") or []
+                first = background[0] if background and isinstance(background[0], dict) else {}
+                purpose = first.get("description")
+            data["repository_purpose"] = (
+                str(purpose).strip() if purpose else "Generated from the supplied requirements."
+            )
+        return data
     @property
     def target_language(self) -> str | None:
         """The primary target programming language."""
