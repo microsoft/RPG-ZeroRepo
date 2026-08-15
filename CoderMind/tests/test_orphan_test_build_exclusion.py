@@ -231,6 +231,49 @@ class TestFeatureCoverageExcludesTestBuild:
         assert connectivity["orphan_units"] == []
         assert feature_orphans == []
 
+    def test_qualified_method_invocation_matches_flattened_method_unit(self):
+        data = _interfaces(
+            {
+                "method execute": ["Task Data and JSON Persistence/repository/execute command"],
+                "method load": ["Task Data and JSON Persistence/repository/load selected file"],
+                "method save": ["Task Data and JSON Persistence/repository/save selected file"],
+            },
+            subtree="Task Data and JSON Persistence",
+            file_path="src/tasklite/storage/repository.py",
+        )
+        flow = {
+            "invocation_edges": [
+                {
+                    "caller": "method TaskRepository.execute",
+                    "caller_file": "src/tasklite/storage/repository.py",
+                    "callee": "method TaskRepository.load",
+                    "callee_file": "src/tasklite/storage/repository.py",
+                },
+                {
+                    "caller": "method TaskRepository.execute",
+                    "caller_file": "src/tasklite/storage/repository.py",
+                    "callee": "method TaskRepository.save",
+                    "callee_file": "src/tasklite/storage/repository.py",
+                },
+            ],
+            "inheritance_edges": [],
+            "reference_edges": [],
+        }
+
+        connectivity = check_call_graph_connectivity(
+            data, flow, entry_points=[],
+            is_callable=get_backend("python").is_callable_unit,
+            is_test_file=get_backend("python").is_test_file,
+        )
+        feature_orphans = check_feature_dependency_coverage(
+            data, flow, entry_points=[],
+            is_callable=get_backend("python").is_callable_unit,
+            is_test_file=get_backend("python").is_test_file,
+        )
+
+        assert connectivity["orphan_units"] == []
+        assert feature_orphans == []
+
     def test_ambiguous_entry_point_alias_without_file_is_not_overmatched(self):
         data = {
             "subtrees": {
