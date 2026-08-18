@@ -54,7 +54,7 @@ import platform
 import importlib.metadata
 import tomllib
 
-from . import _storage
+from . import _storage, _workspace_config
 
 ssl_context = truststore.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
 client = httpx.Client(verify=ssl_context)
@@ -342,22 +342,7 @@ CLAUDE_LOCAL_PATH = Path.home() / ".claude" / "local" / "claude"
 #                                       user's original choice.  Mirrors the
 #                                       constants in :mod:`cmind_cli._storage`.
 
-_AI_TO_CLI_CMD = {
-    # NOTE: values below are copied verbatim from
-    # .github/workflows/scripts/cmind/create-release-packages.sh lines ~142-169
-    # to guarantee bundle mode and legacy-download mode behave identically.
-    "copilot":      "copilot",
-    "claude":       "claude",
-    "gemini":       "gemini -p",
-    "qwen":         "qwen -p",
-    "cursor-agent": "agent -p",
-    "auggie":       "augment -p",
-    "codex":        "codex exec",
-    "codebuddy":    "codebuddy -p",
-    "qoder":        "qodercli -p",
-    "opencode":     "opencode run",
-    "amp":          "amp --execute",
-}
+_AI_TO_CLI_CMD = _workspace_config.AGENT_CLI_COMMANDS
 
 # Re-exported (under the older names) to minimise churn at call sites;
 # the canonical strings now live in :mod:`cmind_cli._storage`.
@@ -419,25 +404,7 @@ def _write_workspace_config(project_path: Path, selected_ai: str) -> None:
     ``ai_cli_cmd``, leave it alone (the user may have customised it).
     Only writes a fresh file when one is missing.
     """
-    cfg_path = project_path / _CONFIG_RELPATH
-    cli_cmd = _AI_TO_CLI_CMD.get(selected_ai, selected_ai)
-
-    if cfg_path.exists():
-        # Don't clobber user edits.  We could merge here, but plain
-        # workspaces don't need the complexity and a stale value is a
-        # supported configuration (env var override remains available).
-        return
-
-    cfg_path.parent.mkdir(parents=True, exist_ok=True)
-    cfg_path.write_text(
-        "# CoderMind workspace configuration\n"
-        "# Managed by `cmind init` / `cmind update`.  Safe to commit.\n"
-        "# See: https://github.com/microsoft/RPG-ZeroRepo (CoderMind/docs/configuration.md)\n"
-        "\n"
-        "[cmind]\n"
-        f'ai_cli_cmd = "{cli_cmd}"\n',
-        encoding="utf-8",
-    )
+    _workspace_config.initialize(project_path, selected_ai)
 
 
 def _detect_install_method() -> str:
@@ -1117,6 +1084,56 @@ app = typer.Typer(
     invoke_without_command=True,
     cls=BannerGroup,
 )
+config_app = typer.Typer(
+    help="Inspect or change the active encoder/decoder LLM backend.",
+    no_args_is_help=True,
+)
+app.add_typer(config_app, name="config")
+
+
+def _config_workspace() -> Path:
+    workspace = _storage.find_workspace_root_from(Path.cwd())
+    if workspace is None:
+        console.print(
+            "[red]Error:[/red] No CoderMind workspace found. "
+            "Run this command inside a workspace created by `cmind init`."
+        )
+        raise typer.Exit(1)
+    return workspace
+
+
+@config_app.command("show")
+def config_show() -> None:
+    """Show the active encoder/decoder LLM backend."""
+    try:
+        backend = _workspace_config.read_active_backend(_config_workspace())
+    except _workspace_config.WorkspaceConfigError as exc:
+        console.print(f"[red]Error:[/red] {exc}")
+        raise typer.Exit(1) from exc
+
+    agent = backend.agent or "custom"
+    console.print(f"[cyan]Active backend:[/cyan] {agent}")
+    console.print(f"[cyan]CLI command:[/cyan] {backend.command}")
+
+
+@config_app.command("set-agent")
+def config_set_agent(
+    agent: str = typer.Argument(
+        ...,
+        help="Backend for encoder/decoder: copilot, claude, or codex.",
+    ),
+) -> None:
+    """Set the active encoder/decoder LLM backend."""
+    try:
+        backend = _workspace_config.set_active_backend(_config_workspace(), agent)
+    except _workspace_config.WorkspaceConfigError as exc:
+        console.print(f"[red]Error:[/red] {exc}")
+        raise typer.Exit(1) from exc
+
+    console.print(
+        f"[green]Active backend set to {backend.agent}[/green] "
+        f"([cyan]{backend.command}[/cyan])"
+    )
 
 
 def show_banner():

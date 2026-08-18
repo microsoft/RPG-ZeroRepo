@@ -34,7 +34,8 @@ dependencies = [
     "openai>=1.0.0",
     "anthropic>=0.20.0",
     "mcp>=1.0.0",
-    "pyyaml>=6.0"
+    "pyyaml>=6.0",
+    "tomlkit>=0.13.0"
 ]
 
 [project.scripts]
