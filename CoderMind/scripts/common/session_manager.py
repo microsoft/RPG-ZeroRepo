@@ -453,6 +453,45 @@ class CopilotSessionManager(SessionManager):
 
 
 # ============================================================================
+# Codex CLI manager
+# ============================================================================
+
+class CodexSessionManager(SessionManager):
+    """Prepare non-interactive Codex calls without bypassing its sandbox."""
+
+    def __init__(
+        self,
+        project_dir: Path,
+        trace_filename_builder: Optional[Callable[[str], str]] = None,
+        logger: Optional[logging.Logger] = None,
+    ) -> None:
+        super().__init__(project_dir, trace_filename_builder, logger)
+        self._prompt_file: Optional[Any] = None
+
+    def before(self, ctx: TraceContext, prompt: str) -> None:
+        self._close_prompt_file()
+        self._prompt_file = tempfile.TemporaryFile(mode="w+", encoding="utf-8")
+        self._prompt_file.write(prompt)
+        self._prompt_file.seek(0)
+        ctx.stdin = self._prompt_file
+        ctx.extra_args.extend([
+            "--approve-for-me",
+            "--ephemeral",
+            "--skip-git-repo-check",
+            "-",
+        ])
+
+    def after(self, purpose: str) -> Optional[Path]:
+        self._close_prompt_file()
+        return None
+
+    def _close_prompt_file(self) -> None:
+        if self._prompt_file is not None:
+            self._prompt_file.close()
+            self._prompt_file = None
+
+
+# ============================================================================
 # Factory
 # ============================================================================
 
@@ -460,6 +499,7 @@ class CopilotSessionManager(SessionManager):
 _MANAGER_REGISTRY: Dict[str, type] = {
     "claude": ClaudeSessionManager,
     "copilot": CopilotSessionManager,
+    "codex": CodexSessionManager,
 }
 
 
