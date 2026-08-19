@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import argparse
 import json
 import re
 from dataclasses import dataclass
@@ -71,8 +72,9 @@ def render_template(source: Path) -> RenderedSkill:
                 "",
                 f"Treat text accompanying `${skill_name}` as `{_INPUT_PLACEHOLDER}`. ",
                 "Before running a shown command, replace that placeholder with the ",
-                "actual input and pass it as one safely quoted shell argument. Never ",
-                "execute the literal placeholder.",
+                "actual input and pass it as one safely quoted shell argument. If no ",
+                "input accompanies the skill invocation, remove the placeholder from ",
+                "the command. Never execute the literal placeholder.",
                 "",
             ]
         )
@@ -117,3 +119,18 @@ def _skill_name(command_name: str) -> str:
     if len(name) > 64 or _VALID_SKILL_NAME.fullmatch(name) is None:
         raise CodexSkillError(f"invalid Codex skill name derived from {command_name!r}")
     return name
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser(
+        description="Render CoderMind command templates as Codex project skills."
+    )
+    parser.add_argument("source_dir", type=Path)
+    parser.add_argument("workspace", type=Path)
+    args = parser.parse_args()
+    generated = materialize_skills(args.source_dir, args.workspace)
+    print(f"Generated {len(generated)} Codex skills in {args.workspace}")
+
+
+if __name__ == "__main__":
+    main()

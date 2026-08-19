@@ -16,7 +16,7 @@ cmind init . [options]
 
 | Option | Description |
 | ------ | ----------- |
-| `--ai <agent>` | AI assistant: `copilot` or `claude` |
+| `--ai <agent>` | Default encoder/decoder backend: `copilot`, `claude`, or `codex` |
 | `--script <type>` | Script type: `sh` (POSIX). `ps` (PowerShell) is not yet supported and will be added in a future release. |
 | `--here` | Initialize in current directory |
 | `--force` | Skip confirmation for non-empty current directory |
@@ -28,18 +28,21 @@ cmind init . [options]
 
 ### Supported AI Assistants
 
-| Agent | Folder | Description | Status |
-| ----- | ------ | ----------- | ------ |
-| `copilot` | `.github/`, `.vscode/` | GitHub Copilot | Verified |
-| `claude` | `.claude/` | Claude Code | Verified |
+| Agent | Folder | Invocation | Status |
+| ----- | ------ | ---------- | ------ |
+| `copilot` | `.github/`, `.vscode/` | `/cmind.*` | Verified |
+| `claude` | `.claude/` | `/cmind.*` | Verified |
+| `codex` | `.agents/skills/`, `.codex/` | `$cmind-*` or `/skills` | CLI verified |
 
-CoderMind currently supports only **GitHub Copilot** and **Claude Code** in the CLI. Additional agents may be adapted in future releases.
+All three integrations are generated together. `--ai` selects only the default
+LLM backend used by encoder/decoder pipeline calls.
 
 ### Examples
 
 ```bash
 cmind init my-project
 cmind init my-project --ai claude --script sh
+cmind init my-project --ai codex --script sh
 cmind init . --force
 cmind init . --encode
 cmind init . --force --encode
@@ -48,7 +51,9 @@ cmind init --here --ai copilot
 
 ## `cmind update`
 
-Update CoderMind template files, scripts, command definitions, MCP configuration, gitignore rules, and hooks in an existing project. The AI assistant is auto-detected from existing project configuration when possible.
+Update CoderMind template files, all agent integrations, MCP configuration,
+gitignore rules, and hooks. The active LLM backend is preserved unless `--ai`
+is passed.
 
 ```bash
 cmind update
@@ -61,7 +66,7 @@ cmind update --no-upgrade
 
 | Option | Description |
 | ------ | ----------- |
-| `--ai <agent>` | AI assistant, auto-detected if not specified |
+| `--ai <agent>` | Change the active encoder/decoder backend |
 | `--script <type>` | Script type: `sh` (POSIX). `ps` (PowerShell) is not yet supported and will be added in a future release. |
 | `--no-upgrade` | Skip the default-on CLI self-upgrade and only sync workspace files. |
 | `--no-mcp` | Skip MCP server configuration |
@@ -99,6 +104,18 @@ Claude Code), and optional editors (VS Code / VS Code Insiders), and
 prints a tree of which ones are available.  Run this after
 installation to confirm the environment is ready, or whenever a
 pipeline step complains about a missing tool.
+
+## `cmind config`
+
+Inspect or switch the active encoder/decoder LLM backend without changing the
+installed Claude, Copilot, or Codex integrations.
+
+```bash
+cmind config show
+cmind config set-agent codex
+cmind config set-agent claude
+cmind config set-agent copilot
+```
 
 ## `cmind version`
 
@@ -140,12 +157,10 @@ cmind script --list
 cmind script --where mcp_server.py
 ```
 
-The slash-command templates installed by `cmind init` (in
-`.claude/commands/` or `.github/agents/`) all use `cmind script …`
-under the hood, so AI agents invoke the pipeline through the same
+The Claude/Copilot commands and Codex skills installed by `cmind init` all use
+`cmind script …` under the hood, so every agent invokes the same pipeline
 contract.
 
 A companion console script, `cmind-mcp`, is the MCP server entry
-point and is what `.mcp.json` / `.vscode/mcp.json` register as the
-`rpg-tools` command — no absolute paths in the config, no per-machine
-edits.
+point and is what `.mcp.json`, `.vscode/mcp.json`, and
+`.codex/config.toml` register as the `rpg-tools` command.

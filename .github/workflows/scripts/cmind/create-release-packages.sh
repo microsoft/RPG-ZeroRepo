@@ -230,8 +230,7 @@ SETTINGS
       mkdir -p "$base_dir/.augment/commands"
       generate_commands md "$base_dir/.augment/commands" ;;
     codex)
-      mkdir -p "$base_dir/.codex/prompts"
-      generate_commands md "$base_dir/.codex/prompts" ;;
+      "$PYTHON_BIN" src/cmind_cli/_codex_skills.py templates/commands "$base_dir" ;;
     codebuddy)
       mkdir -p "$base_dir/.codebuddy/commands"
       generate_commands md "$base_dir/.codebuddy/commands" ;;

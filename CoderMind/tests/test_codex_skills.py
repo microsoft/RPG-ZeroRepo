@@ -79,3 +79,17 @@ def test_render_rejects_template_without_frontmatter(tmp_path):
         assert "missing YAML frontmatter" in str(exc)
     else:
         raise AssertionError("invalid template was accepted")
+
+
+def test_release_scripts_use_shared_renderer():
+    repo_root = PROJECT_ROOT.parent
+    shell = (
+        repo_root / ".github/workflows/scripts/cmind/create-release-packages.sh"
+    ).read_text()
+    powershell = (
+        repo_root / ".github/workflows/scripts/cmind/create-release-packages.ps1"
+    ).read_text()
+
+    for script in (shell, powershell):
+        assert "src/cmind_cli/_codex_skills.py" in script
+        assert ".codex/prompts" not in script

@@ -56,6 +56,7 @@ if (-not (Test-Path $ProjectRoot)) {
     exit 1
 }
 Set-Location $ProjectRoot
+$PythonBin = if ($env:PYTHON) { $env:PYTHON } else { "python" }
 
 Write-Host "Building release packages for $Version from $ProjectRoot"
 
@@ -320,8 +321,10 @@ function Build-Variant {
             Generate-Commands -Extension 'md' -OutputDir $cmdDir
         }
         'codex' {
-            $cmdDir = Join-Path $baseDir ".codex/prompts"
-            Generate-Commands -Extension 'md' -OutputDir $cmdDir
+            & $PythonBin "src/cmind_cli/_codex_skills.py" "templates/commands" $baseDir
+            if ($LASTEXITCODE -ne 0) {
+                throw "Codex skill rendering failed with exit code $LASTEXITCODE"
+            }
         }
         'codebuddy' {
             $cmdDir = Join-Path $baseDir ".codebuddy/commands"
