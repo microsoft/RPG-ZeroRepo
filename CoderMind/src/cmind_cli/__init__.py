@@ -31,12 +31,9 @@ import httpx
 from rich.console import Console
 from rich.panel import Panel
 from rich.progress import (
-    BarColumn,
-    MofNCompleteColumn,
     Progress,
     SpinnerColumn,
     TextColumn,
-    TimeElapsedColumn,
 )
 from rich.text import Text
 from rich.live import Live
@@ -1810,6 +1807,29 @@ _ENCODE_RE_SUMMARY_PROCESS = re.compile(r"\[SUMMARY\] processing batch with (\d+
 _ENCODE_RE_SUMMARY_FINISHED = re.compile(r"\[SUMMARY\] finished batch with (\d+) files")
 
 
+def _encode_live_status(phase: str, started_at: float) -> Panel:
+    """Build the fixed-panel initial-encode status display."""
+    elapsed = max(0, int(time.monotonic() - started_at))
+    hours, remainder = divmod(elapsed, 3600)
+    minutes, seconds = divmod(remainder, 60)
+    now = datetime.now().astimezone().strftime("%H:%M:%S")
+    footer = Text.assemble(
+        ("Now ", "dim"),
+        (now, "cyan"),
+        ("  •  Elapsed ", "dim"),
+        (f"{hours:02d}:{minutes:02d}:{seconds:02d}", "cyan"),
+    )
+    return Panel(
+        Text(phase, style="bold white", justify="center"),
+        title=Text("Encoding", style="bold cyan"),
+        title_align="center",
+        subtitle=footer,
+        subtitle_align="center",
+        border_style="cyan",
+        padding=(1, 2),
+    )
+
+
 def _parse_encoder_line(line: str, state: Dict[str, Any]) -> None:
     """Mutate ``state`` based on a single line of encoder stderr.
 
@@ -1828,6 +1848,9 @@ def _parse_encoder_line(line: str, state: Dict[str, Any]) -> None:
       * ``[SUMMARY] processing batch with N files`` / ``finished batch``
       * ``Refactoring to RPG`` / ``RPG refactoring done``
     """
+    if "LLM returned empty response" in line or "LLM returned None at iteration" in line:
+        state["llm_warning_count"] = state.get("llm_warning_count", 0) + 1
+        return
     if "Skeleton loaded" in line:
         state["phase"] = "Skeleton loaded"
         return
@@ -1869,32 +1892,22 @@ def _parse_encoder_line(line: str, state: Dict[str, Any]) -> None:
         state["phase"] = "Parsing function batches"
         return
     if _ENCODE_RE_CLASS_PROCESS.search(line):
-        state["class_done"] += 1
-        if state.get("class_total"):
-            state["class_done"] = min(state["class_done"], state["class_total"])
-        state["_class_counted_on_process"] = True
         state["kind"] = "class"
         state["phase"] = "Parsing class batches"
         return
     if _ENCODE_RE_CLASS_FINISHED.search(line):
-        if not state.get("_class_counted_on_process"):
-            state["class_done"] += 1
+        state["class_done"] += 1
         if state.get("class_total"):
             state["class_done"] = min(state["class_done"], state["class_total"])
         state["kind"] = "class"
         state["phase"] = "Parsing class batches"
         return
     if _ENCODE_RE_FUNC_PROCESS.search(line):
-        state["func_done"] += 1
-        if state.get("func_total"):
-            state["func_done"] = min(state["func_done"], state["func_total"])
-        state["_func_counted_on_process"] = True
         state["kind"] = "function"
         state["phase"] = "Parsing function batches"
         return
     if _ENCODE_RE_FUNC_FINISHED.search(line):
-        if not state.get("_func_counted_on_process"):
-            state["func_done"] += 1
+        state["func_done"] += 1
         if state.get("func_total"):
             state["func_done"] = min(state["func_done"], state["func_total"])
         state["kind"] = "function"
@@ -1952,9 +1965,9 @@ def _run_initial_encode(project_path: Path) -> bool:
       * Capture stderr in a reader thread and write it verbatim to
         ``~/.cmind/workspaces/<workspace-id>/logs/encode.log`` — power users
         can ``tail -f`` it for the full firehose.
-      * Parse a handful of phase markers off each line to drive a
-        :class:`rich.progress.Progress` bar with a spinner + current
-        phase + (when known) an M/N batch counter.
+            * Parse a handful of phase markers and update one live status panel with
+                the current phase, wall-clock time, and elapsed duration. The panel is
+                refreshed at most once per second and has no spinner or percentage.
       * Capture stdout and surface the encoder's JSON summary on
         failure so the user has something concrete to debug.
 
@@ -2019,6 +2032,7 @@ def _run_initial_encode(project_path: Path) -> bool:
         "summary_total_files": 0,
         "summary_current_files": 0,
         "total_files": 0,
+        "llm_warning_count": 0,
     }
 
     try:
@@ -2075,107 +2089,47 @@ def _run_initial_encode(project_path: Path) -> bool:
 
     stdout_chunks: List[str] = []
     interrupted = False
-
-    progress = Progress(
-        SpinnerColumn(),
-        TextColumn("[progress.description]{task.description}"),
-        BarColumn(bar_width=None),
-        MofNCompleteColumn(),
-        TimeElapsedColumn(),
-        console=console,
-        transient=False,
-    )
-    task_id = progress.add_task(state["phase"], total=None)
+    started_at = time.monotonic()
+    started_wall_clock = datetime.now().astimezone()
 
     try:
-        with progress:
+        displayed_phase = state["phase"]
+        console.print(
+            "[dim]Started at "
+            f"{started_wall_clock.strftime('%Y-%m-%d %H:%M:%S %Z')}[/dim]"
+        )
+        displayed_second = -1
+        with Live(
+            _encode_live_status(displayed_phase, started_at),
+            console=console,
+            auto_refresh=False,
+            transient=True,
+        ) as live:
             while True:
-                kind = state["kind"]
-                if kind == "class" and state["class_total"]:
-                    progress.update(
-                        task_id,
-                        description=state["phase"],
-                        total=state["class_total"],
-                        completed=state["class_done"],
+                elapsed_second = int(time.monotonic() - started_at)
+                if (
+                    state["phase"] != displayed_phase
+                    or elapsed_second != displayed_second
+                ):
+                    displayed_phase = state["phase"]
+                    displayed_second = elapsed_second
+                    live.update(
+                        _encode_live_status(displayed_phase, started_at),
+                        refresh=True,
                     )
-                elif kind == "function" and state["func_total"]:
-                    progress.update(
-                        task_id,
-                        description=state["phase"],
-                        total=state["func_total"],
-                        completed=state["func_done"],
-                    )
-                elif kind == "summary" and state["summary_total"]:
-                    progress.update(
-                        task_id,
-                        description=state["phase"],
-                        total=state["summary_total"],
-                        completed=state["summary_done"],
-                    )
-                else:
-                    # Indeterminate phase (e.g. "Refactoring to RPG",
-                    # "Finalising").  Update the description, but also
-                    # unfreeze the task whenever the previous determinate
-                    # phase ended with ``completed == total`` — Rich
-                    # sets ``task.finished_time`` at that point, and
-                    # ``TimeElapsedColumn`` then renders the frozen
-                    # ``finished_time`` instead of the live ``elapsed``,
-                    # so the timer appears stuck.  We have to mutate the
-                    # Task directly because ``Progress.update`` provides
-                    # no public way to clear ``finished_time`` and
-                    # ``update(total=None)`` is a no-op (None means
-                    # "leave unchanged").
-                    progress.update(task_id, description=state["phase"])
-                    if progress.tasks:
-                        t = progress.tasks[0]
-                        if t.finished_time is not None:
-                            t.total = None
-                            t.completed = 0
-                            t.finished_time = None
-                            t.finished_speed = None
 
                 if proc.poll() is not None:
                     break
                 time.sleep(0.2)
 
             # Process exited — drain remaining stdout (JSON summary)
-            # and wait for the reader to consume any trailing stderr
-            # lines still buffered in the pipe, so the final progress
-            # frame reflects the *complete* phase state.
+            # and wait for the reader to consume any trailing stderr lines.
             try:
                 if proc.stdout is not None:
                     stdout_chunks.append(proc.stdout.read())
             except Exception:  # noqa: BLE001
                 pass
             reader.join(timeout=2)
-            # Final frame: show the *latest* batch state we know about,
-            # not whatever the previous polling iteration captured.  If
-            # the encoder zipped through function batches between two
-            # 0.2-second polls and is now in "Finalising", we still want
-            # the bar to read "3/3" rather than "1/3".
-            if state["summary_total"]:
-                progress.update(
-                    task_id,
-                    description=state["phase"],
-                    total=state["summary_total"],
-                    completed=state["summary_done"],
-                )
-            elif state["func_total"]:
-                progress.update(
-                    task_id,
-                    description=state["phase"],
-                    total=state["func_total"],
-                    completed=state["func_done"],
-                )
-            elif state["class_total"]:
-                progress.update(
-                    task_id,
-                    description=state["phase"],
-                    total=state["class_total"],
-                    completed=state["class_done"],
-                )
-            else:
-                progress.update(task_id, description=state["phase"])
     except KeyboardInterrupt:
         interrupted = True
         try:
@@ -2200,15 +2154,41 @@ def _run_initial_encode(project_path: Path) -> bool:
         )
         return False
 
+    elapsed_seconds = max(0, int(time.monotonic() - started_at))
+    elapsed_minutes, elapsed_remainder = divmod(elapsed_seconds, 60)
+    elapsed_text = f"{elapsed_minutes}m {elapsed_remainder:02d}s"
+    finished_text = datetime.now().astimezone().strftime("%Y-%m-%d %H:%M:%S %Z")
+
     if proc.returncode == 0:
         console.print()
+        warning_count = state["llm_warning_count"]
+        if warning_count:
+            console.print(
+                Panel(
+                    "[yellow]Encoder completed with LLM warnings.[/]\n\n"
+                    "The RPG graph was written, but one or more semantic parsing "
+                    f"calls returned no usable response ({warning_count} warning "
+                    "log entries). Some class or function features may be missing.\n\n"
+                    f"Finished at: [cyan]{finished_text}[/]\n"
+                    f"Total time: [cyan]{elapsed_text}[/]\n\n"
+                    f"Review [cyan]{log_path}[/] before relying on the graph, and "
+                    "re-run [cyan]/cmind.encode[/] after fixing the model or proxy "
+                    "response path.",
+                    title="[bold yellow]Encode completed with warnings[/bold yellow]",
+                    border_style="yellow",
+                    padding=(1, 2),
+                )
+            )
+            return True
         console.print(
             Panel(
                 "[green]Encoder finished successfully.[/]\n\n"
                 "The RPG graph is now available under your home-dir "
                 "workspace store ([cyan]rpg.json[/]).  The post-commit hook will "
                 "keep it in sync on every commit; the MCP tools "
-                "([cyan]search_rpg[/], [cyan]explore_rpg[/], …) are now usable.",
+                "([cyan]search_rpg[/], [cyan]explore_rpg[/], …) are now usable.\n\n"
+                f"Finished at: [cyan]{finished_text}[/]\n"
+                f"Total time: [cyan]{elapsed_text}[/]",
                 title="[bold green]Encode complete[/bold green]",
                 border_style="green",
                 padding=(1, 2),
@@ -2229,7 +2209,9 @@ def _run_initial_encode(project_path: Path) -> bool:
         Panel(
             f"[red]Encoder exited with code {proc.returncode}.[/]\n\n"
             f"Check [cyan]{log_path}[/] for the full log.  You can retry "
-            "with [cyan]/cmind.encode[/] after fixing the issue."
+            "with [cyan]/cmind.encode[/] after fixing the issue.\n\n"
+            f"Finished at: [cyan]{finished_text}[/]\n"
+            f"Total time: [cyan]{elapsed_text}[/]"
             f"{summary_blurb}",
             title="[bold red]Encode failed[/bold red]",
             border_style="red",
