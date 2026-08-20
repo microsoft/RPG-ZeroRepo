@@ -530,6 +530,16 @@ class TestMCPServer:
 # ============================================================================
 
 class TestCLIIntegration:
+    def test_mcp_dependency_stays_on_fastmcp_compatible_major(self):
+        """MCP 2.x removes ``mcp.server.fastmcp`` used by the server."""
+        import tomllib
+
+        pyproject = Path(__file__).resolve().parent.parent / "pyproject.toml"
+        with open(pyproject, "rb") as file:
+            dependencies = tomllib.load(file)["project"]["dependencies"]
+
+        assert "mcp>=1.0.0,<2" in dependencies
+
     def test_main_app_no_encode_command(self):
         """The main app should NOT have 'encode' registered (removed in M12 redo)."""
         from cmind_cli import app
