@@ -457,7 +457,9 @@ class CopilotSessionManager(SessionManager):
 # ============================================================================
 
 class CodexSessionManager(SessionManager):
-    """Prepare non-interactive Codex calls without bypassing its sandbox."""
+    """Prepare non-interactive Codex calls with an explicit sandbox opt-out."""
+
+    _BYPASS_SANDBOX_ENV = "CMIND_CODEX_BYPASS_SANDBOX"
 
     def __init__(
         self,
@@ -474,8 +476,13 @@ class CodexSessionManager(SessionManager):
         self._prompt_file.write(prompt)
         self._prompt_file.seek(0)
         ctx.stdin = self._prompt_file
+        permission_args = (
+            ["--dangerously-bypass-approvals-and-sandbox"]
+            if os.environ.get(self._BYPASS_SANDBOX_ENV, "").lower() in {"1", "true", "yes"}
+            else ["--approve-for-me"]
+        )
         ctx.extra_args.extend([
-            "--approve-for-me",
+            *permission_args,
             "--ephemeral",
             "--skip-git-repo-check",
             "-",

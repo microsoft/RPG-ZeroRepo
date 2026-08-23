@@ -208,6 +208,33 @@ class TestSafeLoadRecovery:
         # No stray .tmp from the heal write.
         assert not (home / "data" / "rpg.json.tmp").exists()
 
+    def test_service_loader_recovers_from_last_good_snapshot(self, tmp_path: Path) -> None:
+        from rpg.service import RPGService
+
+        home = _make_home_layout(tmp_path)
+        target = home / "data" / "rpg.json"
+        good = {
+            "repo_name": "fixture",
+            "root": {
+                "id": "fixture_L0",
+                "name": "fixture",
+                "node_type": "repo",
+                "level": 0,
+                "children": [],
+            },
+            "edges": [],
+        }
+        rpg_io.atomic_write_rpg(target, good)
+        _git(home, "init", "-q", "-b", "main")
+        _git(home, "add", "-A")
+        _git(home, "commit", "-q", "-m", "valid RPG")
+        target.write_text('{"repo_name": "broken"', encoding="utf-8")
+
+        service = RPGService.load(target)
+
+        assert service.rpg.repo_name == "fixture"
+        assert json.loads(target.read_text(encoding="utf-8")) == good
+
     def test_skips_bad_snapshots(self, tmp_path: Path) -> None:
         """If recent commits are also broken, walks further back."""
         home, target, good = self._setup_with_history(tmp_path)

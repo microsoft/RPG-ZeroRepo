@@ -34,3 +34,16 @@ def test_codex_manager_rewinds_stdin_for_retry(tmp_path):
         assert context.stdin.read() == "retry me"
         context.refresh_for_retry()
         assert context.stdin.read() == "retry me"
+
+
+def test_codex_manager_allows_explicit_sandbox_bypass(tmp_path, monkeypatch):
+    monkeypatch.setenv("CMIND_CODEX_BYPASS_SANDBOX", "1")
+    manager = create_session_manager("codex", tmp_path)
+
+    with manager.trace("automate me") as context:
+        assert context.extra_args == [
+            "--dangerously-bypass-approvals-and-sandbox",
+            "--ephemeral",
+            "--skip-git-repo-check",
+            "-",
+        ]

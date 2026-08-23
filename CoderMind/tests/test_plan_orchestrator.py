@@ -94,7 +94,9 @@ class TestDecideCascade:
         states = _states(["update", "warning", "update", "update", "update"])
         plan.decide(states, force=False)
         assert [s.will_run for s in states] == [False, True, True, True, True]
-        assert states[1].reason == "type=warning"
+        assert states[1].reason == (
+            "warning: cross-stage contract violation; rebuild stage and downstream"
+        )
 
     def test_force_runs_everything(self) -> None:
         states = _states(["update"] * 5)
