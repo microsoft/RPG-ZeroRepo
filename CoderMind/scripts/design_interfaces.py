@@ -958,12 +958,14 @@ class InterfaceDesigner:
         max_file_iterations: int = 10,
         max_planning_retries: int = 3,
         trajectory: Optional[Trajectory] = None,
-        output_path: Optional[str] = None
+        output_path: Optional[str] = None,
+        restore_existing: bool = True,
     ):
         self.max_file_iterations = max_file_iterations
         self.max_planning_retries = max_planning_retries
         self.trajectory = trajectory
         self.output_path = output_path
+        self.restore_existing = restore_existing
         self.logger = logging.getLogger(__name__)
         self._current_step_id: Optional[int] = None
         self.llm: Optional[LLMClient] = None  # Created lazily when step_id is known
@@ -1069,6 +1071,7 @@ class InterfaceDesigner:
             step_id=self._current_step_id,
             output_path=self.output_path,
             target_language=primary_language,
+            restore_existing=self.restore_existing,
         )
         
         result = orchestrator.design_all_interfaces(
@@ -1613,6 +1616,11 @@ def main():
         action="store_true",
         help="Disable trajectory recording"
     )
+    parser.add_argument(
+        "--force",
+        action="store_true",
+        help="Ignore existing interfaces output and rebuild every subtree",
+    )
 
     args = parser.parse_args()
 
@@ -1686,7 +1694,8 @@ def main():
         designer = InterfaceDesigner(
             max_file_iterations=args.max_file_iterations,
             trajectory=trajectory,
-            output_path=str(args.output)
+            output_path=str(args.output),
+            restore_existing=not args.force,
         )
         
         heartbeat_stop, heartbeat_thread = _start_heartbeat("design_interfaces")

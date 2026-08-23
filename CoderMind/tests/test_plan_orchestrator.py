@@ -104,6 +104,14 @@ class TestDecideCascade:
         assert all(s.will_run for s in states)
         assert all(s.reason == "forced" for s in states)
 
+    def test_force_is_forwarded_to_interfaces_stage(self) -> None:
+        args = plan._parse_args(["--force"])
+        interfaces = next(stage for stage in plan.STAGES if stage.name == "interfaces")
+        skeleton = next(stage for stage in plan.STAGES if stage.name == "skeleton")
+
+        assert "--force" in plan._build_args_for(interfaces, args)
+        assert "--force" not in plan._build_args_for(skeleton, args)
+
 
 # ---------------------------------------------------------------------------
 # _extract_last_json_object — tolerant JSON parsing.

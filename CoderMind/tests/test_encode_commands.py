@@ -524,6 +524,23 @@ class TestMCPServer:
         assert payload["error"] == "rpg_unavailable"
         assert "/cmind.encode" in payload["next_step"]
 
+    def test_tool_call_telemetry_records_client_context(self, tmp_path, monkeypatch):
+        import mcp_server as m
+
+        calls = tmp_path / "mcp_calls.jsonl"
+        monkeypatch.setattr(m, "MCP_CALLS_LOG", calls)
+        monkeypatch.setenv("CMIND_MCP_CLIENT_CONTEXT", "codex-agent")
+
+        m._log_tool_call(
+            "list_rpg_tree",
+            {"max_depth": 1},
+            {"total_nodes": 3},
+            4,
+        )
+
+        record = json.loads(calls.read_text(encoding="utf-8"))
+        assert record["client_context"] == "codex-agent"
+
 
 # ============================================================================
 # Test: CLI integration (M12 commands removed)

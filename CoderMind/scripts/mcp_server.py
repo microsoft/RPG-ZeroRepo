@@ -64,6 +64,9 @@ def _log_tool_call(tool_name: str, params: dict, result_summary: dict, duration_
             **result_summary,
             "duration_ms": duration_ms,
         }
+        client_context = os.environ.get("CMIND_MCP_CLIENT_CONTEXT", "").strip()
+        if client_context:
+            record["client_context"] = client_context
         with open(MCP_CALLS_LOG, "a", encoding="utf-8") as f:
             f.write(json.dumps(record, ensure_ascii=False) + "\n")
     except Exception:
