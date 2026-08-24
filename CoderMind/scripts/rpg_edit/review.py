@@ -34,7 +34,13 @@ SCRIPTS_DIR = Path(__file__).resolve().parent.parent
 if str(SCRIPTS_DIR) not in sys.path:
     sys.path.insert(0, str(SCRIPTS_DIR))
 
-from common.paths import REPO_DIR, cmd_for, RPG_EDIT_PLAN_FILE, RPG_EDIT_IMPACT_FILE  # noqa: E402
+from common.paths import (  # noqa: E402
+    REPO_DIR,
+    RPG_EDIT_IMPACT_FILE,
+    RPG_EDIT_PLAN_FILE,
+    RPG_EDIT_REVIEW_RESULT_FILE,
+    cmd_for,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -549,6 +555,17 @@ def impact_review(
     return results
 
 
+def persist_review_result(result: Dict[str, Any], path: Path) -> None:
+    """Atomically persist the review result for workflow resume."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temporary = path.with_name(f".{path.name}.tmp")
+    temporary.write_text(
+        json.dumps(result, indent=2, ensure_ascii=False) + "\n",
+        encoding="utf-8",
+    )
+    temporary.replace(path)
+
+
 # ---------------------------------------------------------------------------
 # CLI
 # ---------------------------------------------------------------------------
@@ -582,7 +599,12 @@ def main():
     setup_file_logging("rpg_edit")
 
     if not args.plan.exists():
-        result = {"type": "error", "message": f"Plan not found: {args.plan}"}
+        result = {
+            "type": "error",
+            "success": False,
+            "message": f"Plan not found: {args.plan}",
+        }
+        persist_review_result(result, RPG_EDIT_REVIEW_RESULT_FILE)
         print(json.dumps(result) if args.json else f"Error: {result['message']}")
         return 1
 
@@ -599,10 +621,12 @@ def main():
         if total_callers == 0 and affected_files <= 1:
             result = {
                 "type": "skipped",
+                "success": True,
                 "reason": f"Impact too small for sub-agent review "
                           f"(callers={total_callers}, files={affected_files}). "
                           f"Agent self-review is sufficient.",
             }
+            persist_review_result(result, RPG_EDIT_REVIEW_RESULT_FILE)
             print(json.dumps(result, indent=2) if args.json else
                   f"Skipped: {result['reason']}")
             return 0
@@ -614,6 +638,7 @@ def main():
         max_iterations=args.max_iterations,
         timeout=args.timeout,
     )
+    persist_review_result(result, RPG_EDIT_REVIEW_RESULT_FILE)
 
     print(json.dumps(result, indent=2) if args.json else
           f"Review {'PASSED' if result['success'] else 'FAILED'} "

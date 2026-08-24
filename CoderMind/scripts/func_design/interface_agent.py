@@ -2129,6 +2129,7 @@ class InterfaceOrchestrator:
         step_id: Optional[int] = None,
         output_path: Optional[str] = None,
         target_language: Optional[str] = None,
+        restore_existing: bool = True,
     ):
         # Create LLMClient with trajectory support if not provided
         if llm_client is None:
@@ -2145,6 +2146,7 @@ class InterfaceOrchestrator:
         self.step_id = step_id
         self.output_path = output_path
         self.backend = get_backend(target_language)
+        self.restore_existing = restore_existing
     
     def design_all_interfaces(
         self,
@@ -2204,14 +2206,16 @@ class InterfaceOrchestrator:
         all_import_warnings = []  # collect import cross-validation warnings
         all_new_features = []  # collect new features created across all subtrees
         coverage_status = self._new_coverage_status()
-        restored_subtrees = self._restore_completed_subtrees(
-            skeleton=skeleton,
-            subtree_order=subtree_order,
-            all_interfaces=all_interfaces,
-            implemented_subtrees=implemented_subtrees,
-            coverage_status=coverage_status,
-            global_registry=global_registry,
-        )
+        restored_subtrees = set()
+        if self.restore_existing:
+            restored_subtrees = self._restore_completed_subtrees(
+                skeleton=skeleton,
+                subtree_order=subtree_order,
+                all_interfaces=all_interfaces,
+                implemented_subtrees=implemented_subtrees,
+                coverage_status=coverage_status,
+                global_registry=global_registry,
+            )
         if restored_subtrees:
             restored_in_order = [name for name in subtree_order if name in restored_subtrees]
             print(

@@ -43,6 +43,7 @@ from common.paths import (  # noqa: E402
     RPG_FILE,
     REPO_DIR,
     RPG_EDIT_PLAN_FILE,
+    RPG_EDIT_CODE_RESULT_FILE,
     DATA_DIR,
     WORKSPACE_ROOT,
     cmd_for,
@@ -637,6 +638,17 @@ def apply_code_changes(
     }
 
 
+def persist_code_result(result: Dict[str, Any], path: Path) -> None:
+    """Atomically persist the code-stage result for review and resume."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temporary = path.with_name(f".{path.name}.tmp")
+    temporary.write_text(
+        json.dumps(result, indent=2, ensure_ascii=False) + "\n",
+        encoding="utf-8",
+    )
+    temporary.replace(path)
+
+
 # ---------------------------------------------------------------------------
 # CLI
 # ---------------------------------------------------------------------------
@@ -684,6 +696,15 @@ def main() -> int:
         max_iterations=args.max_iterations,
         timeout=args.timeout,
     )
+
+    try:
+        persist_code_result(result, RPG_EDIT_CODE_RESULT_FILE)
+    except OSError as exc:
+        result = {
+            "type": "error",
+            "success": False,
+            "error": f"failed to persist code result: {exc}",
+        }
 
     if args.json:
         print(json.dumps(result, indent=2, ensure_ascii=False))

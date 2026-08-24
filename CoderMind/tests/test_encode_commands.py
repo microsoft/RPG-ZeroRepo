@@ -499,11 +499,41 @@ class TestMCPServer:
         assert "error" in result
 
     def test_create_mcp_server_returns_server(self, tmp_rpg_with_dep_graph):
-        """create_mcp_server should return a FastMCP instance with 4 tools."""
+        """create_mcp_server should return a FastMCP instance with RPG access."""
         from mcp_server import create_mcp_server
         server = create_mcp_server(rpg_file=tmp_rpg_with_dep_graph)
         assert hasattr(server, "run")
         assert server.name == "rpg-tools"
+
+    def test_create_mcp_server_exposes_tree_resource(self, tmp_rpg_with_dep_graph):
+        from mcp_server import create_mcp_server
+
+        server = create_mcp_server(rpg_file=tmp_rpg_with_dep_graph)
+        resources = server._resource_manager.list_resources()
+
+        assert "rpg://tree" in {str(resource.uri) for resource in resources}
+
+    def test_create_mcp_server_reloads_updated_rpg(self, tmp_rpg_with_dep_graph):
+        import asyncio
+        from mcp_server import create_mcp_server
+
+        rpg_path = Path(tmp_rpg_with_dep_graph)
+        server = create_mcp_server(rpg_file=str(rpg_path))
+        first = asyncio.run(
+            server._tool_manager.call_tool("list_rpg_tree", {"max_depth": 0})
+        )
+        assert json.loads(first)["name"] == "test_repo"
+
+        updated = json.loads(rpg_path.read_text())
+        updated["root"]["name"] = "updated_repo"
+        replacement = rpg_path.with_suffix(".replacement.json")
+        replacement.write_text(json.dumps(updated, indent=2))
+        replacement.replace(rpg_path)
+
+        second = asyncio.run(
+            server._tool_manager.call_tool("list_rpg_tree", {"max_depth": 0})
+        )
+        assert json.loads(second)["name"] == "updated_repo"
 
     def test_create_mcp_server_handles_missing_rpg_file(self, tmp_path):
         """Server must start cleanly when rpg.json is absent.
@@ -524,12 +554,39 @@ class TestMCPServer:
         assert payload["error"] == "rpg_unavailable"
         assert "/cmind.encode" in payload["next_step"]
 
+    def test_tool_call_telemetry_records_client_context(self, tmp_path, monkeypatch):
+        import mcp_server as m
+
+        calls = tmp_path / "mcp_calls.jsonl"
+        monkeypatch.setattr(m, "MCP_CALLS_LOG", calls)
+        monkeypatch.setenv("CMIND_MCP_CLIENT_CONTEXT", "codex-agent")
+
+        m._log_tool_call(
+            "list_rpg_tree",
+            {"max_depth": 1},
+            {"total_nodes": 3},
+            4,
+        )
+
+        record = json.loads(calls.read_text(encoding="utf-8"))
+        assert record["client_context"] == "codex-agent"
+
 
 # ============================================================================
 # Test: CLI integration (M12 commands removed)
 # ============================================================================
 
 class TestCLIIntegration:
+    def test_mcp_dependency_stays_on_fastmcp_compatible_major(self):
+        """MCP 2.x removes ``mcp.server.fastmcp`` used by the server."""
+        import tomllib
+
+        pyproject = Path(__file__).resolve().parent.parent / "pyproject.toml"
+        with open(pyproject, "rb") as file:
+            dependencies = tomllib.load(file)["project"]["dependencies"]
+
+        assert "mcp>=1.0.0,<2" in dependencies
+
     def test_main_app_no_encode_command(self):
         """The main app should NOT have 'encode' registered (removed in M12 redo)."""
         from cmind_cli import app

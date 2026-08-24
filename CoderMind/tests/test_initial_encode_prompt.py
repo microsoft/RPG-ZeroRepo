@@ -194,6 +194,7 @@ def _fresh_state():
         "func_total": 0,
         "func_done": 0,
         "total_files": 0,
+        "llm_warning_count": 0,
     }
 
 
@@ -239,8 +240,13 @@ def test_parse_line_class_batches_and_progress():
     assert s["class_total"] == 7
     cmind_cli._parse_encoder_line(
         "RPGParser - INFO - [GLOBAL] process_class_batch: classes=['A'], units=3", s)
+    assert s["class_done"] == 0
+    cmind_cli._parse_encoder_line(
+        "RPGParser - INFO - [GLOBAL] finished class batch with 3 units", s)
     cmind_cli._parse_encoder_line(
         "RPGParser - INFO - [GLOBAL] process_class_batch: classes=['B'], units=2", s)
+    cmind_cli._parse_encoder_line(
+        "RPGParser - INFO - [GLOBAL] finished class batch with 2 units", s)
     assert s["class_done"] == 2
 
 
@@ -252,6 +258,9 @@ def test_parse_line_function_batches_and_progress():
     assert s["func_total"] == 6
     cmind_cli._parse_encoder_line(
         "RPGParser - INFO - [GLOBAL] process_func_batch: functions=['f'], units=1", s)
+    assert s["func_done"] == 0
+    cmind_cli._parse_encoder_line(
+        "RPGParser - INFO - [GLOBAL] finished function batch with 1 units", s)
     assert s["func_done"] == 1
 
 
@@ -268,6 +277,15 @@ def test_parse_line_unknown_is_ignored():
     s = _fresh_state()
     cmind_cli._parse_encoder_line("some completely unrelated line", s)
     assert s == _fresh_state()
+
+
+def test_parse_line_counts_empty_llm_warnings():
+    s = _fresh_state()
+    cmind_cli._parse_encoder_line("LLM returned empty response", s)
+    cmind_cli._parse_encoder_line(
+        "RPGParser - ERROR - parse_functions: LLM returned None at iteration 1", s
+    )
+    assert s["llm_warning_count"] == 2
 
 
 # ---------------------------------------------------------------------------
@@ -340,3 +358,65 @@ def test_run_initial_encode_failure_returns_false(tmp_path):
     log = cmind_cli._storage.workspace_logs_dir(tmp_path) / "encode.log"
     assert log.is_file()
     assert "boom" in log.read_text()
+
+
+def test_run_initial_encode_warns_on_empty_llm_responses(tmp_path, capsys):
+    _make_fake_encoder(
+        tmp_path,
+        exit_code=0,
+        stderr_lines=[
+            "LLM returned empty response",
+            "RPGParser - ERROR - parse_functions: LLM returned None at iteration 1",
+        ],
+        stdout_text='{"status": "success"}\n',
+    )
+
+    assert cmind_cli._run_initial_encode(tmp_path) is True
+    output = capsys.readouterr().out
+    assert "completed with LLM warnings" in output
+    assert "2 warning log entries" in output
+
+
+def test_run_initial_encode_uses_single_live_timer(tmp_path, monkeypatch, capsys):
+    _make_fake_encoder(
+        tmp_path,
+        exit_code=0,
+        stderr_lines=[
+            "RPGParser - INFO - [GLOBAL] kind=function, groups=1, batches=1",
+            "RPGParser - INFO - [GLOBAL] process_func_batch: functions=['f'], units=1",
+            "RPGParser - INFO - [GLOBAL] finished function batch with 1 units",
+        ],
+        stdout_text='{"status": "success"}\n',
+    )
+
+    panels = []
+
+    class RecordingLive:
+        def __init__(self, renderable, **kwargs):
+            assert kwargs["auto_refresh"] is False
+            assert kwargs["transient"] is True
+            panels.append(renderable)
+
+        def update(self, renderable, refresh=False):
+            assert refresh is True
+            panels.append(renderable)
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, traceback):
+            return False
+
+    monkeypatch.setattr(cmind_cli, "Live", RecordingLive)
+
+    assert cmind_cli._run_initial_encode(tmp_path) is True
+    output = capsys.readouterr().out
+    assert "Started at" in output
+    assert "Finished at:" in output
+    assert "Total time:" in output
+    assert panels
+    assert all(panel.title.plain == "Encoding" for panel in panels)
+    assert all(panel.renderable.plain for panel in panels)
+    assert all("Now" in panel.subtitle.plain for panel in panels)
+    assert all("Elapsed" in panel.subtitle.plain for panel in panels)
+    assert all("/" not in panel.subtitle.plain for panel in panels)

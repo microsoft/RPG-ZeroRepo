@@ -94,13 +94,23 @@ class TestDecideCascade:
         states = _states(["update", "warning", "update", "update", "update"])
         plan.decide(states, force=False)
         assert [s.will_run for s in states] == [False, True, True, True, True]
-        assert states[1].reason == "type=warning"
+        assert states[1].reason == (
+            "warning: cross-stage contract violation; rebuild stage and downstream"
+        )
 
     def test_force_runs_everything(self) -> None:
         states = _states(["update"] * 5)
         plan.decide(states, force=True)
         assert all(s.will_run for s in states)
         assert all(s.reason == "forced" for s in states)
+
+    def test_force_is_forwarded_to_interfaces_stage(self) -> None:
+        args = plan._parse_args(["--force"])
+        interfaces = next(stage for stage in plan.STAGES if stage.name == "interfaces")
+        skeleton = next(stage for stage in plan.STAGES if stage.name == "skeleton")
+
+        assert "--force" in plan._build_args_for(interfaces, args)
+        assert "--force" not in plan._build_args_for(skeleton, args)
 
 
 # ---------------------------------------------------------------------------

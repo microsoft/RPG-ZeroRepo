@@ -67,7 +67,9 @@ class RPGService:
         """
         _logger = logging.getLogger(__name__)
 
-        rpg = RPG.load_json(str(path))
+        from common.rpg_io import safe_load_rpg
+
+        rpg = RPG.from_dict(safe_load_rpg(path))
         svc = cls(rpg)
         svc._rpg_dir = Path(path).parent
 

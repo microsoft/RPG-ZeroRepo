@@ -453,6 +453,52 @@ class CopilotSessionManager(SessionManager):
 
 
 # ============================================================================
+# Codex CLI manager
+# ============================================================================
+
+class CodexSessionManager(SessionManager):
+    """Prepare non-interactive Codex calls with an explicit sandbox opt-out."""
+
+    _BYPASS_SANDBOX_ENV = "CMIND_CODEX_BYPASS_SANDBOX"
+
+    def __init__(
+        self,
+        project_dir: Path,
+        trace_filename_builder: Optional[Callable[[str], str]] = None,
+        logger: Optional[logging.Logger] = None,
+    ) -> None:
+        super().__init__(project_dir, trace_filename_builder, logger)
+        self._prompt_file: Optional[Any] = None
+
+    def before(self, ctx: TraceContext, prompt: str) -> None:
+        self._close_prompt_file()
+        self._prompt_file = tempfile.TemporaryFile(mode="w+", encoding="utf-8")
+        self._prompt_file.write(prompt)
+        self._prompt_file.seek(0)
+        ctx.stdin = self._prompt_file
+        permission_args = (
+            ["--dangerously-bypass-approvals-and-sandbox"]
+            if os.environ.get(self._BYPASS_SANDBOX_ENV, "").lower() in {"1", "true", "yes"}
+            else ["--approve-for-me"]
+        )
+        ctx.extra_args.extend([
+            *permission_args,
+            "--ephemeral",
+            "--skip-git-repo-check",
+            "-",
+        ])
+
+    def after(self, purpose: str) -> Optional[Path]:
+        self._close_prompt_file()
+        return None
+
+    def _close_prompt_file(self) -> None:
+        if self._prompt_file is not None:
+            self._prompt_file.close()
+            self._prompt_file = None
+
+
+# ============================================================================
 # Factory
 # ============================================================================
 
@@ -460,6 +506,7 @@ class CopilotSessionManager(SessionManager):
 _MANAGER_REGISTRY: Dict[str, type] = {
     "claude": ClaudeSessionManager,
     "copilot": CopilotSessionManager,
+    "codex": CodexSessionManager,
 }
 
 

@@ -499,7 +499,13 @@ Additionally, for data_structures:
                 f"{len(uncovered)} uncovered data flow types"
             )
             if uncovered:
-                self.logger.warning(f"[BaseClassAgent] Uncovered data flow types: {sorted(uncovered)}")
+                last_error = (
+                    "Every data flow type must be covered by a base class or "
+                    "data_structure.data_flow_types entry. Missing exact values: "
+                    + json.dumps(sorted(uncovered), ensure_ascii=False)
+                )
+                self.logger.warning(f"[BaseClassAgent] {last_error}")
+                continue
             
             return {
                 "base_classes": base_classes,

@@ -191,14 +191,14 @@ def test_install_copilot_hooks_preserves_user_tasks(project):
 # Dispatch
 # ---------------------------------------------------------------------------
 
-def test_install_hooks_dispatches_to_copilot(project, monkeypatch):
+def test_install_hooks_provisions_claude_and_copilot(project, monkeypatch):
     (project / ".git" / "hooks").mkdir(parents=True)
 
     cmind_cli._install_hooks(project, "copilot", tracker=None)
 
-    # Copilot tasks.json present, Claude settings.json absent.
+    # Both user-facing integrations coexist regardless of the active backend.
     assert (project / ".vscode" / "tasks.json").is_file()
-    assert not (project / ".claude" / "settings.json").exists()
+    assert (project / ".claude" / "settings.json").is_file()
     hooks_dir = project / ".git" / "hooks"
     post_commit = (hooks_dir / "post-commit").read_text()
     post_merge = (hooks_dir / "post-merge").read_text()
@@ -209,13 +209,13 @@ def test_install_hooks_dispatches_to_copilot(project, monkeypatch):
     assert not (hooks_dir / "pre-commit").exists()
 
 
-def test_install_hooks_dispatches_to_claude(project):
+def test_install_hooks_are_backend_independent(project):
     (project / ".git" / "hooks").mkdir(parents=True)
 
     cmind_cli._install_hooks(project, "claude", tracker=None)
 
     assert (project / ".claude" / "settings.json").is_file()
-    assert not (project / ".vscode" / "tasks.json").exists()
+    assert (project / ".vscode" / "tasks.json").is_file()
     hooks_dir = project / ".git" / "hooks"
     assert (hooks_dir / "post-commit").is_file()
     assert (hooks_dir / "post-merge").is_file()
@@ -534,21 +534,21 @@ def test_setup_gitignore_greenfield_writes_full_template(tmp_path):
     assert ".vscode/mcp.json" in content
     assert ".vscode/tasks.json" in content
     assert ".mcp.json" in content
-    # Copilot-specific
+    # All generated agent integrations coexist.
     assert ".github/agents/" in content
     assert ".github/prompts/" in content
-    # Claude rules must NOT leak into copilot project
-    assert ".claude/commands/" not in content
+    assert ".claude/commands/" in content
+    assert ".agents/skills/cmind-*/" in content
 
 
-def test_setup_gitignore_greenfield_claude(tmp_path):
-    """Claude path uses .claude/commands/ instead of .github/*."""
+def test_setup_gitignore_is_backend_independent(tmp_path):
+    """Generated integration rules do not depend on the active LLM backend."""
     cmind_cli._setup_gitignore(tmp_path, "claude")
     content = (tmp_path / ".gitignore").read_text()
     assert ".claude/commands/" in content
-    # Copilot directories must NOT be ignored on a Claude project
-    assert ".github/agents/" not in content
-    assert ".github/prompts/" not in content
+    assert ".github/agents/" in content
+    assert ".github/prompts/" in content
+    assert ".agents/skills/cmind-*/" in content
 
 
 def test_setup_gitignore_existing_git_no_ignore_writes_cmind_only(tmp_path):
@@ -686,3 +686,12 @@ def test_generate_mcp_config_claude_has_no_sandbox_field(tmp_path):
     server = cfg["mcpServers"]["rpg-tools"]
     assert "sandboxEnabled" not in server
     assert "sandbox" not in server
+
+
+def test_generate_mcp_config_also_writes_codex_project_config(tmp_path):
+    cmind_cli._generate_mcp_config(tmp_path, "copilot")
+
+    content = (tmp_path / ".codex" / "config.toml").read_text()
+    assert '[mcp_servers.rpg-tools]' in content
+    assert 'command = "cmind-mcp"' in content
+    assert "args = []" in content

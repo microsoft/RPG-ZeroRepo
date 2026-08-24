@@ -93,7 +93,7 @@ Below is part of the graph visualization generated for this repository. After ru
 - Python 3.12+
 - [uv](https://docs.astral.sh/uv/)
 - Git
-- An installed and authenticated AI coding agent CLI: [GitHub Copilot](https://docs.github.com/en/copilot) or [Claude Code](https://docs.anthropic.com/en/docs/claude-code/setup)
+- An installed and authenticated AI coding agent CLI: [GitHub Copilot](https://docs.github.com/en/copilot), [Claude Code](https://docs.anthropic.com/en/docs/claude-code/setup), or [Codex](https://developers.openai.com/codex/cli/)
 
 ### Install CoderMind
 
@@ -219,7 +219,7 @@ cmind update
 | -------------- | --------- | ----------------------- |
 | Claude Code    | ✅        | ✅                      |
 | GitHub Copilot | ✅        | ✅                      |
-| Codex          | ⌛        | ⌛                      |
+| Codex          | ✅        | ⌛                      |
 
 **Operating system support**:
 
