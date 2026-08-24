@@ -1556,11 +1556,16 @@ def _generate_mcp_config(
         "args": [],
     }
 
-    try:
-        # Validate the format-preserving Codex merge first. If it conflicts
-        # with a user-owned entry, abort before touching either JSON config.
-        _codex_config.configure_rpg_tools(project_path)
+    configured = []
+    failures = []
 
+    try:
+        _codex_config.configure_rpg_tools(project_path)
+        configured.append("codex")
+    except Exception as exc:
+        failures.append(("codex", exc))
+
+    try:
         claude_file = project_path / ".mcp.json"
         claude_data = _load_json_dict(claude_file)
         claude_data.setdefault("mcpServers", {})
@@ -1568,7 +1573,11 @@ def _generate_mcp_config(
         with open(claude_file, "w", encoding="utf-8") as file:
             json.dump(claude_data, file, indent=2)
             file.write("\n")
+        configured.append("claude")
+    except Exception as exc:
+        failures.append(("claude", exc))
 
+    try:
         vscode_dir = project_path / ".vscode"
         vscode_dir.mkdir(parents=True, exist_ok=True)
         copilot_file = vscode_dir / "mcp.json"
@@ -1579,14 +1588,26 @@ def _generate_mcp_config(
             json.dump(copilot_data, file, indent=2)
             file.write("\n")
         _cleanup_legacy_vscode_mcp(project_path)
+        configured.append("copilot")
+    except Exception as exc:
+        failures.append(("copilot", exc))
 
+    configured_detail = ", ".join(configured) or "none"
+    if failures:
+        failure_detail = "; ".join(
+            f"{agent}: {error}" for agent, error in failures
+        )
+        detail = f"configured for {configured_detail}; failed: {failure_detail}"
         if tracker:
-            tracker.complete("mcp", "configured for claude, copilot, codex")
-    except Exception as e:
-        if tracker:
-            tracker.error("mcp", f"failed: {e}")
+            failed_agents = {agent for agent, _ in failures}
+            if selected_ai in failed_agents:
+                tracker.error("mcp", detail)
+            else:
+                tracker.complete("mcp", detail)
         else:
-            console.print(f"[yellow]Warning: Could not generate MCP config: {e}[/yellow]")
+            console.print(f"[yellow]Warning: MCP config {detail}[/yellow]")
+    elif tracker:
+        tracker.complete("mcp", f"configured for {configured_detail}")
 
 
 # ---------------------------------------------------------------------------

@@ -61,6 +61,45 @@ def test_mcp_generation_registers_all_project_clients(tmp_path):
     assert codex["mcp_servers"]["rpg-tools"]["command"] == "cmind-mcp"
 
 
+def test_codex_config_conflict_does_not_block_other_mcp_clients(tmp_path):
+    codex_config = tmp_path / ".codex" / "config.toml"
+    codex_config.parent.mkdir()
+    codex_config.write_text(
+        '[mcp_servers.rpg-tools]\ncommand = "custom-mcp"\nargs = []\n'
+    )
+
+    tracker = cmind_cli.StepTracker("test")
+    tracker.add("mcp", "Configure MCP")
+    cmind_cli._generate_mcp_config(tmp_path, "copilot", tracker=tracker)
+
+    claude = json.loads((tmp_path / ".mcp.json").read_text())
+    copilot = json.loads((tmp_path / ".vscode" / "mcp.json").read_text())
+    assert claude["mcpServers"]["rpg-tools"]["command"] == "cmind-mcp"
+    assert copilot["servers"]["rpg-tools"]["command"] == "cmind-mcp"
+    assert 'command = "custom-mcp"' in codex_config.read_text()
+    mcp_step = next(step for step in tracker.steps if step["key"] == "mcp")
+    assert mcp_step["status"] == "done"
+    assert "failed: codex:" in mcp_step["detail"]
+
+
+def test_selected_codex_config_conflict_marks_mcp_step_failed(tmp_path):
+    codex_config = tmp_path / ".codex" / "config.toml"
+    codex_config.parent.mkdir()
+    codex_config.write_text(
+        '[mcp_servers.rpg-tools]\ncommand = "custom-mcp"\nargs = []\n'
+    )
+    tracker = cmind_cli.StepTracker("test")
+    tracker.add("mcp", "Configure MCP")
+
+    cmind_cli._generate_mcp_config(tmp_path, "codex", tracker=tracker)
+
+    mcp_step = next(step for step in tracker.steps if step["key"] == "mcp")
+    assert mcp_step["status"] == "error"
+    assert "failed: codex:" in mcp_step["detail"]
+    assert (tmp_path / ".mcp.json").is_file()
+    assert (tmp_path / ".vscode" / "mcp.json").is_file()
+
+
 def test_backend_switch_does_not_remove_integrations(tmp_path, monkeypatch):
     monkeypatch.setattr(_assets, "commands_dir", lambda: COMMANDS_DIR)
     cmind_cli._install_from_bundle(tmp_path, "copilot", "sh", True)

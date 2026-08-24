@@ -26,9 +26,9 @@ import json
 import logging
 import os
 import sys
+import threading
 import time
 from datetime import datetime, timezone
-from typing import List, Optional
 
 # Ensure sibling packages (common/, rpg/) are importable when this script is
 # invoked by an absolute path (which is how Claude / VS Code launch it).
@@ -69,8 +69,8 @@ def _log_tool_call(tool_name: str, params: dict, result_summary: dict, duration_
             record["client_context"] = client_context
         with open(MCP_CALLS_LOG, "a", encoding="utf-8") as f:
             f.write(json.dumps(record, ensure_ascii=False) + "\n")
-    except Exception:
-        pass
+    except (OSError, TypeError, ValueError) as exc:
+        logger.debug("Could not write MCP telemetry: %s", exc)
 
 
 # ---------------------------------------------------------------------------
@@ -158,29 +158,51 @@ def create_mcp_server(rpg_file: str):
     """
     from mcp.server.fastmcp import FastMCP
 
-    # Single-element list used as a mutable box so the per-tool closures
-    # below can update the cached engine without needing ``nonlocal`` in
-    # each function.
-    engine_box: List[Optional[GraphQueryEngine]] = [None]
+    engine_box: list[GraphQueryEngine | None] = [None]
+    signature_box: list[tuple[int, int, int, int] | None] = [None]
+    engine_lock = threading.Lock()
 
-    def _get_engine() -> Optional[GraphQueryEngine]:
-        """Return the cached engine, lazily loading rpg.json on first use.
+    def _file_signature() -> tuple[int, int, int, int] | None:
+        try:
+            stat = os.stat(rpg_file)
+        except OSError:
+            return None
+        return (stat.st_dev, stat.st_ino, stat.st_size, stat.st_mtime_ns)
+
+    def _get_engine() -> GraphQueryEngine | None:
+        """Load the engine lazily and refresh it when rpg.json changes.
 
         Returns ``None`` if the file doesn't exist or fails to load.
         Errors are logged to stderr — never raised — because raising
         from a tool handler closes the MCP transport.
         """
-        if engine_box[0] is not None:
-            return engine_box[0]
-        if not os.path.isfile(rpg_file):
+        signature = _file_signature()
+        if signature is None:
+            engine_box[0] = None
+            signature_box[0] = None
             return None
-        try:
-            engine_box[0] = GraphQueryEngine.from_rpg_file(rpg_file)
+        if engine_box[0] is not None and signature_box[0] == signature:
+            return engine_box[0]
+
+        with engine_lock:
+            signature = _file_signature()
+            if signature is None:
+                engine_box[0] = None
+                signature_box[0] = None
+                return None
+            if engine_box[0] is not None and signature_box[0] == signature:
+                return engine_box[0]
+            try:
+                engine = GraphQueryEngine.from_rpg_file(rpg_file)
+            except Exception as exc:  # noqa: BLE001
+                engine_box[0] = None
+                signature_box[0] = None
+                logger.error("Failed to load RPG from %s: %s", rpg_file, exc)
+                return None
+            engine_box[0] = engine
+            signature_box[0] = signature
             logger.info("Loaded RPG from %s", rpg_file)
-            return engine_box[0]
-        except Exception as exc:  # noqa: BLE001
-            logger.error("Failed to load RPG from %s: %s", rpg_file, exc)
-            return None
+            return engine
 
     def _unavailable_reason() -> str:
         return (
@@ -294,7 +316,7 @@ def create_mcp_server(rpg_file: str):
         node_id: str,
         direction: str = "both",
         depth: int = 2,
-        edge_types: Optional[List[str]] = None,
+        edge_types: list[str] | None = None,
     ) -> str:
         """Explore dependencies and call chains from a code entity.
 
@@ -388,6 +410,30 @@ def create_mcp_server(rpg_file: str):
                        {"root_id": root_id, "max_depth": max_depth},
                        {"total_nodes": result.get("total_nodes", 0)},
                        int((time.monotonic() - t0) * 1000))
+        return json.dumps(result, indent=2, ensure_ascii=False)
+
+    @mcp.resource(
+        "rpg://tree",
+        name="rpg_tree",
+        description=(
+            "The repository's functional architecture tree at depth 2. "
+            "Use this resource when the client exposes MCP resources but not "
+            "custom MCP tools."
+        ),
+        mime_type="application/json",
+    )
+    def rpg_tree_resource() -> str:
+        engine = _get_engine()
+        if engine is None:
+            return _unavailable_payload(rpg_file, _unavailable_reason())
+        t0 = time.monotonic()
+        result = engine.list_tree(root_id=None, max_depth=2)
+        _log_tool_call(
+            "list_rpg_tree",
+            {"root_id": "", "max_depth": 2, "transport": "resource"},
+            {"total_nodes": result.get("total_nodes", 0)},
+            int((time.monotonic() - t0) * 1000),
+        )
         return json.dumps(result, indent=2, ensure_ascii=False)
 
     return mcp

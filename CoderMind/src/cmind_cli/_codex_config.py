@@ -47,6 +47,14 @@ def configure_rpg_tools(workspace: Path) -> Path:
 
     current["command"] = "cmind-mcp"
     current["args"] = []
+    existing_env = current.get("env")
+    if existing_env is not None and not isinstance(existing_env, dict):
+        raise CodexConfigError(f"{path} has invalid rpg-tools env configuration")
+    env = tomlkit.inline_table()
+    if isinstance(existing_env, dict):
+        env.update(existing_env)
+    env["CMIND_MCP_CLIENT_CONTEXT"] = "codex-agent"
+    current["env"] = env
     path.parent.mkdir(parents=True, exist_ok=True)
     _atomic_write(path, tomlkit.dumps(document))
     return path

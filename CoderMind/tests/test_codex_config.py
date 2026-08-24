@@ -19,6 +19,7 @@ def test_configure_rpg_tools_preserves_existing_config(tmp_path):
     assert "value = 42" in content
     assert '[mcp_servers.rpg-tools]' in content
     assert 'command = "cmind-mcp"' in content
+    assert 'CMIND_MCP_CLIENT_CONTEXT = "codex-agent"' in content
 
 
 def test_configure_rpg_tools_is_idempotent(tmp_path):
@@ -54,3 +55,20 @@ def test_configure_rpg_tools_refuses_custom_args(tmp_path):
         _codex_config.configure_rpg_tools(tmp_path)
 
     assert 'args = ["--custom"]' in path.read_text()
+
+
+def test_configure_rpg_tools_preserves_custom_env(tmp_path):
+    path = tmp_path / ".codex" / "config.toml"
+    path.parent.mkdir()
+    path.write_text(
+        '[mcp_servers.rpg-tools]\n'
+        'command = "cmind-mcp"\n'
+        'args = []\n'
+        'env = { USER_SETTING = "keep" }\n'
+    )
+
+    _codex_config.configure_rpg_tools(tmp_path)
+
+    content = path.read_text()
+    assert 'USER_SETTING = "keep"' in content
+    assert 'CMIND_MCP_CLIENT_CONTEXT = "codex-agent"' in content
