@@ -12,6 +12,70 @@ import sys
 import tempfile
 
 
+class SandboxAudit:
+    """Guard test writes using each filesystem operation's symlink semantics.
+
+    Content writes follow the final link; directory-entry operations resolve
+    only the parent. In particular, unlinking a cyclic or dangling test link
+    must not attempt to resolve the target of the link being removed.
+    """
+
+    def __init__(self, sandbox: Path) -> None:
+        self.sandbox = sandbox.resolve()
+
+    def check_path(self, value, dir_fd=None, *, follow_leaf=True):
+        if isinstance(value, int):
+            return  # Existing stdout/stderr and temporary file descriptors.
+        raw_path = os.fsdecode(value)
+        path = Path(raw_path)
+        if not path.is_absolute() and dir_fd is not None and dir_fd >= 0:
+            # Linux shutil.rmtree uses fd-relative paths during cleanup.
+            fd_path = Path(f"/proc/self/fd/{dir_fd}")
+            if not fd_path.exists():
+                raise PermissionError("Cannot verify fd-relative test write")
+            path = fd_path.resolve() / path
+        # Trailing separators/dot components request directory traversal; Path
+        # normalizes those away, so preserve their semantics from the raw input.
+        spelling = raw_path.replace(os.altsep, os.sep) if os.altsep else raw_path
+        directory_operand = spelling.endswith((os.sep, os.sep + ".", os.sep + ".."))
+        if follow_leaf or directory_operand or path.name in ("", ".", ".."):
+            checked = path.resolve()
+        else:
+            checked = path.parent.resolve() / path.name
+        if not checked.is_relative_to(self.sandbox):
+            raise PermissionError("Security test attempted a write outside its sandbox")
+
+    def __call__(self, event, args):
+        if event in ("subprocess.Popen", "os.system", "os.exec", "os.posix_spawn",
+                     "os.spawn", "socket.connect", "socket.bind", "socket.getaddrinfo"):
+            raise PermissionError("Security tests forbid real processes and network access")
+        if event == "open":
+            _, mode, flags = args
+            if (mode and any(c in mode for c in "wax+")) or flags & (
+                os.O_WRONLY | os.O_RDWR | os.O_CREAT | os.O_TRUNC | os.O_APPEND
+            ):
+                self.check_path(args[0])
+        elif event in ("os.remove", "os.rmdir"):
+            self.check_path(args[0], args[1], follow_leaf=False)
+        elif event == "os.mkdir":
+            self.check_path(args[0], args[2], follow_leaf=False)
+        elif event == "os.chmod":
+            self.check_path(args[0], args[2])
+        elif event == "os.utime":
+            self.check_path(args[0], args[3])
+        elif event == "os.truncate":
+            self.check_path(args[0])
+        elif event == "os.rename":
+            self.check_path(args[0], args[2], follow_leaf=False)
+            self.check_path(args[1], args[3], follow_leaf=False)
+        elif event == "os.link":
+            # A hard link must not create an alias to external content.
+            self.check_path(args[0], args[2])
+            self.check_path(args[1], args[3], follow_leaf=False)
+        elif event == "os.symlink":
+            self.check_path(args[1], args[2], follow_leaf=False)
+
+
 def main() -> int:
     sys.dont_write_bytecode = True
     root = Path(__file__).resolve().parents[1]
@@ -32,46 +96,7 @@ def main() -> int:
         tempfile.tempdir = str(home)
         os.chdir(sandbox)
 
-        def check_path(value, dir_fd=None):
-            if isinstance(value, int):
-                return  # Already-open stdout/stderr and temporary file descriptors.
-            path = Path(os.fsdecode(value))
-            if not path.is_absolute() and dir_fd is not None and dir_fd >= 0:
-                # Linux shutil.rmtree uses fd-relative paths during cleanup.
-                # Resolve the actual directory rather than trusting a basename.
-                fd_path = Path(f"/proc/self/fd/{dir_fd}")
-                if not fd_path.exists():
-                    raise PermissionError("Cannot verify fd-relative test write")
-                path = fd_path.resolve() / path
-            path = path.resolve()
-            if not path.is_relative_to(sandbox):
-                raise PermissionError("Security test attempted a write outside its sandbox")
-
-        def audit(event, args):
-            if event in ("subprocess.Popen", "os.system", "os.exec", "os.posix_spawn",
-                         "os.spawn", "socket.connect", "socket.bind", "socket.getaddrinfo"):
-                raise PermissionError("Security tests forbid real processes and network access")
-            if event == "open":
-                _, mode, flags = args
-                if (mode and any(c in mode for c in "wax+")) or flags & (
-                    os.O_WRONLY | os.O_RDWR | os.O_CREAT | os.O_TRUNC | os.O_APPEND
-                ):
-                    check_path(args[0])
-            elif event in ("os.remove", "os.rmdir"):
-                check_path(args[0], args[1])
-            elif event in ("os.mkdir", "os.chmod"):
-                check_path(args[0], args[2])
-            elif event == "os.utime":
-                check_path(args[0], args[3])
-            elif event == "os.truncate":
-                check_path(args[0])
-            elif event in ("os.rename", "os.link"):
-                check_path(args[0], args[2])
-                check_path(args[1], args[3])
-            elif event == "os.symlink":
-                check_path(args[1], args[2])
-
-        sys.addaudithook(audit)
+        sys.addaudithook(SandboxAudit(sandbox))
         try:
             if "--installed" in sys.argv:
                 # CI-only mode after installing the freshly built wheel. Preload
@@ -106,6 +131,7 @@ def main() -> int:
                 str(root / "tests" / "test_llm_client_agent_detect.py"),
                 str(root / "tests" / "test_windows_ai_cli.py"),
                 str(root / "tests" / "test_hooks_install.py"),
+                str(root / "tests" / "test_security_test_sandbox.py"),
                 "-k", "not update_graphs_status",
                 "--basetemp", str(sandbox / "pytest"),
                 "--log-file", str(sandbox / "pytest.log"),
