@@ -63,14 +63,14 @@ Reverse Direction: Code → RPG                                           │   
                                                                         │    │
 ┌──────────────────┐         ┌──────────┐       ┌──────────┐            │    │
 │ Existing Codebase│────────▶│  encode  │──────▶│update_rpg│────────────┘    │
-│                  │         │  (full)  │       │ (manual  │                 │
-└──────────────────┘         └────┬─────┘       │ fallback)│                 │
+│                  │         │  (full)  │       │ (explicit│                 │
+└──────────────────┘         └────┬─────┘       │ update)  │                 │
                               rpg.json          └──────────┘                 │
                               dep_graph.json     rpg.json / dep_graph.json   │
                                   │                                          │
                                   └──────────────────────────────────────────┘
                                                   ▲
-                                                  │ post-commit hook normally runs incremental updates
+                                                  │ opt-in post-commit hook: deterministic sync only (no AI update)
 
 MCP Server: search_rpg / explore_rpg / get_node_detail / list_rpg_tree
 ```
@@ -100,10 +100,12 @@ uv tool install cmind-cli --from "git+https://github.com/microsoft/RPG-ZeroRepo.
 cmind check
 
 # एक बार के उपयोग के लिए
-uvx --from "git+https://github.com/microsoft/RPG-ZeroRepo.git#subdirectory=CoderMind" cmind init <project-name>
+uvx --from "git+https://github.com/microsoft/RPG-ZeroRepo.git#subdirectory=CoderMind" cmind init <project-name> --ai claude
 ```
 
-`0.1.3` से, wheel pipeline scripts और slash-command templates को packaged assets के रूप में शामिल करता है, इसलिए `cmind init` ऑफ़लाइन वातावरणों (जैसे air-gapped या corporate proxy वातावरण) में भी काम करता है।
+`0.1.3` से, wheel pipeline scripts और slash-command templates को packaged assets के रूप में शामिल करता है, इसलिए `cmind init` का टेम्पलेट सेटअप चरण ऑफ़लाइन काम करता है। वैकल्पिक प्रारंभिक एन्कोडिंग (`--encode`) AI सेवाओं को कॉल कर सकती है और इसके लिए नेटवर्क एक्सेस की आवश्यकता हो सकती है; `cmind update` के दौरान स्वयं को अपग्रेड करने के लिए भी नेटवर्क एक्सेस की आवश्यकता हो सकती है।
+
+उदाहरणों में `--ai claude` है; GitHub Copilot के लिए इसे `--ai copilot` से बदलें। इंटरैक्टिव init में `--ai` छोड़ने पर चयन पूछा जा सकता है। गैर-TTY init में स्पष्ट `--ai` अनिवार्य है, भले ही वातावरण चर से प्रदाता चुना गया हो।
 
 ## Quick Start: नई रिपॉज़िटरी
 
@@ -115,7 +117,7 @@ uvx --from "git+https://github.com/microsoft/RPG-ZeroRepo.git#subdirectory=Coder
 1. नई परियोजना को आरंभीकृत करें:
 
    ```bash
-   cmind init my-project
+   cmind init my-project --ai claude
    cd my-project
    ```
 
@@ -146,26 +148,26 @@ uvx --from "git+https://github.com/microsoft/RPG-ZeroRepo.git#subdirectory=Coder
 > - **Claude Code**: चैट में सीधे `/cmind.feature_construct ...` टाइप करें — slash command पहचाने जाते हैं और संबंधित workflow ट्रिगर हो जाता है।
 > - **GitHub Copilot CLI**: slash command समर्थित नहीं हैं (कस्टम agent समर्थित हैं), इसलिए पहले `/agent cmind.feature_construct` से लक्ष्य agent पर स्विच करें, फिर `start` टाइप करके इसका अंतर्निहित workflow चलाएँ।
 
-CoderMind क्रमिक रूप से `~/.cmind/workspaces/<workspace-id>/data/rpg.json` बनाता है और इसका उपयोग आवश्यकताओं, प्लानिंग आउटपुट, जनरेटेड कोड और dependency जानकारी को संरेखित रखने के लिए करता है। आपके वर्कस्पेस की स्रोत फ़़ाइलें दूषित नहीं होंगी।
+CoderMind क्रमिक रूप से `~/.cmind/workspaces/<workspace-id>/data/rpg.json` बनाता है और इसका उपयोग आवश्यकताओं, प्लानिंग आउटपुट, जनरेटेड कोड और dependency जानकारी को संरेखित रखने के लिए करता है। मुख्य RPG डेटा रिपॉज़िटरी के बाहर रहता है; जनरेटेड रिपोर्ट वर्कस्पेस में रहती हैं।
 
 ## Quick Start: मौजूदा रिपॉज़िटरी
 
 जब आपके पास पहले से एक रिपॉज़िटरी है और आप चाहते हैं कि AI एजेंट इसे RPG कॉन्टेक्स्ट के साथ समझे या संपादित करे, तब इस मार्ग का उपयोग करें।
 
 > [!WARNING]
-> बड़ी परियोजनाओं के लिए, `cmind init . --encode` और `/cmind.encode` को चलने में काफ़ी समय लग सकता है। उदाहरण: 200 स्रोत फ़ाइलों में लगभग 100 मिनट लगते हैं।
+> बड़ी परियोजनाओं के लिए, `cmind init . --ai claude --encode` और `/cmind.encode` को चलने में काफ़ी समय लग सकता है। उदाहरण: 200 स्रोत फ़ाइलों में लगभग 100 मिनट लगते हैं।
 
 1. रिपॉज़िटरी रूट में CoderMind को आरंभीकृत करें और प्रारंभिक ग्राफ़ बनाएँ:
 
    ```bash
    cd existing-repo/
-   cmind init . --encode    # --encode वर्तमान कोड से RPG उत्पन्न करता है
+   cmind init . --ai claude --encode    # --encode वर्तमान कोड से RPG उत्पन्न करता है
    ```
 
    यदि आप गैर-खाली निर्देशिका के लिए पुष्टि संकेत को छोड़ना चाहते हैं:
 
    ```bash
-   cmind init . --force --encode
+   cmind init . --ai claude --force --encode
    ```
 
 2. रिपॉज़िटरी में अपना AI कोडिंग एजेंट लॉन्च करें।
@@ -174,39 +176,59 @@ CoderMind क्रमिक रूप से `~/.cmind/workspaces/<workspace-id
 
    ```text
    /cmind.encode                                  # आवश्यकता पड़ने पर पूर्ण RPG को पुनर्निर्मित करें
-   /cmind.update_rpg                              # मैन्युअल वृद्धिशील अपडेट (fallback)
+   /cmind.update_rpg                              # AI आधारित वृद्धिशील अपडेट स्पष्ट रूप से माँगें
    /cmind.rpg_edit <edit instructions>            # ग्राफ़-जागरूक कोड संपादन
    ```
 
-4. हर commit के बाद, CoderMind द्वारा इंस्टॉल किया गया git hook स्वचालित रूप से `cmind hook <name>` dispatcher को कॉल करता है, RPG को अपडेट करता है और उसे कोड परिवर्तनों के साथ संरेखित रखता है। यदि hook विफल हो जाता है या छोड़ दिया जाता है, तो `/cmind.update_rpg` मैन्युअल रूप से चलाएँ।
+4. AI आधारित ग्राफ़ अपडेट के लिए `/cmind.update_rpg` स्पष्ट रूप से चलाएँ। Git hooks डिफ़ॉल्ट रूप से बंद हैं; सक्षम करने पर भी वे केवल फ़ोरग्राउंड में नियतात्मक सिंक करते हैं, AI अपडेट या बैकग्राउंड कार्य नहीं चलाते।
 
 ## `cmind init` के बाद क्या होता है
 
-`cmind init` आपकी स्रोत फ़़ाइलों को संशोधित नहीं करता है, **और आपके वर्कस्पेस में रनटाइम स्टेट नहीं लिखता है**। यह आपके वर्कस्पेस में केवल command definitions, MCP कॉन्फ़़िगरेशन और hooks जोड़ता है। CoderMind का रनटाइम डेटा (outputs और logs) home-side निर्देशिका `~/.cmind/workspaces/<workspace-id>/` के अंतर्गत रखा जाता है, जहाँ `<workspace-id>` वर्कस्पेस के absolute path से जनित एक पठनीय slug है (उदाहरण: `home-hys-projects-myrepo`)।
+`cmind init` स्रोत फ़ाइलों को बदले बिना कमांड परिभाषाएँ, वर्कस्पेस मार्कर/कॉन्फ़िगरेशन, MCP पंजीकरण और स्टेटस एकीकरण सेट करता है। जनरेटेड रिपोर्ट वर्कस्पेस में रहती हैं; मुख्य रनटाइम डेटा (RPG आउटपुट और लॉग) `~/.cmind/workspaces/<workspace-id>/` में रहता है। `<workspace-id>` वर्कस्पेस के absolute path से बना पठनीय slug है (उदाहरण: `home-hys-projects-myrepo`)।
 
 ```text
 my-project/
 ├── docs/                 # /cmind.feature_construct के लिए वैकल्पिक आवश्यकता दस्तावेज़
 ├── .github/ or .claude/  # Coding Agent कमांड परिभाषाएँ और सेटिंग्स
-├── .vscode/              # लागू होने पर Copilot/VS Code MCP कॉन्फ़िगरेशन
-├── .cmind/              # जनरेटेड रिपोर्ट और कॉन्फ़िगरेशन फ़ाइलें
-└── .git/hooks/           # cmind init द्वारा इंस्टॉल किए गए post-commit / post-merge (प्रत्येक hook केवल एक पंक्ति: `cmind hook <name>`)
+├── .vscode/              # लागू होने पर Copilot/VS Code MCP और स्टेटस एकीकरण
+├── .cmind/              # वर्कस्पेस मार्कर/कॉन्फ़िगरेशन और जनरेटेड रिपोर्ट
+└── .git/hooks/           # वैकल्पिक post-commit / post-merge, केवल नियतात्मक सिंक
 ```
+
+CoderMind के Git hooks **डिफ़ॉल्ट रूप से बंद** हैं। नियतात्मक सिंक के लिए **हर** init/update में `--git-hooks` देना आवश्यक है। इसे छोड़ने या `--no-git-hooks` देने पर केवल पहचाने गए CoderMind-प्रबंधित ब्लॉक हटते हैं; अन्य उपयोगकर्ता/टीम hooks की सामग्री सुरक्षित रहती है। CoderMind-प्रबंधित Git hooks AI या बैकग्राउंड कार्य नहीं चलाते। Claude का `SessionStart` और Copilot/VS Code का `folderOpen` पहले की तरह **केवल स्टेटस दिखाते हैं**; वे Git hooks से अलग हैं और `--no-git-hooks` से प्रभावित नहीं होते।
 
 पूर्ण लेआउट और डेटा फ़ाइल संदर्भ के लिए [docs/project-structure.md](docs/project-structure.md) देखें।
 
+### निष्पादन कॉन्फ़िगरेशन
+
+रिपॉज़िटरी के `recommended_provider` और मान्य पुराने `ai_provider` / बिल्ट-इन मान से हूबहू मेल खाते `ai_cli_cmd` केवल सुझाव हैं, **रनटाइम निष्पादन की अनुमति नहीं**। Init आपका स्पष्ट चयन रिपॉज़िटरी के बाहर `~/.cmind/execution/<workspace-hash>/selection.json` में सहेजता है। यह वर्कस्पेस के कैनॉनिकल पथ से जुड़ा है और slug-आधारित RPG डेटा से अलग है। [लोकल निष्पादन चयन](docs/configuration.md#user-local-execution-selection) देखें।
+
+किसी अन्य पथ पर क्लोन करने, वर्कस्पेस को स्थानांतरित करने या नया उपयोगकर्ता होने पर दोबारा चयन करना होगा। विश्वसनीय CI प्रक्रिया के निष्पादन के लिए `CMIND_AI_PROVIDER` उपयोग कर सकता है; गैर-TTY init में फिर भी `--ai` चाहिए। `cmind update --ai claude` सहेजे गए चयन को स्पष्ट रूप से बदलता है। `--ai` के बिना update चयन बनाए रखता है (या अनुपस्थित ही छोड़ता है); रिपॉज़िटरी के सुझावों या पहचाने गए एकीकरणों से अपने आप अनुमति नहीं देता।
+
+असुरक्षित raw-command या अमान्य कॉन्फ़िगरेशन होने पर init/update वर्कस्पेस सेटअप या hook माइग्रेशन से पहले की जाँच में विफल होते हैं। `--ai`, `--force` और वातावरण चर से किया गया ओवरराइड इस जाँच को बायपास नहीं करते। [माइग्रेशन चेकलिस्ट](docs/configuration.md#updating-an-existing-codermind-project) के अनुसार कॉन्फ़िगरेशन सुधारें।
+
 ## CoderMind अपडेट करें
+
+पहले अपने इंस्टॉलेशन तरीके से सुधारों वाला CLI इंस्टॉल करें, उदाहरण के लिए:
 
 ```bash
 uv tool install cmind-cli \
    --from "git+https://github.com/microsoft/RPG-ZeroRepo.git#subdirectory=CoderMind" \
    --force \
    --reinstall
+```
 
-# किसी मौजूदा वर्कस्पेस को अपडेट करें
+फिर **हर मौजूदा वर्कस्पेस** का माइग्रेशन करें: अमान्य कॉन्फ़िगरेशन जाँचकर सुधारें, फिर नीचे दिए गए कमांड से स्पष्ट चयन करें (Copilot के लिए `claude` को `copilot` से बदलें)। केवल CLI इंस्टॉल करने से वर्कस्पेस के पुराने hooks साफ़ नहीं होते।
+
+```bash
 cd <your-workspace>
+cmind update --ai claude --no-upgrade --no-git-hooks
+
+# नियमित अपडेट लोकल चयन बनाए रखते हैं; अनुपस्थित निष्पादन सहमति नहीं बनाते
 cmind update
 ```
+
+न पहचाने गए पुराने hooks की मैन्युअल समीक्षा करें और असंबंधित उपयोगकर्ता/टीम hooks सुरक्षित रखें। केवल नियतात्मक सिंक चाहिए तो हर update में `--git-hooks` दें। [माइग्रेशन चेकलिस्ट](docs/configuration.md#updating-an-existing-codermind-project) देखें।
 
 ## समर्थित प्लेटफ़ॉर्म्स
 
@@ -226,11 +248,13 @@ cmind update
 | macOS            | ⌛     |
 | Windows          | ⌛     |
 
+Windows समर्थन अभी आंशिक है: टेम्पलेट केवल `sh` के लिए हैं (`ps` समर्थित नहीं है)। AI लॉन्च में इंस्टॉल की गई नेटिव `.exe` या समर्थित, ज्ञात Claude/Copilot npm एंट्री ही उपयोग होती हैं; `.cmd`, `.bat` और `.ps1` रैपर कभी नहीं चलाए जाते। यह वास्तविक रिलीज़ की संगतता की गारंटी नहीं है। प्रदाता की सामान्य अनुमोदन प्रक्रिया लागू रहती है; व्यापक अनुमति-बायपास नहीं है। केवल पढ़ने वाले MCP टूल्स का पूर्व-अनुमोदन अलग सेटिंग है। [निष्पादन फ़ाइल नीति](docs/configuration.md#executable-and-permission-policy) और [MCP अनुमतियाँ](docs/configuration.md#assistant-permissions-and-scope) देखें।
+
 ## दस्तावेज़ीकरण
 
 - [स्लैश कमांड संदर्भ](docs/commands.md) — हर `/cmind.*` कमांड के लिए इनपुट, आउटपुट और उदाहरण।
 - [CLI संदर्भ](docs/cli-reference.md) — `cmind init`, `cmind update`, `cmind check`, `cmind version` और सभी विकल्प।
-- [कॉन्फ़िगरेशन](docs/configuration.md) — AI सहायक सेटअप, MCP पंजीकरण, hooks, ऑटो-अनुमोदन और समस्या-निवारण।
+- [कॉन्फ़िगरेशन](docs/configuration.md) — लोकल प्रदाता चयन, MCP अनुमतियाँ, वैकल्पिक hooks, माइग्रेशन और समस्या-निवारण।
 - [परियोजना संरचना](docs/project-structure.md) — CoderMind द्वारा बनाई गई फ़ाइलें और निर्देशिकाएँ।
 
 ## आगामी सुविधाएँ

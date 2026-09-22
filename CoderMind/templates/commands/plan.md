@@ -1,5 +1,5 @@
 ---
-description: Build the complete Phase 2 Repository Planning Graph (RPG) from the feature tree in one step, with automatic resume on failure
+description: Build the complete Phase 2 Repository Planning Graph (RPG) from the feature tree in one step, with resumable stages
 name: cmind.plan
 ---
 
@@ -17,7 +17,18 @@ If empty, proceed with default behavior.
 
 Given the feature tree produced by `/cmind.feature_construct`, this
 command builds the complete Repository Planning Graph (RPG) in a single
-non-interactive run with automatic resume on failure.
+orchestrated run with resumable stages, subject to normal provider approvals.
+
+### Execution prerequisites and security stops
+
+AI calls require a trusted constructor/process choice or valid user-local
+selection; tracked provider hints are not authority. Configuration,
+authentication, access, or approval blocks override all retry, resume, restart,
+and non-interruption guidance below. Show the exact error and any report path,
+preserve artifacts, and pause for the user. Do not treat the block as an
+incomplete checkpoint, retry, modify artifacts or configuration/local selection,
+run init/update, or grant trust/permission overrides. Continue only after the
+user resolves the blocker and explicitly requests another attempt.
 
 > [!WARNING]
 > A full pipeline run can take from a few minutes to over an hour
@@ -47,7 +58,7 @@ cover all `skeleton.json` features). Do not skip the stage, do not run a
 later stage directly, and do not create downstream artifacts from a
 warning-state input.
 
-### Step 2: One decision (the only prompt of this command)
+### Step 2: One workflow decision (provider approvals remain separate)
 
 Choose **exactly one** case based on `done` vs `total`:
 
@@ -123,9 +134,11 @@ your own commentary on top of every line.
 
 ### Step 4: On failure
 
-If the orchestrator exits non-zero, it has already printed a
-`✗ <stage> ... failed` line plus three recovery hints. Surface those
-hints verbatim. The most common follow-ups are:
+If the orchestrator exits non-zero, surface the exact error and any
+`✗ <stage> ... failed` line or recovery hints verbatim. Apply the security
+stop rule before any follow-up: the hints are not authorization to retry,
+probe/resume as a checkpoint, or change settings after a blocked call.
+For ordinary stage failures only, the most common follow-ups are:
 
 ```bash
 # Re-check progress (no side effects).

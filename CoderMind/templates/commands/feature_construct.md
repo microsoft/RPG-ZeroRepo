@@ -1,5 +1,5 @@
 ---
-description: Build the complete Phase 1 feature tree from requirements in one step, with automatic resume on failure
+description: Build the complete Phase 1 feature tree from requirements in one step, with resumable stages
 name: cmind.feature_construct
 ---
 
@@ -22,6 +22,18 @@ CoderMind data store.
 Each stage is a standalone Python helper that drives an LLM through
 `LLMClient.call_structured(...)` with a Pydantic-validated schema — no
 intermediate Markdown artefacts are produced.
+
+## Execution Prerequisites and Security Stops
+
+AI calls require a trusted constructor/process choice or valid user-local
+selection; tracked provider hints are not authority. Normal provider approvals
+apply. Configuration, authentication, access, or approval blocks override all
+automatic resume, retry, restart, and expansion guidance below. Show the exact
+error and any report path, preserve artifacts, and pause for the user. Do not
+treat the block as an incomplete checkpoint, retry, modify artifacts or
+configuration/local selection, run init/update, or grant trust/permission
+overrides. Continue only after the user resolves the blocker and explicitly
+requests another attempt.
 
 ## Argument Parsing
 
@@ -177,8 +189,10 @@ without modifying artefacts.
 Stream stdout/stderr verbatim. The orchestrator prints one progress
 line per stage and validates each generated artefact.
 
-If a stage exits non-zero, surface the orchestrator's recovery hints.
-Typical recovery commands:
+If a stage exits non-zero, show its exact error and recovery hints. Apply the
+security stop rule before any follow-up: a blocked call is not a resumable
+checkpoint, and recovery hints do not authorize a retry. For ordinary stage
+failures only, typical recovery commands are:
 
 ```bash
 cmind script feature_construct.py --check-only           # see which stage failed
@@ -188,8 +202,8 @@ cmind script feature_build.py --verbose                  # debug build stage
 cmind script feature_refactor.py --log-level DEBUG       # debug refactor stage
 ```
 
-For spec-stage failures, the most common cause is an LLM call that
-failed to produce a schema-valid JSON after retries. Re-run with
+For ordinary spec-stage failures (not security blocks), a common cause is an
+LLM call that failed to produce schema-valid JSON after retries. Re-run with
 `--verbose` to surface the trajectory file location in the script's
 own log output; do not attempt to locate it manually.
 

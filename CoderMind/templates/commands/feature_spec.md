@@ -14,6 +14,13 @@ For the recommended end-to-end Phase 1 flow (spec → build → refactor),
 use `/cmind.feature_construct` instead. The granular command remains
 available for debugging and single-stage reruns.
 
+**Execution prerequisites:** AI calls need a trusted constructor/process
+choice or valid user-local selection; tracked provider hints are not authority.
+Normal approvals apply. Configuration, authentication, access, or approval
+blocks override retry/repair guidance: show the exact error and any report path,
+preserve artifacts, and stop for the user. Do not automatically retry, modify
+files, run init/update, or change configuration, trust, or permissions to recover.
+
 ## Argument Parsing
 
 Supported facade options (forward as-is to the helper):
@@ -89,7 +96,9 @@ Stream stdout / stderr from the helper. The helper handles:
 
 ### Step 5: Recovery hints on failure
 
-If the helper exits non-zero:
+If the helper exits non-zero, show the exact error first. Configuration,
+authentication, access, and approval blocks follow the stop rule above,
+regardless of exit code; do not retry them with `--verbose`. For other failures:
 
 - Exit code `2` (`NoInputAvailable`) — neither `--input-text` nor
   `docs/*.md` was found. Re-invoke with either inline text or after

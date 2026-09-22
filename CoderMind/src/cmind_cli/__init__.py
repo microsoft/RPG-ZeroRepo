@@ -3847,12 +3847,11 @@ def init(
         False,
         "--no-cmind-git",
         help=(
-            "Skip initialising a private git repository inside .cmind/. "
-            "Default is ON: cmind init seeds .cmind/.git "
-            "so every subsequent `cmind script` invocation auto-snapshots "
-            "the workspace state, letting you `git log` / `git diff` "
-            "between pipeline stages without extra tooling.  This flag "
-            "disables the feature for the current init only."
+            "Skip initialising the home-side private snapshot repository at "
+            "~/.cmind/workspaces/<workspace-id>/.git. By default eligible pipeline "
+            "stages snapshot generated state there. This flag skips initialization "
+            "for this invocation; it does not disable an existing snapshot repo "
+            "or control project Git sync hooks."
         ),
     ),
     git_hooks: bool = typer.Option(
@@ -4086,8 +4085,8 @@ def init(
                 debug=debug,
             )
 
-            # .cmind/.source is written by whichever provisioning path
-            # actually ran (_install_from_bundle / _download_and_extract_release_zip).
+            # Provisioning records the channel in home-side .meta.toml,
+            # separately from user-local execution selection.
 
             # Track only a marker/recommendation, never execution consent.
             # Preserve valid pre-existing configs byte-for-byte.
@@ -4332,19 +4331,19 @@ def init(
     if selected_ai == "claude":
         claude_settings = project_path / ".claude" / "settings.json"
         permissions_hint = Panel(
-            f"The template pre-configures [cyan].claude/settings.json[/cyan] with broad permissions "
-            f"(e.g. [cyan]Bash[/cyan], [cyan]Write[/cyan], [cyan]Edit[/cyan]) so that Claude Code can run scripts and "
-            f"modify files without repeated approval prompts.\n"
-            f"These permissions may be more permissive than you need. "
-            f"You can review and adjust them at any time by editing [cyan]{claude_settings.relative_to(project_path)}[/cyan].",
-            title="[yellow]Pre-granted Permissions[/yellow]",
+            f"The status integration adds [cyan]mcp__rpg-tools[/cyan] for read-only graph queries "
+            f"and preserves existing settings. It does not grant blanket Bash, Write or Edit access.\n"
+            f"AI calls keep the provider's normal permission checks. Existing or legacy template "
+            f"permissions may still be broad; this update does not revoke them. Review "
+            f"[cyan]{claude_settings.relative_to(project_path)}[/cyan] separately.",
+            title="[yellow]Review Assistant Permissions[/yellow]",
             border_style="yellow",
             padding=(1, 2),
         )
         console.print()
         console.print(permissions_hint)
 
-    # Initialise the private snapshot repo inside .cmind/.  Done BEFORE
+    # Initialise the private snapshot repo in the home-side RPG store. Done BEFORE
     # the optional initial encode so the encoder's output, if it runs,
     # becomes a fresh commit on top of the [init] baseline — a useful
     # diff target.
@@ -4423,7 +4422,8 @@ def update(
         False,
         "--no-cmind-git",
         help=(
-            "Skip backfilling the private snapshot repo at .cmind/.git "
+            "Skip backfilling the private snapshot repo at "
+            "~/.cmind/workspaces/<workspace-id>/.git "
             "for older workspaces that don't have one yet.  Default is ON: "
             "if the inner repo is missing, `cmind update` creates it and "
             "commits a catch-up snapshot.  Pre-existing inner repos are "
@@ -4718,8 +4718,8 @@ def update(
                 debug=debug,
             )
 
-            # .cmind/.source is written by whichever provisioning path
-            # actually ran (_install_from_bundle / _download_and_extract_release_zip).
+            # Provisioning records the channel in home-side .meta.toml,
+            # separately from user-local execution selection.
 
             # Revalidate repository recommendations and create only when absent;
             # preserve valid hints, including exact legacy built-in commands.
@@ -4810,7 +4810,7 @@ def update(
     )
 
     # Backfill inner snapshot repo for workspaces created before
-    # this feature shipped.  Idempotent — does nothing if .cmind/.git
+    # this feature shipped. Idempotent — does nothing if the home-side snapshot repo
     # already exists, and silently noops if --no-cmind-git was passed.
     if not no_cmind_git:
         from . import _inner_git

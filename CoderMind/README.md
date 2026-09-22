@@ -66,14 +66,14 @@ Reverse Direction: Code → RPG                                           │   
                                                                         │    │
 ┌──────────────────┐         ┌──────────┐       ┌──────────┐            │    │
 │ Existing Codebase│────────▶│  encode  │──────▶│update_rpg│────────────┘    │
-│                  │         │  (full)  │       │ (manual  │                 │
-└──────────────────┘         └────┬─────┘       │ fallback)│                 │
+│                  │         │  (full)  │       │ (explicit│                 │
+└──────────────────┘         └────┬─────┘       │ update)  │                 │
                               rpg.json          └──────────┘                 │
-                           (includes dep_graph)          rpg.json              │
+                              dep_graph.json     rpg.json / dep_graph.json   │
                                   │                                          │
                                   └──────────────────────────────────────────┘
                                                   ▲
-                                                  │ post-commit hook normally runs incremental updates
+                                                  │ opt-in post-commit hook: deterministic sync only (no AI update)
 
 MCP Server: search_rpg / explore_rpg / get_node_detail / list_rpg_tree
 ```
@@ -103,10 +103,12 @@ uv tool install cmind-cli --from "git+https://github.com/microsoft/RPG-ZeroRepo.
 cmind check
 
 # For one-time usage
-uvx --from "git+https://github.com/microsoft/RPG-ZeroRepo.git#subdirectory=CoderMind" cmind init <project-name>
+uvx --from "git+https://github.com/microsoft/RPG-ZeroRepo.git#subdirectory=CoderMind" cmind init <project-name> --ai claude
 ```
 
-Since `0.1.3`, the wheel ships the pipeline scripts and slash-command templates as packaged assets, so `cmind init` works offline (for example in air-gapped or corporate proxy environments).
+Since `0.1.3`, the wheel ships the pipeline scripts and slash-command templates as packaged assets, so the template provisioning step of `cmind init` works offline. Optional initial encoding (`--encode`) may invoke AI services and require network access; self-upgrade during `cmind update` may also require network access.
+
+The examples use `--ai claude`; replace it with `--ai copilot` for GitHub Copilot. Interactive init can prompt if `--ai` is omitted; non-TTY init requires explicit `--ai`, even with an environment override.
 
 ## Quick Start: New Repository
 
@@ -118,7 +120,7 @@ Use this path when you want CoderMind to turn requirements into a new codebase.
 1. Initialize a new project:
 
    ```bash
-   cmind init my-project
+   cmind init my-project --ai claude
    cd my-project
    ```
 
@@ -149,26 +151,26 @@ Use this path when you want CoderMind to turn requirements into a new codebase.
 > - **Claude Code**: type `/cmind.feature_construct ...` directly in the chat — slash commands are recognised and dispatch the matching workflow.
 > - **GitHub Copilot CLI**: slash commands are not supported (custom agents are), so first run `/agent cmind.feature_construct` to switch to the target agent, then type `start` to run its built-in workflow.
 
-CoderMind progressively builds `rpg.json` in the home-side runtime directory (`~/.cmind/workspaces/<workspace-id>/data/rpg.json`) and uses it to keep requirements, planning artifacts, generated code, and dependency information aligned. Your workspace source files are not polluted.
+CoderMind progressively builds `rpg.json` in the home-side runtime directory (`~/.cmind/workspaces/<workspace-id>/data/rpg.json`) and uses it to keep requirements, planning artifacts, generated code, and dependency information aligned. Bulk RPG data stays outside the repo; generated reports remain in the workspace.
 
 ## Quick Start: Existing Repository
 
 Use this path when you already have a repository and want an AI agent to understand or edit it with RPG context.
 
 > [!WARNING]
-> For larger projects, `cmind init . --encode` and `/cmind.encode` can take a long time to run. As a typical example: 200 source files take about 100 minutes.
+> For larger projects, `cmind init . --ai claude --encode` and `/cmind.encode` can take a long time to run. As a typical example: 200 source files take about 100 minutes.
 
 1. Initialize CoderMind in the repository root and build the initial graph:
 
    ```bash
    cd existing-repo/
-   cmind init . --encode    # --encode builds the RPG from the current code
+   cmind init . --ai claude --encode    # --encode builds the RPG from the current code
    ```
 
    If you want to skip the confirmation prompt for a non-empty directory:
 
    ```bash
-   cmind init . --force --encode
+   cmind init . --ai claude --force --encode
    ```
 
 2. Launch your AI coding agent in the repository.
@@ -177,39 +179,59 @@ Use this path when you already have a repository and want an AI agent to underst
 
    ```text
    /cmind.encode                                  # rebuild the full RPG when needed
-   /cmind.update_rpg                              # manual incremental update fallback
+   /cmind.update_rpg                              # explicitly request an AI-driven incremental update
    /cmind.rpg_edit <edit instructions>            # graph-aware code edit
    ```
 
-4. After each commit, the git hook installed by CoderMind automatically calls the `cmind hook <name>` dispatcher to update the RPG and keep it aligned with code changes. If the hook fails or is skipped, run `/cmind.update_rpg` manually.
+4. Request AI-driven graph updates explicitly with `/cmind.update_rpg`. Git hooks are off by default; opting in enables deterministic, foreground sync only, not AI updates or background workers.
 
 ## What happens after `cmind init`
 
-`cmind init` does not modify your source files, **and it does not write runtime state into your workspace**. It only adds command definitions, MCP configuration, and hooks to your workspace. CoderMind runtime data (artifacts and logs) lives under the home-side directory `~/.cmind/workspaces/<workspace-id>/`, where `<workspace-id>` is a slug derived from the workspace's absolute path (e.g. `home-hys-projects-myrepo`).
+`cmind init` provisions command definitions, a workspace marker/configuration, MCP registration, and status integrations without editing your source files. Generated reports live in the workspace; bulk runtime data (RPG artifacts and logs) lives under `~/.cmind/workspaces/<workspace-id>/`, where `<workspace-id>` is a slug derived from the workspace's absolute path (e.g. `home-hys-projects-myrepo`).
 
 ```text
 my-project/
 ├── docs/                 # Optional requirement docs for /cmind.feature_construct
 ├── .github/ or .claude/  # Coding Agent command definitions and settings
-├── .vscode/              # Copilot/VS Code MCP configuration when applicable
-├── .cmind/              # Generated reports and configuration files
-└── .git/hooks/           # post-commit / post-merge installed by cmind init (each hook is one line: `cmind hook <name>`)
+├── .vscode/              # Copilot/VS Code MCP and status integration when applicable
+├── .cmind/              # Workspace marker/configuration and generated reports
+└── .git/hooks/           # Optional post-commit / post-merge deterministic sync only
 ```
+
+CoderMind Git hooks are **OFF by default**. Pass `--git-hooks` on **each** init/update invocation to opt into deterministic sync only. Omitting it or using `--no-git-hooks` removes recognized CoderMind-owned blocks while preserving other user/team hook content. CoderMind-managed Git hooks do not launch AI or background workers. Claude `SessionStart` and Copilot/VS Code `folderOpen` remain **status-only**, separate from Git hooks and unaffected by `--no-git-hooks`.
 
 See [docs/project-structure.md](docs/project-structure.md) for the full layout and data file reference.
 
+### Execution configuration
+
+Repository `recommended_provider` and valid legacy `ai_provider` / exact built-in `ai_cli_cmd` hints are **not runtime authority**. Init saves your explicit choice outside the repo at `~/.cmind/execution/<workspace-hash>/selection.json`, bound to the canonical workspace path and separate from slug-based RPG data. See [local execution selection](docs/configuration.md#user-local-execution-selection).
+
+A clone at another path, a moved workspace, or a new user must choose again. Trusted CI may use `CMIND_AI_PROVIDER` for process execution; non-TTY init still requires `--ai`. `cmind update --ai claude` explicitly changes the saved choice; update without `--ai` preserves it (or leaves it absent), never authorizing execution from repository hints or detected integrations.
+
+Unsafe raw-command or invalid configuration makes init/update fail preflight, before provisioning or hook migration. `--ai`, `--force`, and environment overrides do not bypass validation. Correct the configuration as described in the [migration checklist](docs/configuration.md#updating-an-existing-codermind-project).
+
 ## Updating CoderMind
+
+First install the repaired CLI using your installation method, for example:
 
 ```bash
 uv tool install cmind-cli \
    --from "git+https://github.com/microsoft/RPG-ZeroRepo.git#subdirectory=CoderMind" \
    --force \
    --reinstall
+```
 
-# Update an existing workspace
+Then migrate **each existing workspace**: review and correct invalid configuration before running the explicit selection below (replace `claude` with `copilot` if intended). Installing the CLI alone does not clean old workspace hooks.
+
+```bash
 cd <your-workspace>
+cmind update --ai claude --no-upgrade --no-git-hooks
+
+# Routine updates preserve the local choice; they do not create missing consent
 cmind update
 ```
+
+Review unrecognized legacy hooks manually, preserving unrelated user/team hooks. Use `--git-hooks` on each update only if deterministic sync is wanted. See the [migration checklist](docs/configuration.md#updating-an-existing-codermind-project).
 
 ## Supported Platforms
 
@@ -229,11 +251,13 @@ cmind update
 | macOS            | ⌛     |
 | Windows          | ⌛     |
 
+Windows support remains partial: templates are `sh`-only (`ps` is not supported). AI launches use installed native `.exe` files or supported, known Claude/Copilot npm entries; `.cmd`, `.bat`, and `.ps1` wrappers are never executed. This is not a live-release compatibility guarantee. Normal provider approvals apply, with no broad permission bypass; read-only MCP preapproval is separate. See [executable policy](docs/configuration.md#executable-and-permission-policy) and [MCP permissions](docs/configuration.md#assistant-permissions-and-scope).
+
 ## Documentation
 
 - [Slash command reference](docs/commands.md) — every `/cmind.*` command, inputs, outputs, and examples.
 - [CLI reference](docs/cli-reference.md) — `cmind init`, `cmind update`, `cmind check`, `cmind version`, and all options.
-- [Configuration](docs/configuration.md) — AI assistant setup, MCP registration, hooks, auto-approval, and troubleshooting.
+- [Configuration](docs/configuration.md) — local provider selection, MCP permissions, opt-in hooks, migration, and troubleshooting.
 - [Project structure](docs/project-structure.md) — files and directories created by CoderMind.
 
 ## Upcoming Features

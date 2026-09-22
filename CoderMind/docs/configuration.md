@@ -21,7 +21,7 @@ Use `cmind check` to check local tool availability. AI execution also applies th
 cmind check
 ```
 
-If the selected AI assistant is not found, install and authenticate it, then rerun `cmind init` or `cmind update`.
+If the selected AI assistant is not found, stop and report the exact error. The user must choose whether to install/authenticate it or change their explicit selection; agents must not automatically run init/update as recovery.
 
 ## Workspace Configuration (`.cmind/config.toml`)
 
@@ -53,7 +53,7 @@ A higher-priority authority does not read or rewrite lower-priority local state.
 
 Explicit choices are saved under `Path.home().resolve() / ".cmind" / "execution" / <full-sha256> / "selection.json"`. The hash is the full SHA-256 of the UTF-8 canonical workspace identity: resolve symlinks, normalize Windows extended-path prefixes, then apply `os.path.normcase`. It is not the slug used by the RPG data store.
 
-The JSON record has exactly three fields: `schema_version` (integer `1`), `workspace` (that exact canonical identity), and `ai_provider` (a valid provider enum). Invalid schemas or mismatched identities fail closed when read; redirected/symlinked state paths and storage inside the workspace are rejected. This record is separate from RPG data and provisioning metadata; copying those files cannot authorize execution.
+The JSON record has exactly three fields: `schema_version` (integer `1`), `workspace` (that exact canonical identity), and `ai_provider` (a valid provider enum). Invalid schemas or mismatched identities fail closed when read; redirected/symlinked state paths and storage inside the workspace are rejected. This record is separate from RPG data and provisioning metadata at `~/.cmind/workspaces/<workspace-id>/.meta.toml`; copying those files cannot authorize execution. Do not copy or hand-edit selection records to migrate consent.
 
 A clone at another path, a moved workspace, or a new user needs an explicit selection (or trusted process environment). There is no automatic import from recommendations, detected integrations, or metadata. Use `cmind init --here --ai claude` or, for an existing CoderMind workspace, `cmind update --ai claude`; choose `copilot` instead if intended.
 
@@ -114,7 +114,7 @@ cmind init my-project --ai copilot
 
 `--ai` selects both the integration and the provider to save locally. If omitted in an interactive terminal, CoderMind asks for that explicit choice, independently of the recommendation. Non-TTY init without `--ai` fails early, before provisioning; environment overrides or detected integrations do not satisfy this init requirement.
 
-The local choice is saved atomically only after successful provisioning and hook reconciliation, before the success message or optional initial encode. A hook or local-save error aborts init/update without reporting success; init does not proceed to encoding. A failed atomic replacement preserves the previous selection.
+The local choice is saved atomically only after successful provisioning and **Git hook reconciliation**, before the success message or optional initial encode. A Git hook cleanup/installation error or local-save error aborts init/update without reporting success; init does not proceed to encoding. A failed atomic replacement preserves the previous selection. Installation of the separate `SessionStart` / `folderOpen` status integrations is best-effort and does not have this fatal-error contract.
 
 ### Script type
 
@@ -141,6 +141,12 @@ cmind update --no-mcp
 
 Skipping MCP means the slash-command pipeline still works, but the AI assistant will not get the `rpg-tools` graph-query tools automatically.
 
+For Copilot, `--no-copilot-cli-mcp` skips registration in `~/.copilot/mcp-config.json` while retaining workspace MCP setup. Neither skip option removes existing registrations or permissions.
+
+### Private snapshot repository
+
+By default, init creates the private snapshot repo at `~/.cmind/workspaces/<workspace-id>/.git/`; update backfills it if missing. `--no-cmind-git` skips that creation for the current invocation. It does not delete or disable an existing snapshot repo, change the local provider selection, or control project Git hooks. Project `--no-git` and opt-in `--git-hooks` are separate settings.
+
 ### Initial encode
 
 The MCP tools query `.cmind/data/rpg.json`. For existing codebases, that file is created by the encoder.
@@ -148,8 +154,8 @@ The MCP tools query `.cmind/data/rpg.json`. For existing codebases, that file is
 `cmind init` supports:
 
 ```bash
-cmind init --here --encode
-cmind init --here --no-encode
+cmind init --here --ai claude --encode
+cmind init --here --ai claude --no-encode
 ```
 
 Behavior:
@@ -186,10 +192,10 @@ For Claude Code, CoderMind writes command definitions and settings under `.claud
 ```text
 .claude/
 ├── commands/              # /cmind.* command definitions
-└── settings.json          # permissions and MCP auto-approval
+└── settings.json          # status integration, read-only MCP rule, existing permissions
 ```
 
-The settings file grants project-scoped permissions needed by CoderMind commands, including access to the `rpg-tools` MCP server. Review `.claude/settings.json` if your team wants stricter local permission prompts.
+The status integration adds the project-scoped `mcp__rpg-tools` allow rule for read-only graph queries; it is not a blanket grant for Bash, Write, Edit, or provider execution. Review `.claude/settings.json` and any pre-existing permissions separately. MCP server registration itself is in the workspace's `.mcp.json`.
 
 ### GitHub Copilot / VS Code
 
@@ -210,7 +216,9 @@ Open the project in VS Code after initialization so the workspace MCP configurat
 Provider configuration is not a permission grant. Claude's status integration separately adds a project-scoped `mcp__rpg-tools` allow rule for the four read-only graph queries; Copilot / VS Code manages MCP approvals through its own controls. Review generated and existing assistant permissions separately: removing CLI bypass flags does not revoke settings you already granted.
 
 - `--no-mcp` skips MCP registration, not status integrations or blanket removal of existing permissions.
-- Copilot initialization/update also registers MCP in the user's Copilot CLI configuration by default. Use `--no-copilot-cli-mcp` to skip that registration while retaining workspace MCP setup.
+- Copilot initialization/update also registers MCP in the user's `~/.copilot/mcp-config.json` by default; Copilot CLI does not read `.vscode/mcp.json`. Use `--no-copilot-cli-mcp` to skip that registration while retaining workspace MCP setup.
+
+The separate Release ZIP packagers still generate a broader Claude permissions template, including Bash, Write, and Edit. The current bundle-based `cmind init/update` path does not use that template; unpacking a ZIP manually or retaining old settings is different. Removing CLI bypass flags does not restrict permissions already granted by those files. Review them separately rather than assuming migration revokes them.
 
 ## Git Hooks and Incremental Updates
 
@@ -233,11 +241,11 @@ For LLM-driven updates, explicitly invoke the following from the workspace, outs
 cmind script update_graphs.py update-rpg --json
 ```
 
-This requires an existing RPG and `HEAD~1` (at least two commits). If the graph is missing or needs a full rebuild, use `/cmind.encode`.
+This requires an existing RPG and a resolvable `HEAD~1` (at least two commits with the parent available locally). It compares that commit with the **current working tree**, including uncommitted changes; a dirty working tree is not by itself a blocker. The baseline is fixed, not the graph's last successful update, so a graph stale across several commits or a branch switch may need a user-approved full `/cmind.encode`. If the graph or history is missing, stop and let the user choose how to proceed; do not encode or alter history automatically.
 
 ### Session and workspace startup status
 
-Claude's `SessionStart` integration and Copilot / VS Code's `folderOpen` task remain **status-only**: they run `cmind script update_graphs.py status` to display graph status and guidance, without an LLM update. They are not Git hooks and are not disabled by `--no-git-hooks`.
+Claude's `SessionStart` integration and Copilot / VS Code's `folderOpen` task remain **status-only**: they run `cmind script update_graphs.py status` to display graph status and guidance, without an LLM update. They are not Git hooks and are not disabled by `--no-git-hooks`. Their installation is best-effort: a status integration warning does not abort init/update, unlike Git hook reconciliation or local-selection save failures.
 
 ## Updating an Existing CoderMind Project
 
@@ -249,7 +257,7 @@ Upgrade the installed CLI **and reconcile every existing workspace**. Upgrading 
 4. Review remaining hooks in the active hooks directory, including any `core.hooksPath` override. Manually migrate unrecognized legacy inline-script bodies; preserve unrelated user/team hooks. Do not assume a wheel upgrade cleaned every workspace.
 5. Request feature graph updates explicitly with `cmind script update_graphs.py update-rpg --json` or `/cmind.update_rpg`, allowing for normal provider approval requirements.
 
-Without `--ai`, `cmind update` refreshes integrations only and preserves the local selection byte-for-byte (or leaves it absent). It prefers an existing supported local provider for templates, then detects integration folders or prompts interactively for an integration only; none of these paths saves new consent. Malformed local state fails when read; retry with an explicit choice after checking local-store permissions/identity. `--ai` saves the selected provider only after hooks succeed and leaves valid workspace hints unchanged. `--no-mcp` skips MCP registration, not hook reconciliation.
+Without `--ai`, `cmind update` refreshes integrations only and preserves the local selection byte-for-byte (or leaves it absent). It prefers an existing supported local provider for templates, then detects integration folders or prompts interactively for an integration only; none of these paths saves new consent. Malformed local state fails when read; the user must check local-store permissions/identity and explicitly choose whether to retry with `--ai`. `--ai` saves the selected provider only after Git hook reconciliation succeeds and leaves valid workspace hints unchanged. `--no-mcp` skips MCP registration, not hook reconciliation. This checklist is an explicit user maintenance action, not an automatic response to a rejected AI call.
 
 ### Repository regression checks
 
@@ -258,6 +266,10 @@ For maintainers, [../tests/run_security_tests.py](../tests/run_security_tests.py
 The security CI workflow is configured for disposable Linux and Windows runners: source and freshly installed wheel tests, module-origin/byte checks, and verification of all eleven provider Release ZIPs. Stable and pre-release publishing depend on it. The local runner does not install packages or build releases; `--installed` is for CI after a fresh wheel installation. Neither this runner nor that workflow installs or executes real provider npm releases; mocked fixtures and artifact checks are not live compatibility tests or evidence of a completed CI run.
 
 ## Troubleshooting
+
+### Configuration, authentication, access, or approval blocks
+
+Stop the workflow and surface the exact reported error; preserve any existing artifacts and diagnostic report paths. Do not treat these blocks as checkpoints or automatically retry, resume, initialize/update the workspace, rewrite configuration/local selection, set trust or environment overrides, or grant permissions. Ask the user to resolve the issue through the normal provider controls and explicitly authorize another attempt. A repository recommendation and a request to run a pipeline do not authorize those recovery changes.
 
 ### AI assistant CLI not found
 
@@ -279,13 +291,13 @@ The MCP server is configured, but `.cmind/data/rpg.json` has not been created ye
 
 ### Incremental update failed
 
-Inspect the foreground error and use `cmind version` to locate the actual Logs directory. Check for invalid provider configuration, unsupported launchers, or required provider approval before retrying explicitly:
+Preserve the exact foreground error and any reported diagnostic artifact; use `cmind version` to locate the actual Logs directory. For configuration, authentication, access, or approval blocks, follow the stop rule above. After the user resolves the blocker and requests a retry:
 
 ```text
 /cmind.update_rpg
 ```
 
-If the graph is corrupted or too stale, run `/cmind.encode` for a full rebuild.
+If the graph is corrupted or too stale, keep the existing graph and reports and ask the user whether to run `/cmind.encode` for a full rebuild. Do not delete artifacts automatically.
 
 ### Template download hits rate limits or private repo access errors
 

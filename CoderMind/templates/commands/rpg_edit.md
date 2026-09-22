@@ -32,6 +32,14 @@ synchronized changes across **code + RPG + dep_graph**.
 - Does NOT depend on `/cmind.feature_edit` or `/cmind.update_rpg`.
 - The RPG feature graph is the authoritative source for code modifications.
 
+**Execution prerequisites:** AI calls need a trusted constructor/process
+choice or valid user-local selection; tracked provider hints and the RPG are
+not execution authority. Normal approvals apply. Configuration, authentication,
+access, or approval blocks override retry/repair and optional-probe fallbacks:
+show the exact error and any report path, preserve artifacts/branches, and stop
+for the user. Do not automatically retry, modify files/state, run init/update,
+or change configuration, trust, or permissions to recover.
+
 ## Workflow
 
 The text after `/cmind.rpg_edit` is the edit instruction, available as `$ARGUMENTS`.
@@ -89,8 +97,9 @@ separately — incorporate the results directly into Step 4.
 ### Step 3.5: Visual Reconnaissance (optional, before EditPlan)
 
 This step is relevant for any edit that affects **what the user sees** —
-UI, layout, styles, pages, forms, or any visual component. Failure modes
-short-circuit to Step 4 with no user-visible error.
+UI, layout, styles, pages, forms, or any visual component. Ordinary optional
+tool-availability failures may skip to Step 4; security blocks must be shown
+and stop the workflow, not silently fall back.
 
 **Trigger:** Run this step when the edit instruction relates to visual
 or layout concerns. Match case-insensitively against:
@@ -107,14 +116,15 @@ If no keyword matches, skip directly to Step 4.
 **Step 3.5a — Probe tool availability (≤ 5s):**
 
 ```bash
-cmind script tools/browser.py check >/dev/null 2>&1 \
-    && BROWSER_OK=1 || BROWSER_OK=0
+cmind script tools/browser.py check
 ```
 
-If `BROWSER_OK=0` (Playwright not installed, headless launch failed,
-no display), skip the rest of this step with a one-line note like
+Inspect the exit status and output without suppressing diagnostics. If the
+tool is simply unavailable (Playwright not installed or no display), skip the
+rest of this step with a one-line note like
 `Note: visual recon skipped — playwright unavailable.` and proceed to
-Step 4.
+Step 4. Configuration, authentication, access, or approval errors instead
+follow the stop rule above.
 
 **Step 3.5b — Decide what to capture:**
 
@@ -137,9 +147,10 @@ HTML file to extract real class names, element structure, and any
 inline styles. Cite these concretely in Step 4's `code_changes`
 descriptions instead of generic phrases like "polish the form".
 
-**Failure handling:** If `inspect` exits non-zero (server down, 404,
-network error), record the failure in your reasoning and proceed to
-Step 4 without recon — never block the edit on a failed probe.
+**Failure handling:** For ordinary availability errors (server down, 404,
+network failure), note the error and proceed to Step 4 without recon.
+Configuration, authentication, access, or approval blocks are not optional
+probe failures: show the exact error and stop.
 
 ### Step 4: Generate EditPlan and Confirm
 
@@ -234,9 +245,9 @@ Reply with one of:
 * `show: <node_id>`            → Expand full impact / detail for this node, then ask again
 ```
 
-**This is the only user confirmation point.** Wait for one of the four
-replies above before proceeding. Treat any other free-form reply as
-`revise: <free-form text>`.
+**This is the plan confirmation point, not a substitute for provider
+approvals.** Wait for one of the four replies above before proceeding.
+Treat any other free-form reply as `revise: <free-form text>`.
 
 ### Step 5: Apply Changes (RPG-First, on a dedicated branch)
 
@@ -335,7 +346,7 @@ If the output contains a `"suggestions"` array, save it for Step 6 —
 these are related issues the review agent noticed but are outside the
 current plan's scope. Present them as follow-up recommendations.
 
-If any test step fails: fix the code on the branch, re-run dep-refresh
+For ordinary implementation/test failures only: fix the code on the branch, re-run dep-refresh
 (Step 5c command), `git commit --amend --no-edit` to fold the
 fix into the same branch commit, then re-test.
 

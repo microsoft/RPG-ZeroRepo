@@ -12,6 +12,13 @@ $ARGUMENTS
 You **MAY** consider additional user input if provided. If empty,
 proceed with default behavior.
 
+**Execution prerequisites:** AI calls need a trusted constructor/process
+choice or valid user-local selection; tracked provider hints are not authority.
+Normal approvals apply. Configuration, authentication, access, or approval
+blocks override retry/repair guidance: show the exact error and any report path,
+preserve artifacts, and stop for the user. Do not automatically retry, modify
+files, run init/update, or change configuration, trust, or permissions to recover.
+
 ## **Outline**
 
 The text entered by the user after `/cmind.design_base_classes` **is the adjustment suggestion**.

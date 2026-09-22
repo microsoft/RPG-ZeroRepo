@@ -84,7 +84,7 @@ cmind check
 
 ```bash
 cd your-existing-repo
-cmind init . --encode
+cmind init . --ai claude --encode
 # In Claude Code or GitHub Copilot:
 # /cmind.rpg_edit  "Add rate limiting to all API endpoints"
 ```
@@ -92,12 +92,14 @@ cmind init . --encode
 **Generate a new repository:**
 
 ```bash
-cmind init my-project
+cmind init my-project --ai claude
 cd my-project
 # In Claude Code or GitHub Copilot:
 # /cmind.feature_spec  Build a CLI tool for managing Docker containers
 # /cmind.feature_build → /cmind.feature_refactor → ... → /cmind.code_gen
 ```
+
+Use `--ai copilot` instead for Copilot. Init saves the user's explicit provider selection outside the repository after successful setup. Interactive init can ask for the choice; noninteractive init requires `--ai`. Tracked provider recommendations and legacy configuration values do not authorize AI execution. On an existing workspace, `cmind update --ai claude --no-upgrade` explicitly establishes or changes the local choice after installing the updated CLI; an update without `--ai` does not grant one automatically. See the [execution configuration and migration guide](CoderMind/docs/configuration.md#updating-an-existing-codermind-project).
 
 See [`CoderMind/README.md`](CoderMind/README.md) for the full setup, slash commands, and MCP tools.
 Also available in [简体中文](CoderMind/README.zh-CN.md) · [日本語](CoderMind/README.ja-JP.md) · [한국어](CoderMind/README.ko-KR.md) · [हिन्दी](CoderMind/README.hi-IN.md).
@@ -112,7 +114,7 @@ CoderMind exposes the RPG workspace through three interfaces:
 - **Slash commands** — run build, understand, and update workflows inside the coding agent (`/cmind.feature_spec`, `/cmind.code_gen`, `/cmind.encode`, `/cmind.rpg_edit`, and more).
 - **MCP graph tools** — let the agent search, inspect, and traverse RPG nodes during coding (`search_rpg`, `explore_rpg`, `get_node_detail`, `list_rpg_tree`).
 
-CoderMind can keep the RPG in sync with code changes through a post-commit hook, so edits made by the agent or directly in code can be reflected back into the graph.
+Git hooks are off by default. Passing `--git-hooks` to init/update installs foreground deterministic synchronization only; otherwise recognized CoderMind hook blocks are removed while unrelated hooks are preserved. Hooks never launch background AI updates. Run `/cmind.update_rpg` explicitly for an AI-driven incremental update, or `/cmind.encode` for a full rebuild. Normal provider permission checks still apply.
 
 **Supported agents:** Claude Code (verified), GitHub Copilot (verified).
 
