@@ -15,7 +15,6 @@ import shlex
 import signal as _signal
 import subprocess
 import time
-import tomllib
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
@@ -24,7 +23,11 @@ from dataclasses import dataclass, field, asdict
 from common.llm_types import Memory
 from common.session_manager import create_session_manager
 from . import paths as _paths
-from .paths import REPO_DIR as _REPO_DIR, WORKSPACE_ROOT as _WORKSPACE_ROOT
+from .ai_cli_policy import (
+    AICommandPolicyError, PROVIDER_ARGV, build_argv, provider_from_command,
+    resolve_provider,
+)
+from .paths import WORKSPACE_ROOT as _WORKSPACE_ROOT
 
 _IS_WINDOWS = _platform.system() == "Windows"
 
@@ -70,11 +73,10 @@ def _kill_process_tree(proc: subprocess.Popen) -> None:
 # ----------------------------------------------------------------------------
 #
 # Resolution priority:
-#   P1. LLMClient(tool="...") constructor argument
-#   P2. CMIND_AI_CLI_CMD env var
-#   P3. <workspace>/.cmind/config.toml  [cmind].ai_cli_cmd
-#   P4. _BAKED_IN_VALUE (release-zip builds substitute it at packaging time;
-#                        bundle builds leave the placeholder unchanged)
+#   P1. LLMClient(tool="...") exact legacy built-in command
+#   P2. CMIND_AI_PROVIDER, or legacy CMIND_AI_CLI_CMD (mutually exclusive)
+#   P3. User-local provider selection bound to the canonical workspace path
+# Repository recommendations and legacy release defaults never authorize a call.
 #
 # An unresolved value is reported lazily by LLMClient.generate, not here,
 # so importing the module and constructing an LLMClient without calling
@@ -87,56 +89,27 @@ _PLACEHOLDER_LITERAL = "<" + "AI_CLI_CMD" + ">"
 _BAKED_IN_VALUE = "<AI_CLI_CMD>"
 
 
-def _load_ai_cli_cmd() -> str:
-    """Resolve the AI CLI command string via the P1-P4 priority chain.
-
-    P1 is handled by :class:`LLMClient.__init__` (constructor argument).
-    This function implements P2-P4 and returns ``""`` if none of them
-    yield a usable value — callers decide how to react.
-
-    The workspace root is *re-resolved at every invocation* via
-    :func:`paths._find_workspace_root`, not via the import-frozen
-    :data:`paths.WORKSPACE_ROOT` constant.  This matters for long-lived
-    processes that may serve more than one workspace (e.g. a future
-    global MCP server).
-    """
-    # P2: env var (highest non-P1 priority — useful in tests and one-off
-    # overrides without editing the workspace config).
-    env_val = _os.environ.get("CMIND_AI_CLI_CMD", "").strip()
-    if env_val:
-        return env_val
-
-    # P3: workspace config.toml.
-    try:
-        workspace = _paths._find_workspace_root()
-        cfg_path = workspace / ".cmind" / "config.toml"
-        if cfg_path.exists():
-            with open(cfg_path, "rb") as f:
-                data = tomllib.load(f)
-            cfg_val = (data.get("cmind") or {}).get("ai_cli_cmd", "")
-            if isinstance(cfg_val, str):
-                cfg_val = cfg_val.strip()
-                if cfg_val:
-                    return cfg_val
-    except Exception:
-        # paths resolution, missing tomllib, or malformed TOML must not
-        # crash LLMClient construction.
-        pass
-
-    # P4: legacy baked-in value (release-zip-substituted at build time).
-    if _BAKED_IN_VALUE and _BAKED_IN_VALUE != _PLACEHOLDER_LITERAL:
-        return _BAKED_IN_VALUE
-
-    return ""
+def _load_ai_cli_cmd(workspace: Optional[Path] = None) -> str:
+    """Return a canonical built-in command, never raw configuration text."""
+    provider = resolve_provider(
+        workspace if workspace is not None else _paths._find_workspace_root(),
+        baked="" if _BAKED_IN_VALUE == _PLACEHOLDER_LITERAL else _BAKED_IN_VALUE,
+    )
+    return " ".join(PROVIDER_ARGV[provider]) if provider else ""
 
 
 # Resolved once at import for backward-compat with callers that referenced
 # the module-level constant directly.  New code should call ``_load_ai_cli_cmd()``
 # or use ``LLMClient.tool`` (already populated through the same chain).
-AI_CLI_CMD = _load_ai_cli_cmd()
+try:
+    AI_CLI_CMD = _load_ai_cli_cmd()
+except AICommandPolicyError:
+    # Compatibility snapshot only. Read-only modules may still import us in an
+    # invalid workspace; actual clients re-resolve and fail closed below.
+    AI_CLI_CMD = ""
 
 
-# Mapping from the first token of AI_CLI_CMD to the canonical agent name
+# Mapping from validated built-in executables to session-manager names
 _CLI_TO_AGENT = {
     "copilot": "copilot",
     "claude": "claude",
@@ -154,6 +127,10 @@ _CLI_TO_AGENT = {
 
 def detect_agent_type(cmd: Optional[str] = None) -> str:
     """Detect which AI coding agent is being used.
+
+    Identification only, not execution authorization. Keep Windows path/quote
+    recognition for diagnostic callers; LLMClient validates against the closed
+    provider policy before selecting a session manager or launching a process.
 
     Args:
         cmd: Optional explicit CLI command string.  When omitted we
@@ -262,31 +239,35 @@ class LLMClient:
         """Initialize LLM Client.
         
         Args:
-            tool: CLI tool command (default: "llm")
+            tool: Exact legacy built-in command; None resolves the provider policy
             trajectory: Trajectory instance for recording LLM calls
             step_id: Current step ID in the trajectory
             logger: Logger instance
         """
-        # P1 (explicit arg) wins; otherwise P2-P4 chain via _load_ai_cli_cmd.
+        # P1 (explicit arg) wins; otherwise environment/user-local selection.
         # The empty-string case is tolerated here so unit tests / utilities
         # that construct an LLMClient without intending to invoke the LLM
         # keep working.  The actual error is raised in :meth:`generate` if
         # the tool is still empty when a call is attempted.
-        self.tool = tool if tool is not None else _load_ai_cli_cmd()
+        self._workspace = _paths._find_workspace_root().resolve()
+        self._explicit_tool = tool
+        if tool is not None:
+            resolve_provider(self._workspace, tool=tool)
+        self.tool = tool if tool is not None else _load_ai_cli_cmd(self._workspace)
         self.trajectory = trajectory
         self.step_id = step_id
         self.logger = logger or logging.getLogger(__name__)
         
         # Session manager — driven by detect_agent_type(self.tool) so the
         # right subclass is chosen even when self.tool came from the
-        # workspace config (not the import-time AI_CLI_CMD constant).
-        # project_dir must match the subprocess cwd (workspace root == REPO_DIR)
+        # local selection (not the import-time AI_CLI_CMD constant).
+        # project_dir must match the subprocess cwd (the resolved workspace root)
         # so that Claude CLI's session file path
         # (~/.claude/projects/<encoded-cwd>/) can be correctly located by
         # the session manager.
         self._session_manager = create_session_manager(
             agent_type=detect_agent_type(self.tool),
-            project_dir=_REPO_DIR,
+            project_dir=self._workspace,
             trace_filename_builder=self._build_trace_filename,
             logger=self.logger,
         )
@@ -372,16 +353,28 @@ class LLMClient:
         Raises:
             RuntimeError: If LLM call fails after all retries
         """
+        # Hooks are deterministic only. This also protects old dispatcher
+        # workers that reach a newly installed LLM client.
+        if _os.environ.get("CMIND_HOOK"):
+            raise AICommandPolicyError("AI execution from Git hooks is disabled.")
+        if self._explicit_tool is None and _load_ai_cli_cmd(self._workspace) != self.tool:
+            raise AICommandPolicyError("AI configuration changed; create a new client.")
+
         # Lazy validation: the constructor tolerates an empty/placeholder
         # ``self.tool`` so that tests and tools can build an LLMClient
         # without triggering an LLM invocation, but the moment we are
         # actually asked to call out, the configuration must be valid.
         if not self.tool or self.tool == _PLACEHOLDER_LITERAL:
             raise RuntimeError(
-                "AI CLI command not configured.  Run "
-                "`cmind init --ai <name>` in this workspace, or set the "
-                "CMIND_AI_CLI_CMD environment variable."
+                "AI CLI command not configured for this user and workspace. Run "
+                "`cmind init --ai <name>` or `cmind update --ai <name>`, or set "
+                "CMIND_AI_PROVIDER in a trusted CI/process environment. "
+                "Repository recommendations do not authorize execution."
             )
+
+        # Validate outside the retry/trace scope: a rejected configuration must
+        # not launch anything, prepare session files, or get retried.
+        base_argv = build_argv(provider_from_command(self.tool), self._workspace)
 
         # Create call record
         self._call_counter += 1
@@ -420,7 +413,7 @@ class LLMClient:
                     # and resets stdin for re-reading the prompt.
                     if attempt > 0:
                         trace_ctx.refresh_for_retry()
-                    cmd = shlex.split(self.tool) + trace_ctx.extra_args
+                    cmd = [*base_argv, *trace_ctx.extra_args]
 
                     # Sub-agent runs in the project repo directory.
                     # POSIX: start_new_session=True puts the child in its own
@@ -438,7 +431,8 @@ class LLMClient:
                         encoding="utf-8",
                         errors="replace",
                         env=trace_ctx.env,
-                        cwd=_REPO_DIR,
+                        cwd=self._workspace,
+                        shell=False,
                     )
                     if _IS_WINDOWS:
                         popen_kwargs["creationflags"] = subprocess.CREATE_NEW_PROCESS_GROUP

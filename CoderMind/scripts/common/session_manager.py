@@ -308,13 +308,10 @@ class ClaudeSessionManager(SessionManager):
         file and exposed as ``ctx.stdin``.
         """
         self._session_id = str(uuid.uuid4())
-        # --dangerously-skip-permissions: required for autonomous sub-agent
-        # execution in the TDD workflow.  The sub-agent must read/write files
-        # and run pytest without interactive permission prompts.  This flag
-        # should ONLY be used in controlled, single-tenant environments.
+        # Keep the provider's normal permission checks. Repository configuration
+        # must never implicitly authorize autonomous tool execution.
         ctx.extra_args.extend([
             "-p", "--session-id", self._session_id,
-            "--dangerously-skip-permissions",
         ])
         ctx.env.pop("CLAUDECODE", None)
 
@@ -428,14 +425,14 @@ class CopilotSessionManager(SessionManager):
     """Session manager for the GitHub Copilot CLI.
 
     Injects Copilot-specific CLI arguments (``--log-dir``,
-    ``--log-level``, ``--allow-all``) into ``extra_args`` and appends
+    ``--log-level``) into ``extra_args`` and appends
     the prompt as the final argument.
     """
 
     def before(self, ctx: TraceContext, prompt: str) -> None:
         """Inject Copilot-specific CLI flags and append prompt.
 
-        Adds ``--log-dir``, ``--log-level``, ``--allow-all`` and the
+        Adds ``--log-dir``, ``--log-level`` and the
         prompt text itself to ``extra_args``.
         """
         log_dir = COPILOT_LOGS_DIR
@@ -443,7 +440,6 @@ class CopilotSessionManager(SessionManager):
         ctx.extra_args.extend([
             "--log-dir", str(log_dir),
             "--log-level", "all",
-            "--allow-all",
             "-p", prompt,
         ])
 

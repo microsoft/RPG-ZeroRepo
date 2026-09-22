@@ -13,8 +13,8 @@ C. ``sync_from_commit_diff`` refreshes ``meta.git.head_branch`` /
    ``head_timestamp`` even in **noop** mode (covers ``git checkout
    other_branch_at_same_sha`` and ``git branch -m`` cases).
 
-D. Git hook setup installs post-commit/post-merge dispatcher hooks and
-    removes CoderMind-owned pre-commit blocks.
+D. Opt-in Git hook setup installs sync-only post-commit/post-merge
+    dispatchers and removes CoderMind-owned pre-commit blocks.
 """
 
 from __future__ import annotations
@@ -387,7 +387,7 @@ def test_install_post_merge_hook_preserves_existing_user_hook(tmp_path):
 
 
 def test_install_hooks_installs_post_hooks_and_removes_pre_commit(tmp_path):
-    """End-to-end: ``_install_hooks`` writes post hooks and no pre-commit."""
+    """Explicit opt-in writes post hooks and no pre-commit."""
     project = tmp_path / "proj"
     project.mkdir()
     (project / ".cmind" / "scripts").mkdir(parents=True)
@@ -395,7 +395,7 @@ def test_install_hooks_installs_post_hooks_and_removes_pre_commit(tmp_path):
     (project / ".cmind" / "scripts" / "update_graphs.py").write_text("")
     _sh(project, "init", "-q")
 
-    cmind_cli._install_hooks(project, "copilot", tracker=None)
+    cmind_cli._install_hooks(project, "copilot", tracker=None, git_hooks=True)
 
     pre_commit = project / ".git" / "hooks" / "pre-commit"
     post_commit = project / ".git" / "hooks" / "post-commit"

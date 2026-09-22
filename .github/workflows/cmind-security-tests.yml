@@ -1,0 +1,57 @@
+name: CoderMind Security Regressions
+
+on:
+  pull_request:
+    paths:
+      - "CoderMind/**"
+      - ".github/workflows/cmind-*.yml"
+      - ".github/workflows/scripts/cmind/**"
+  workflow_dispatch:
+  workflow_call:
+
+permissions:
+  contents: read
+
+jobs:
+  security-tests:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Build and install wheel on disposable CI runner
+        run: |
+          python -m pip install build
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          python -m build --wheel CoderMind --outdir "$env:RUNNER_TEMP/wheels"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $wheel = @(Get-ChildItem "$env:RUNNER_TEMP/wheels" -Filter '*.whl')
+          if ($wheel.Count -ne 1) { throw 'Expected one wheel' }
+          python -m pip install $wheel[0].FullName
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Source policy and migration regressions (no real subprocesses)
+        run: python -I -B CoderMind/tests/run_security_tests.py
+      - name: Installed wheel regressions and source identity
+        run: python -I -B CoderMind/tests/run_security_tests.py --installed
+      - name: Build release ZIPs with Bash packager
+        if: runner.os == 'Linux'
+        shell: bash
+        env:
+          SCRIPTS: sh
+        run: bash .github/workflows/scripts/cmind/create-release-packages.sh v0.0.0-security-test
+      - name: Build release ZIPs with PowerShell packager
+        if: runner.os == 'Windows'
+        run: ./.github/workflows/scripts/cmind/create-release-packages.ps1 -Version v0.0.0-security-test -Scripts sh
+      - name: Verify each release variant carries the security policy
+        run: python -I -B CoderMind/tests/verify_release_security.py CoderMind/.genreleases

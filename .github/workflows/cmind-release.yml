@@ -6,11 +6,17 @@ on:
     paths:
       - "CoderMind/**"
       - ".github/workflows/cmind-release.yml"
+      - ".github/workflows/cmind-security-tests.yml"
       - ".github/workflows/scripts/cmind/**"
   workflow_dispatch:
 
 jobs:
+  security:
+    permissions:
+      contents: read
+    uses: ./.github/workflows/cmind-security-tests.yml
   release:
+    needs: security
     runs-on: ubuntu-latest
     permissions:
       contents: write

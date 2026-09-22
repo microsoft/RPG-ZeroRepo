@@ -1,6 +1,6 @@
 # Configuration
 
-This document covers CoderMind configuration that is useful after installation: AI assistant setup, MCP registration, auto-approval, hooks, and initial encoding.
+This document covers AI provider selection, assistant permissions, MCP registration, hooks, and workspace upgrades.
 
 > **Data paths.** References below such as `.cmind/data/rpg.json` and `.cmind/logs/...` are logical names. Runtime files actually live under `~/.cmind/workspaces/<workspace-id>/{data,logs}/` so they stay outside your git repo, where `<workspace-id>` is the slug-based workspace identifier used by the home-side store (with an optional `-<hash6>` suffix when needed). Reports stay in the workspace at `<workspace>/.cmind/reports/`. The MCP server, hooks, and pipeline scripts all resolve the home-dir location automatically from the workspace root. Run `cmind version` from inside the workspace to see the resolved Data / Logs paths; see [project-structure.md](project-structure.md) for the full layout.
 
@@ -8,14 +8,14 @@ This document covers CoderMind configuration that is useful after installation: 
 
 CoderMind slash commands are executed by an AI coding agent. Before running `cmind init`, install and authenticate at least one supported AI assistant CLI.
 
-Currently verified assistants:
+CLI integration choices (not a claim that live npm releases were tested):
 
 | Agent | `--ai` value | Generated configuration | Requirement |
 | ----- | ------------ | ----------------------- | ----------- |
 | GitHub Copilot | `copilot` | `.github/`, `.vscode/` | Copilot CLI available and authenticated |
 | Claude Code | `claude` | `.claude/` | Claude Code CLI available and authenticated |
 
-Use `cmind check` to verify required local tools.
+Use `cmind check` to check local tool availability. AI execution also applies the stricter [executable policy](#executable-and-permission-policy) below.
 
 ```bash
 cmind check
@@ -25,34 +25,43 @@ If the selected AI assistant is not found, install and authenticate it, then rer
 
 ## Workspace Configuration (`.cmind/config.toml`)
 
-Since `0.1.3`, every workspace owns a `.cmind/config.toml` file that records which AI CLI command the pipeline scripts should invoke. This decouples the scripts from a single AI at packaging time — the same packaged scripts now serve any AI you pick.
+The workspace's `.cmind/config.toml` is a **workspace-discovery marker and provider recommendation only**, never execution authority. Keeping this provider-only hint tracked is intentional; no `git rm` is needed. It cannot select an executable, authorize AI calls, or grant auto-approval.
 
 ```toml
 # .cmind/config.toml
 [cmind]
-ai_cli_cmd = "claude"
+recommended_provider = "claude"
 ```
 
-The file is created automatically by `cmind init --ai <agent>`. Edit it any time to switch the workspace to a different AI; no need to re-run `init`.
+`cmind init` and `cmind update` create this file if missing and preserve valid existing files byte-for-byte. Legacy `ai_provider` and exact built-in `ai_cli_cmd` values remain valid **hints**, never authority. Only one of the three keys is allowed. Changing a recommendation does not change execution consent; an explicit user choice is independent of the hint and is never imported from it.
 
 ### Resolution priority
 
-When a pipeline script (or a hook, or the MCP server) needs to invoke the AI CLI, it resolves the command via the following chain. The first non-empty value wins:
+AI calls use the closed policy in [../scripts/common/ai_cli_policy.py](../scripts/common/ai_cli_policy.py):
 
-| # | Source | Use case |
-| - | ------ | -------- |
-| P1 | `LLMClient(tool="...")` constructor argument | Programmatic override (rare) |
-| P2 | `CMIND_AI_CLI_CMD` environment variable | CI runs, one-off experiments |
-| P3 | `.cmind/config.toml` `[cmind].ai_cli_cmd` | Normal default (per workspace) |
-| P4 | Release-zip baked-in literal | Legacy workspaces provisioned before v0.1.4 |
+| # | Source | Accepted value |
+| - | ------ | -------------- |
+| P1 | Explicit, trusted `LLMClient(tool="...")` constructor argument | Exact legacy command from the table below; not copied from repository metadata |
+| P2 | `CMIND_AI_PROVIDER` **or** legacy `CMIND_AI_CLI_CMD` | Provider enum for the former; exact legacy command for the latter; mutually exclusive |
+| P3 | User-local workspace selection | Validated provider and workspace identity from the record described below |
 
-If all four resolve to empty, the next `LLMClient.generate()` call raises a `RuntimeError` instructing the user to run `cmind init` or set the env var.
+Every consulted configuration must be valid: unknown, non-string, empty, malformed, unreadable, or conflicting settings fail closed, with **no fallthrough**. Workspace configuration is always validated before resolution, **even with a constructor or environment override**. Init/update also preflight it before provisioning, hook migration, or self-upgrade. Nonempty legacy release-baked commands are validated but **never authorize execution or provide a fallback**.
 
-### Supported AI CLI commands
+A higher-priority authority does not read or rewrite lower-priority local state. If no authority is present, `LLMClient.generate()` reports a configuration error despite any workspace or baked recommendation.
 
-The values written to `ai_cli_cmd` mirror the per-AI substitutions performed by the GitHub release-zip CI:
+### User-local execution selection
 
-| `--ai` value | `ai_cli_cmd` |
+Explicit choices are saved under `Path.home().resolve() / ".cmind" / "execution" / <full-sha256> / "selection.json"`. The hash is the full SHA-256 of the UTF-8 canonical workspace identity: resolve symlinks, normalize Windows extended-path prefixes, then apply `os.path.normcase`. It is not the slug used by the RPG data store.
+
+The JSON record has exactly three fields: `schema_version` (integer `1`), `workspace` (that exact canonical identity), and `ai_provider` (a valid provider enum). Invalid schemas or mismatched identities fail closed when read; redirected/symlinked state paths and storage inside the workspace are rejected. This record is separate from RPG data and provisioning metadata; copying those files cannot authorize execution.
+
+A clone at another path, a moved workspace, or a new user needs an explicit selection (or trusted process environment). There is no automatic import from recommendations, detected integrations, or metadata. Use `cmind init --here --ai claude` or, for an existing CoderMind workspace, `cmind update --ai claude`; choose `copilot` instead if intended.
+
+### Provider enum and legacy compatibility
+
+The policy accepts exactly these 11 historical providers, case-sensitively. Legacy command values must match the right column exactly: no executable paths, extra flags, quote characters inside the value, leading/trailing or altered whitespace, or shell syntax. The fixed arguments and single spaces shown below are the only accepted legacy forms.
+
+| Provider enum (`recommended_provider`, `ai_provider`, `CMIND_AI_PROVIDER`) | Exact legacy form (`ai_cli_cmd`, `CMIND_AI_CLI_CMD`, `tool`, baked command) |
 | ------------ | ------------ |
 | `copilot` | `copilot` |
 | `claude` | `claude` |
@@ -66,11 +75,33 @@ The values written to `ai_cli_cmd` mirror the per-AI substitutions performed by 
 | `opencode` | `opencode run` |
 | `amp` | `amp --execute` |
 
-Only `copilot` and `claude` are currently verified end-to-end; the others are scaffolded but may need integration adjustments.
+Only `copilot` and `claude` are exposed by CLI `--ai` selection and have Windows npm adapters. The other nine retain historical native-executable/scaffold integration only, not verified integration support or npm adapters. Enum acceptance and mocked adapter coverage are not live-release compatibility guarantees.
 
-### Other config keys
+### Executable and permission policy
 
-The `[cmind]` table currently holds only `ai_cli_cmd`. Future releases will add timeouts, retry budgets, and model overrides under the same namespace; older keys remain forward-compatible.
+- CoderMind builds argv internally and invokes the provider without a shell. It resolves an absolute executable using only absolute `PATH` entries outside both the workspace and current working directory, checking resolved symlink targets too. Empty and relative entries are ignored; installed tools and those external `PATH` directories remain trusted.
+- On Windows, direct provider `.exe` files take priority across eligible `PATH` directories. The fallback adapter recognizes only the Claude/Copilot npm layouts below, under an external search directory's `node_modules`. It never reads, parses, or executes `.cmd`, `.bat`, or `.ps1` wrappers, and does not accept arbitrary user scripts or invoke `npm`/`npx`.
+- The adapter requires an exact manifest `name` and a `bin` object containing exactly the provider key and an allowlisted entry. Package, manifest, entry, and interpreter paths must resolve canonically outside the workspace and current directory; manifest/entry links must stay inside the package. JS entries require an external `node.exe`, returned as an absolute path from the same eligible search directories. Native Claude needs no Node.
+- The default Claude `--dangerously-skip-permissions` and Copilot `--allow-all` arguments have been removed, with **no new opt-in bypass**. Standard provider permissions apply: a tool action may require user approval or halt a noninteractive workflow. Review approvals through the provider's normal controls; provider selection grants none.
+
+| Exact npm package name | Exact `bin` key | Allowed entry and public manifest evidence |
+| --- | --- | --- |
+| `@anthropic-ai/claude-code` | `claude` | `bin/claude.exe` ([2.1.278](https://unpkg.com/@anthropic-ai/claude-code@2.1.278/package.json)); `cli.js` ([2.0.0](https://unpkg.com/@anthropic-ai/claude-code@2.0.0/package.json)) |
+| `@github/copilot` | `copilot` | `index.js` ([0.0.369](https://unpkg.com/@github/copilot@0.0.369/package.json)); `npm-loader.js` ([1.0.87](https://unpkg.com/@github/copilot@1.0.87/package.json)) |
+
+These versioned manifests document layouts, not version pins, compatibility guarantees, or locally tested installations. The [adapter](../scripts/common/windows_ai_cli.py) checks filesystem paths and metadata, **not signatures or publisher authenticity**. External installations, Node, and loader dependencies remain user-trusted; these checks do not secure a tampered installation.
+
+### Trusted CI process selection
+
+For an already initialized workspace (or a checkout with its valid workspace marker), a trusted POSIX CI step can select a provider for that process and its children only:
+
+```bash
+CMIND_AI_PROVIDER=claude cmind script rpg_encoder/run_encode.py --json
+```
+
+This changes no system setting and does not require persisting a local selection. Normal pipeline workspace-marker lookup still applies; this example does not bootstrap an uninitialized checkout. A noninteractive `cmind init` still requires `--ai`, even with the environment set. Invalid repository hints still fail preflight, and normal executable and provider-permission rules still apply.
+
+Only a trusted operator/workflow may supply execution authority. Running untrusted upstream or pull-request workflows is not an authorization bypass or sandbox; the provider policy does not make arbitrary repository code safe.
 
 ## Initialization Options
 
@@ -81,16 +112,17 @@ cmind init my-project --ai claude
 cmind init my-project --ai copilot
 ```
 
-If `--ai` is omitted in an interactive terminal, CoderMind prompts for a supported assistant.
+`--ai` selects both the integration and the provider to save locally. If omitted in an interactive terminal, CoderMind asks for that explicit choice, independently of the recommendation. Non-TTY init without `--ai` fails early, before provisioning; environment overrides or detected integrations do not satisfy this init requirement.
+
+The local choice is saved atomically only after successful provisioning and hook reconciliation, before the success message or optional initial encode. A hook or local-save error aborts init/update without reporting success; init does not proceed to encoding. A failed atomic replacement preserves the previous selection.
 
 ### Script type
 
 ```bash
 cmind init my-project --script sh
-cmind init my-project --script ps
 ```
 
-`sh` installs POSIX shell-oriented command snippets. `ps` installs PowerShell-oriented snippets.
+`sh` installs POSIX shell-oriented command snippets. `ps` (PowerShell) is not yet supported; this is separate from Windows native/npm executable resolution for AI calls.
 
 ### MCP registration
 
@@ -173,56 +205,57 @@ For Copilot, CoderMind writes agent instructions under `.github/` and VS Code MC
 
 Open the project in VS Code after initialization so the workspace MCP configuration is available to Copilot.
 
-## Auto-approval and Scope
+## Assistant Permissions and Scope
 
-CoderMind pre-authorizes the `rpg-tools` MCP server where the selected assistant supports project-scoped permissions. The goal is to avoid prompting on every graph query during chat.
+Provider configuration is not a permission grant. Claude's status integration separately adds a project-scoped `mcp__rpg-tools` allow rule for the four read-only graph queries; Copilot / VS Code manages MCP approvals through its own controls. Review generated and existing assistant permissions separately: removing CLI bypass flags does not revoke settings you already granted.
 
-Scope rules:
-
-- Configuration is written into the project that ran `cmind init` or `cmind update`.
-- User-level assistant settings are not modified.
-- Passing `--no-mcp` skips MCP registration and related auto-approval entries.
+- `--no-mcp` skips MCP registration, not status integrations or blanket removal of existing permissions.
+- Copilot initialization/update also registers MCP in the user's Copilot CLI configuration by default. Use `--no-copilot-cli-mcp` to skip that registration while retaining workspace MCP setup.
 
 ## Git Hooks and Incremental Updates
 
-CoderMind installs local git hooks to keep the RPG aligned with code changes.
+Git hooks are **OFF by default** for both `cmind init` and `cmind update`.
 
-The important hook behavior is:
+- Omit the option or pass `--no-git-hooks` to remove only recognized CoderMind-managed `pre-commit`, `post-commit`, and `post-merge` blocks, including recognized legacy bodies. Other hook content is preserved; unfamiliar or incomplete old bodies require manual review.
+- If a hook cannot be read or cleaned, reconciliation still attempts the other hooks, then fails explicitly. Malformed bytes are preserved; init/update must not report successful migration or proceed to encoding after that failure.
+- Pass `--git-hooks` on **each** init/update invocation to install deterministic, foreground `post-commit` / `post-merge` sync only. Retired managed `pre-commit` blocks are removed in either mode. Sync writes `hooks.log` under the home-side Logs directory shown by `cmind version`.
+- The post-commit background LLM update has been removed entirely. Git hooks do not launch AI or background workers; sync does not replace an LLM-driven feature graph update.
 
-- After commits, CoderMind can run an incremental update in the background.
-- The update refreshes `.cmind/data/rpg.json` and `.cmind/data/dep_graph.json`.
-- Logs are written to `.cmind/logs/update_rpg.log`.
-
-Manual fallback:
-
-```text
-/cmind.update_rpg
+```bash
+cmind init --here --ai claude --no-git-hooks
+cmind update --git-hooks
+cmind update --no-git-hooks
 ```
 
-Use `/cmind.update_rpg` when:
+For LLM-driven updates, explicitly invoke the following from the workspace, outside Git hooks, or use `/cmind.update_rpg`:
 
-- The hook failed.
-- The hook was skipped.
-- You want to force a foreground update and inspect the result.
-
-If the RPG seems significantly stale or corrupted, run a full encode instead:
-
-```text
-/cmind.encode
+```bash
+cmind script update_graphs.py update-rpg --json
 ```
+
+This requires an existing RPG and `HEAD~1` (at least two commits). If the graph is missing or needs a full rebuild, use `/cmind.encode`.
+
+### Session and workspace startup status
+
+Claude's `SessionStart` integration and Copilot / VS Code's `folderOpen` task remain **status-only**: they run `cmind script update_graphs.py status` to display graph status and guidance, without an LLM update. They are not Git hooks and are not disabled by `--no-git-hooks`.
 
 ## Updating an Existing CoderMind Project
 
-Run `cmind update` from the project root to refresh scripts, command definitions, MCP configuration, gitignore rules, and hooks.
+Upgrade the installed CLI **and reconcile every existing workspace**. Upgrading the wheel alone does not rewrite old hook files, especially legacy inline-script hooks.
 
-```bash
-cmind update
-cmind update --ai claude
-cmind update --no-upgrade
-cmind update --no-mcp
-```
+1. Upgrade `cmind-cli` using your installation method (for example, `uv tool upgrade cmind-cli`). Verify the installed CLI with `cmind version`; do not rely on a workspace update's best-effort self-upgrade alone.
+2. Review each workspace's `.cmind/config.toml`. Valid provider-only hints, including exact legacy `ai_provider`/`ai_cli_cmd`, may remain tracked and are preserved; no `git rm` is needed. Old raw commands are never executed. Manually remove unsupported command settings or replace them with one valid `recommended_provider`. **Invalid configuration fails preflight before provisioning, self-upgrade, or hook migration**, even with `--ai`, `--force`, or an environment override.
+3. From each workspace root, explicitly choose the intended provider with `cmind update --ai claude --no-upgrade --no-git-hooks` (or `--ai copilot`); for first-time setup use `cmind init --here --ai ...`. This refreshes integrations, reconciles hooks, then saves the explicit choice locally. Use `--git-hooks` instead only if deterministic sync is wanted. No choice is imported from workspace or RPG metadata.
+4. Review remaining hooks in the active hooks directory, including any `core.hooksPath` override. Manually migrate unrecognized legacy inline-script bodies; preserve unrelated user/team hooks. Do not assume a wheel upgrade cleaned every workspace.
+5. Request feature graph updates explicitly with `cmind script update_graphs.py update-rpg --json` or `/cmind.update_rpg`, allowing for normal provider approval requirements.
 
-`cmind update` auto-detects the existing assistant configuration when possible.
+Without `--ai`, `cmind update` refreshes integrations only and preserves the local selection byte-for-byte (or leaves it absent). It prefers an existing supported local provider for templates, then detects integration folders or prompts interactively for an integration only; none of these paths saves new consent. Malformed local state fails when read; retry with an explicit choice after checking local-store permissions/identity. `--ai` saves the selected provider only after hooks succeed and leaves valid workspace hints unchanged. `--no-mcp` skips MCP registration, not hook reconciliation.
+
+### Repository regression checks
+
+For maintainers, [../tests/run_security_tests.py](../tests/run_security_tests.py) includes expanded mocked policy, user-local state, Windows npm-layout/path, and hook-migration regressions. It uses an existing Python environment with dependencies already installed and redirects home/config/temp locations into a disposable repository directory. Its audit guard forbids real process launches, network access, and writes outside that directory. No dependency installation or machine-setting changes are needed. The guard prevents accidental test side effects, not hostile Python code.
+
+The security CI workflow is configured for disposable Linux and Windows runners: source and freshly installed wheel tests, module-origin/byte checks, and verification of all eleven provider Release ZIPs. Stable and pre-release publishing depend on it. The local runner does not install packages or build releases; `--installed` is for CI after a fresh wheel installation. Neither this runner nor that workflow installs or executes real provider npm releases; mocked fixtures and artifact checks are not live compatibility tests or evidence of a completed CI run.
 
 ## Troubleshooting
 
@@ -234,12 +267,7 @@ Run:
 cmind check
 ```
 
-Install and authenticate the missing assistant CLI, or rerun init with the assistant you want:
-
-```bash
-cmind init my-project --ai claude
-cmind init my-project --ai copilot
-```
+Install and authenticate the intended CLI outside the workspace, with an absolute `PATH` directory. Availability detection is not execution-policy validation. On Windows, wrappers alone are insufficient: review the [direct-executable/npm adapter requirements](#executable-and-permission-policy), rather than adding paths or flags to configuration. A tracked recommendation alone also does not authorize execution; make an explicit local or trusted process selection.
 
 ### MCP tools say `rpg_unavailable`
 
@@ -251,13 +279,7 @@ The MCP server is configured, but `.cmind/data/rpg.json` has not been created ye
 
 ### Incremental update failed
 
-Check:
-
-```bash
-tail -n 200 .cmind/logs/update_rpg.log
-```
-
-Then run:
+Inspect the foreground error and use `cmind version` to locate the actual Logs directory. Check for invalid provider configuration, unsupported launchers, or required provider approval before retrying explicitly:
 
 ```text
 /cmind.update_rpg
@@ -267,7 +289,7 @@ If the graph is corrupted or too stale, run `/cmind.encode` for a full rebuild.
 
 ### Template download hits rate limits or private repo access errors
 
-As of v0.1.4 `cmind init` and `cmind update` no longer fetch templates
+`cmind init` and `cmind update` do not fetch templates
 from GitHub releases — templates are bundled inside the installed
 `cmind-cli` wheel, so this class of error should no longer occur during
 provisioning.  To pick up newer templates, upgrade the CLI itself:
@@ -276,5 +298,6 @@ provisioning.  To pick up newer templates, upgrade the CLI itself:
 uv tool upgrade cmind-cli
 ```
 
-`cmind update` does this automatically by default; pass `--no-upgrade`
-to opt out.
+`cmind update` attempts a best-effort self-upgrade by default; pass
+`--no-upgrade` to opt out. Existing workspaces still need the reconciliation
+described in the [upgrade checklist](#updating-an-existing-codermind-project).

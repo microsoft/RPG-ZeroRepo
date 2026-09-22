@@ -7,9 +7,12 @@ Verifies:
   - ``_install_copilot_hooks`` writes a VS Code task with
     ``runOptions.runOn = "folderOpen"``, is idempotent, and preserves
     pre-existing user tasks.
-    - ``_install_hooks`` dispatches the right AI-specific installer,
-        installs git post-commit/post-merge dispatchers, and removes
-        CoderMind-owned pre-commit blocks when a ``.git`` dir exists.
+    - ``_install_hooks`` installs status integrations, removes only cmind
+        Git blocks by default, and installs sync-only dispatchers on opt-in.
+    - Workspace provider configuration is validated before provisioning or
+        self-upgrade, without importing policy code from the workspace.
+    - Repository recommendations never grant execution consent; explicit local
+        choices are saved only after hooks succeed, in an isolated fake home.
   - ``update_graphs.py status`` returns RPG/dep-graph stats + an
     agent-facing MCP-tools reminder, on both populated and empty
     workspaces.
@@ -20,8 +23,11 @@ import os
 import subprocess
 import sys
 from pathlib import Path
+from types import ModuleType, SimpleNamespace
+from unittest.mock import Mock
 
 import pytest
+from typer.testing import CliRunner
 
 # Ensure src/ and scripts/ are importable
 _project_root = Path(__file__).resolve().parent.parent
@@ -36,9 +42,24 @@ import cmind_cli  # noqa: E402
 # Fixtures
 # ---------------------------------------------------------------------------
 
+@pytest.fixture(autouse=True)
+def isolated_home(tmp_path, monkeypatch):
+    """Keep real local-selection writes outside both the project and real HOME."""
+    home = tmp_path.parent / f"{tmp_path.name}-home"
+    home.mkdir()
+    home = home.resolve()
+    assert not home.is_relative_to(tmp_path.resolve())
+    monkeypatch.setattr(Path, "home", classmethod(lambda cls: home))
+    monkeypatch.setenv("HOME", str(home))
+    monkeypatch.setenv("USERPROFILE", str(home))
+    return home
+
+
 @pytest.fixture
-def project(tmp_path):
+def project(tmp_path, monkeypatch):
     """A minimal CoderMind workspace with .cmind/scripts/update_graphs.py."""
+    # Never follow a developer's global core.hooksPath out of tmp_path.
+    monkeypatch.setattr(cmind_cli, "_read_core_hooks_path", lambda _: None)
     scripts_dir = tmp_path / ".cmind" / "scripts"
     scripts_dir.mkdir(parents=True)
     # The installers only need the file to exist; we copy the real script
@@ -194,7 +215,7 @@ def test_install_copilot_hooks_preserves_user_tasks(project):
 def test_install_hooks_dispatches_to_copilot(project, monkeypatch):
     (project / ".git" / "hooks").mkdir(parents=True)
 
-    cmind_cli._install_hooks(project, "copilot", tracker=None)
+    cmind_cli._install_hooks(project, "copilot", tracker=None, git_hooks=True)
 
     # Copilot tasks.json present, Claude settings.json absent.
     assert (project / ".vscode" / "tasks.json").is_file()
@@ -212,7 +233,7 @@ def test_install_hooks_dispatches_to_copilot(project, monkeypatch):
 def test_install_hooks_dispatches_to_claude(project):
     (project / ".git" / "hooks").mkdir(parents=True)
 
-    cmind_cli._install_hooks(project, "claude", tracker=None)
+    cmind_cli._install_hooks(project, "claude", tracker=None, git_hooks=True)
 
     assert (project / ".claude" / "settings.json").is_file()
     assert not (project / ".vscode" / "tasks.json").exists()
@@ -229,11 +250,9 @@ def test_update_command_invokes_install_hooks():
     gitignore, and MCP config refreshes, so existing workspaces receive
     hook dispatcher fixes when users run ``cmind update``.
 
-    This is a static-source assertion rather than an end-to-end test
-    because ``update`` does network I/O (template download) that is
-    too heavyweight to mock for a single-bit regression check.  The
-    intent is simply: if someone deletes the ``_install_hooks(...)``
-    call from ``update``, this test fails loudly.
+    This static assertion complements the mocked CLI tests below:
+    deleting the ``_install_hooks(...)`` call must fail loudly without
+    running provisioning or the optional CLI self-upgrade.
     """
     import inspect
     source = inspect.getsource(cmind_cli.update)
@@ -246,6 +265,51 @@ def test_update_command_invokes_install_hooks():
     assert '"hooks"' in source, (
         "cmind update tracker must declare a 'hooks' step"
     )
+
+
+@pytest.fixture
+def no_subprocess(monkeypatch):
+    """Policy/installation tests must never launch processes or use the network."""
+    blocked = Mock(side_effect=lambda *a, **kw: pytest.fail("Unexpected process or network call"))
+    for name in ("run", "Popen", "call", "check_call", "check_output"):
+        monkeypatch.setattr(cmind_cli.subprocess, name, blocked)
+    monkeypatch.setattr(cmind_cli.os, "execvp", blocked)
+    monkeypatch.setattr(cmind_cli.client, "request", blocked)
+    return blocked
+
+
+@pytest.mark.parametrize("command", ["init", "update"])
+@pytest.mark.parametrize("flag,expected", [(None, False), ("--no-git-hooks", False), ("--git-hooks", True)])
+def test_cli_passes_explicit_git_hook_choice(tmp_path, monkeypatch, no_subprocess, command, flag, expected):
+    """Only the CLI flag enables hooks; all provisioning is stubbed locally."""
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / ".cmind").mkdir()
+    monkeypatch.setattr(cmind_cli, "show_banner", lambda: None)
+    for name in (
+        "download_and_extract_template", "_setup_gitignore",
+        "ensure_cmind_runtime_dirs", "_maybe_offer_initial_encode",
+    ):
+        monkeypatch.setattr(cmind_cli, name, Mock())
+    monkeypatch.setattr(cmind_cli, "_detect_install_method", lambda: "editable")
+    monkeypatch.setattr(cmind_cli, "_install_source", lambda: "editable")
+    monkeypatch.setattr(cmind_cli.shutil, "which", lambda _: "/installed/cmind")
+    installer = Mock()
+    monkeypatch.setattr(cmind_cli, "_install_hooks", installer)
+    args = [command, "--ai", "copilot", "--script", "sh", "--no-mcp", "--no-cmind-git"]
+    if command == "init":
+        args += ["--here", "--force", "--no-git", "--no-encode", "--ignore-agent-tools"]
+    else:
+        args += ["--no-upgrade"]
+    if flag:
+        args.append(flag)
+
+    result = CliRunner().invoke(cmind_cli.app, args)
+
+    assert result.exit_code == 0, result.output
+    installer.assert_called_once()
+    assert installer.call_args.kwargs["git_hooks"] is expected
+    assert cmind_cli._ai_cli_policy().read_local_provider(tmp_path) == "copilot"
+    no_subprocess.assert_not_called()
 
 
 # ---------------------------------------------------------------------------
@@ -378,6 +442,906 @@ def test_user_authored_content_outside_block_is_preserved(project):
     assert "/old/python" not in text
     assert "# CMIND-BEGIN pre-commit" not in text
     assert "# CMIND-END pre-commit" not in text
+
+
+@pytest.mark.parametrize("selected_ai", ["claude", "copilot"])
+def test_default_removes_all_cmind_blocks_preserving_user_bytes(project, selected_ai, no_subprocess):
+    hd = _hooks_dir(project)
+    before = b"#!/bin/sh\r\necho 'user before'\r\n"
+    after = b"echo 'user after'\r\n\r\n"
+    for name in ("pre-commit", "post-commit", "post-merge"):
+        block = (
+            f"# CMIND-BEGIN {name}\r\n"
+            "cmind script update_graphs.py update-rpg --json &\r\n"
+            f"# CMIND-END {name}\r\n"
+        ).encode()
+        (hd / name).write_bytes(before + block + after)
+
+    cmind_cli._install_hooks(project, selected_ai)
+    cmind_cli._install_hooks(project, selected_ai)
+
+    for name in ("pre-commit", "post-commit", "post-merge"):
+        assert (hd / name).read_bytes() == before + after
+    if selected_ai == "claude":
+        assert (project / ".claude" / "settings.json").is_file()
+    else:
+        assert (project / ".vscode" / "tasks.json").is_file()
+    no_subprocess.assert_not_called()
+
+
+@pytest.mark.parametrize("name,body", [
+    ("pre-commit", "# CoderMind: full RPG sync on commit\n/old/python /old/update_graphs.py sync 2>/dev/null || true\n"),
+    ("pre-commit", "# CoderMind: incremental RPG sync on commit\ncmind script update_graphs.py sync --staged-only\n"),
+    ("post-commit", "# CoderMind: advance meta.git after commit\n/old/python /old/update_graphs.py sync 2>/dev/null || true\n"),
+    ("post-commit", (
+        "# CoderMind: advance meta.git + background feature graph update\n"
+        "/old/python /old/update_graphs.py sync 2>/dev/null || true\n"
+        "if [ ! -f /old/.lock ]; then\n"
+        '  setsid env -u GIT_INDEX_FILE -u GIT_DIR sh -c "cd /old; sleep 2; touch /old/.lock; '
+        '/old/python /old/update_graphs.py update-rpg --json >> /old/log 2>&1; '
+        'rm -f /old/.lock" </dev/null >/dev/null 2>&1 &\n'
+        "fi\n"
+    )),
+    ("post-merge", "# CoderMind: incremental RPG sync after merge / pull\ncmind script update_graphs.py sync\n"),
+    ("post-commit", (
+        "# CoderMind: advance meta.git + background feature graph update\n"
+        "'/old python/python3.12' '/old scripts/update_graphs.py' sync 2>/dev/null || true\n"
+        "if [ ! -f '/old logs/.lock' ]; then\n"
+        '  setsid sh -c "\'/old python/python3.12\' \'/old scripts/update_graphs.py\' '
+        'update-rpg --json" </dev/null >/dev/null 2>&1 &\n'
+        "fi\n"
+    )),
+    *[(name, f"# CoderMind: {name} dispatcher\n{cmind_cli._HOOK_PATH_FALLBACK}\ncmind hook {name} 2>/dev/null || true\n")
+      for name in ("pre-commit", "post-commit", "post-merge")],
+])
+def test_default_removes_legacy_bodies_without_consuming_user_lines(project, no_subprocess, name, body):
+    hd = _hooks_dir(project)
+    before = "#!/bin/sh\necho user-before\n"
+    after = "echo user-after\necho still-user\n"
+    (hd / name).write_bytes((before + body + after).encode())
+
+    cmind_cli._install_hooks(project, "copilot")
+
+    assert (hd / name).read_bytes() == (before + after).encode()
+    no_subprocess.assert_not_called()
+
+
+def test_default_deletes_owned_only_hooks(project, no_subprocess):
+    hd = _hooks_dir(project)
+    for name in ("pre-commit", "post-commit", "post-merge"):
+        (hd / name).write_text(
+            f"#!/bin/sh\n# CMIND-BEGIN {name}\ncmind hook {name}\n# CMIND-END {name}\n"
+        )
+    cmind_cli._install_hooks(project, "copilot")
+    assert not any((hd / name).exists() for name in ("pre-commit", "post-commit", "post-merge"))
+
+
+@pytest.mark.parametrize("body", [
+    b"", b"#!/bin/sh\n", b"#!/bin/sh\r\necho user\r\n",
+    b"#!/bin/sh\n# CMIND-BEGIN post-commit\necho keep-unmatched-tail\n",
+    b"#!/bin/sh\n# CoderMind: advance meta.git after commit\necho not-a-cmind-body\n",
+    b"#!/bin/sh\n# user mentions # CoderMind: advance meta.git after commit\necho user\n",
+])
+def test_default_leaves_unowned_or_ambiguous_hooks_untouched(project, no_subprocess, body):
+    hd = _hooks_dir(project)
+    path = hd / "post-commit"
+    path.write_bytes(body)
+    original_mode = path.stat().st_mode
+    cmind_cli._install_hooks(project, "copilot")
+    assert path.read_bytes() == body
+    assert path.stat().st_mode == original_mode
+
+
+def test_default_does_not_create_git_hooks_directory(project, no_subprocess):
+    (project / ".git").mkdir()
+    cmind_cli._install_hooks(project, "copilot")
+    assert not (project / ".git" / "hooks").exists()
+
+
+def test_default_cleans_git_hooks_even_if_status_integration_fails(project, monkeypatch, no_subprocess):
+    hd = _hooks_dir(project)
+    path = hd / "post-commit"
+    path.write_text(
+        "#!/bin/sh\n# CMIND-BEGIN post-commit\n"
+        "cmind script update_graphs.py update-rpg &\n# CMIND-END post-commit\n"
+    )
+    monkeypatch.setattr(cmind_cli, "_install_copilot_hooks", Mock(side_effect=OSError("read-only tasks")))
+    cmind_cli._install_hooks(project, "copilot")
+    assert not path.exists()
+
+
+@pytest.fixture
+def legacy_hooks(project, no_subprocess):
+    """Owned hooks, including the old AI worker, confined to tmp_path."""
+    hd = _hooks_dir(project)
+    bodies = {
+        "pre-commit": (
+            "# CoderMind: full RPG sync on commit\n"
+            "cmind script update_graphs.py sync\n"
+        ),
+        "post-commit": (
+            "# CoderMind: advance meta.git + background feature graph update\n"
+            "cmind script update_graphs.py sync\n"
+            "if [ ! -f .cmind-update.lock ]; then\n"
+            "setsid cmind script update_graphs.py update-rpg --json >/dev/null 2>&1 &\n"
+            "fi\n"
+        ),
+        "post-merge": (
+            "# CoderMind: incremental RPG sync after merge / pull\n"
+            "cmind script update_graphs.py sync\n"
+        ),
+    }
+    for name, body in bodies.items():
+        (hd / name).write_bytes(("#!/bin/sh\n" + body).encode("utf-8"))
+    return hd
+
+
+@pytest.mark.parametrize("git_hooks", [False, True])
+@pytest.mark.parametrize("with_tracker", [False, True])
+def test_invalid_utf8_hook_preserved_while_other_legacy_hooks_are_cleaned(
+    project, legacy_hooks, monkeypatch, no_subprocess, git_hooks, with_tracker,
+):
+    path = legacy_hooks / "pre-commit"
+    original = path.read_bytes() + b"# user bytes: \xff\r\n"
+    path.write_bytes(original)
+    original_mode = path.stat().st_mode
+    cleanup = Mock(wraps=cmind_cli._uninstall_git_hook)
+    monkeypatch.setattr(cmind_cli, "_uninstall_git_hook", cleanup)
+    blocked = Mock()
+    for name in (
+        "_install_git_post_commit_hook", "_install_git_post_merge_hook",
+        "_install_copilot_hooks", "_install_claude_hooks",
+    ):
+        monkeypatch.setattr(cmind_cli, name, blocked)
+    tracker = Mock() if with_tracker else None
+
+    with pytest.raises(RuntimeError) as exc:
+        cmind_cli._install_hooks(project, "copilot", tracker=tracker, git_hooks=git_hooks)
+
+    assert str(exc.value) == cmind_cli._GIT_HOOK_CLEANUP_ERROR
+    assert [call.args[1] for call in cleanup.call_args_list] == [
+        "pre-commit", "post-commit", "post-merge",
+    ]
+    assert path.read_bytes() == original
+    assert path.stat().st_mode == original_mode
+    assert not (legacy_hooks / "post-commit").exists()
+    assert not (legacy_hooks / "post-merge").exists()
+    blocked.assert_not_called()
+    if tracker is not None:
+        tracker.error.assert_called_once_with("hooks", cmind_cli._GIT_HOOK_CLEANUP_ERROR)
+        tracker.complete.assert_not_called()
+        tracker.skip.assert_not_called()
+    assert not cmind_cli._ai_cli_policy().local_selection_path(project).exists()
+    no_subprocess.assert_not_called()
+
+
+@pytest.mark.parametrize("git_hooks", [False, True])
+@pytest.mark.parametrize("failed_hook", ["pre-commit", "post-commit", "post-merge"])
+@pytest.mark.parametrize("operation", ["read_bytes", "unlink", "write_bytes"])
+def test_hook_permission_error_does_not_skip_other_cleanup(
+    project, legacy_hooks, monkeypatch, no_subprocess, git_hooks, failed_hook, operation,
+):
+    names = ("pre-commit", "post-commit", "post-merge")
+    originals = {}
+    for name in names:
+        path = legacy_hooks / name
+        if operation == "write_bytes":
+            # Retaining user content forces a write rather than an unlink.
+            path.write_bytes(path.read_bytes() + b"echo user\r\n")
+        originals[name] = path.read_bytes()
+    original_operation = getattr(Path, operation)
+    attempted = []
+
+    def denied(path, *args, **kwargs):
+        if path.parent == legacy_hooks:
+            attempted.append(path.name)
+            if path.name == failed_hook:
+                raise PermissionError("UNTRUSTED_HOOK_ERROR")
+        return original_operation(path, *args, **kwargs)
+
+    blocked = Mock()
+    for name in (
+        "_install_git_post_commit_hook", "_install_git_post_merge_hook",
+        "_install_copilot_hooks",
+    ):
+        monkeypatch.setattr(cmind_cli, name, blocked)
+    with monkeypatch.context() as patch:
+        patch.setattr(Path, operation, denied)
+        with pytest.raises(RuntimeError) as exc:
+            cmind_cli._install_hooks(project, "copilot", git_hooks=git_hooks)
+
+    assert str(exc.value) == cmind_cli._GIT_HOOK_CLEANUP_ERROR
+    assert attempted == list(names)
+    for name in names:
+        path = legacy_hooks / name
+        if name == failed_hook:
+            assert path.read_bytes() == originals[name]
+        elif operation == "write_bytes":
+            assert path.read_bytes() == b"#!/bin/sh\necho user\r\n"
+        else:
+            assert not path.exists()
+    blocked.assert_not_called()
+    assert not cmind_cli._ai_cli_policy().local_selection_path(project).exists()
+    no_subprocess.assert_not_called()
+
+
+@pytest.mark.parametrize("failed_hook", ["post-commit", "post-merge"])
+def test_opt_in_installer_error_is_fatal_and_stops_further_installation(
+    project, legacy_hooks, monkeypatch, no_subprocess, failed_hook,
+):
+    installers = {}
+    for hook_name in ("post-commit", "post-merge"):
+        attr = f"_install_git_{hook_name.replace('-', '_')}_hook"
+        installer = Mock(wraps=getattr(cmind_cli, attr))
+        if hook_name == failed_hook:
+            installer.side_effect = PermissionError("UNTRUSTED_HOOK_ERROR")
+        monkeypatch.setattr(cmind_cli, attr, installer)
+        installers[hook_name] = installer
+    status = Mock()
+    monkeypatch.setattr(cmind_cli, "_install_copilot_hooks", status)
+
+    with pytest.raises(RuntimeError) as exc:
+        cmind_cli._install_hooks(project, "copilot", git_hooks=True)
+
+    assert str(exc.value) == cmind_cli._GIT_HOOK_INSTALL_ERROR
+    installers["post-commit"].assert_called_once_with(project)
+    if failed_hook == "post-commit":
+        installers["post-merge"].assert_not_called()
+        assert not (legacy_hooks / "post-commit").exists()
+    else:
+        installers["post-merge"].assert_called_once_with(project)
+        assert "cmind hook post-commit" in (legacy_hooks / "post-commit").read_text()
+    assert not (legacy_hooks / "pre-commit").exists()
+    assert not (legacy_hooks / "post-merge").exists()
+    status.assert_not_called()
+    assert not cmind_cli._ai_cli_policy().local_selection_path(project).exists()
+    no_subprocess.assert_not_called()
+
+
+@pytest.mark.parametrize("command", ["init", "update"])
+@pytest.mark.parametrize("existing_provider", [None, "claude"])
+@pytest.mark.parametrize("git_hooks,failure", [
+    (False, "invalid-utf8"), (False, "read-error"),
+    (True, "invalid-utf8"), (True, "read-error"),
+    (True, "post-commit"), (True, "post-merge"),
+])
+def test_cli_hook_reconciliation_failure_prevents_success_and_encode(
+    project, legacy_hooks, monkeypatch, no_subprocess, command, git_hooks, failure,
+    existing_provider,
+):
+    policy = cmind_cli._ai_cli_policy()
+    selection = policy.local_selection_path(project)
+    if existing_provider:
+        policy.write_local_provider(project, existing_provider)
+    original_selection = selection.read_bytes() if selection.exists() else None
+    save = Mock(wraps=policy.write_local_provider)
+    monkeypatch.setattr(policy, "write_local_provider", save)
+    monkeypatch.chdir(project)
+    monkeypatch.setattr(cmind_cli, "show_banner", lambda: None)
+    for name in (
+        "download_and_extract_template", "_setup_gitignore", "ensure_cmind_runtime_dirs",
+    ):
+        monkeypatch.setattr(cmind_cli, name, Mock())
+    monkeypatch.setattr(cmind_cli, "_detect_install_method", lambda: "editable")
+    monkeypatch.setattr(cmind_cli, "_install_source", lambda: "editable")
+    monkeypatch.setattr(cmind_cli.shutil, "which", lambda _: "/installed/cmind")
+    encode = Mock()
+    monkeypatch.setattr(cmind_cli, "_maybe_offer_initial_encode", encode)
+    status = Mock()
+    monkeypatch.setattr(cmind_cli, "_install_copilot_hooks", status)
+    pre_commit = legacy_hooks / "pre-commit"
+    original = pre_commit.read_bytes()
+    if failure == "invalid-utf8":
+        original += b"# user bytes: \xff\r\n"
+        pre_commit.write_bytes(original)
+    elif failure == "read-error":
+        read_bytes = Path.read_bytes
+
+        def denied(path):
+            if path.resolve() == pre_commit.resolve():
+                raise PermissionError("UNTRUSTED_HOOK_ERROR")
+            return read_bytes(path)
+
+        monkeypatch.setattr(Path, "read_bytes", denied)
+    else:
+        monkeypatch.setattr(
+            cmind_cli, f"_install_git_{failure.replace('-', '_')}_hook",
+            Mock(side_effect=PermissionError("UNTRUSTED_HOOK_ERROR")),
+        )
+    args = [command, "--ai", "copilot", "--script", "sh", "--no-mcp", "--no-cmind-git"]
+    if command == "init":
+        args += ["--here", "--force", "--no-git", "--encode", "--ignore-agent-tools"]
+    else:
+        args += ["--no-upgrade"]
+    if git_hooks:
+        args.append("--git-hooks")
+
+    result = CliRunner().invoke(cmind_cli.app, args)
+
+    assert result.exit_code == 1, result.output
+    output = " ".join(result.output.split())
+    if failure in ("invalid-utf8", "read-error"):
+        message = "Could not complete CoderMind Git hook cleanup."
+        with pre_commit.open("rb") as stream:
+            assert stream.read() == original
+        assert not (legacy_hooks / "post-commit").exists()
+    else:
+        message = "Could not install CoderMind Git sync hooks."
+    assert message in output
+    assert ("Initialization failed:" if command == "init" else "Update failed:") in output
+    assert "UNTRUSTED_HOOK_ERROR" not in output
+    assert "Project ready." not in output
+    assert "updated successfully" not in output
+    assert not (legacy_hooks / "post-merge").exists()
+    encode.assert_not_called()
+    status.assert_not_called()
+    save.assert_not_called()
+    if original_selection is None:
+        assert not selection.exists()
+    else:
+        assert selection.read_bytes() == original_selection
+    no_subprocess.assert_not_called()
+
+
+# ---------------------------------------------------------------------------
+# Dispatcher: all subprocesses mocked, all log writes under tmp_path
+# ---------------------------------------------------------------------------
+
+@pytest.mark.parametrize("name", ["post-commit", "post-merge"])
+@pytest.mark.parametrize("sync_result", [0, 1, "os-error"])
+def test_dispatcher_only_runs_deterministic_sync(tmp_path, monkeypatch, name, sync_result):
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("CMIND_AI_CLI_CMD", "UNTRUSTED_CUSTOM_COMMAND")
+    monkeypatch.setattr(cmind_cli._storage, "find_workspace_root_from", lambda _: tmp_path)
+    logs = tmp_path / "home-store" / "logs"
+    monkeypatch.setattr(cmind_cli._storage, "workspace_logs_dir", lambda _: logs)
+    blocked = Mock(side_effect=AssertionError("No background or shell process allowed"))
+    for entry in ("Popen", "call", "check_call", "check_output"):
+        monkeypatch.setattr(cmind_cli.subprocess, entry, blocked)
+
+    def run(args, **kwargs):
+        if args == ["git", "-C", str(tmp_path), "rev-parse", "--short", "HEAD"]:
+            return subprocess.CompletedProcess(args, 0, stdout="abc123\n")
+        assert args == ["cmind", "script", "update_graphs.py", "sync"]
+        assert kwargs["env"]["CMIND_HOOK"] == name
+        assert kwargs["env"]["CMIND_HOOK_SHA"] == "abc123"
+        assert not kwargs.get("shell", False)
+        if sync_result == "os-error":
+            raise OSError("simulated unavailable cmind")
+        return subprocess.CompletedProcess(args, sync_result)
+
+    runner = Mock(side_effect=run)
+    monkeypatch.setattr(cmind_cli.subprocess, "run", runner)
+    with pytest.raises(cmind_cli.typer.Exit) as exc:
+        cmind_cli.hook(name)
+    assert exc.value.exit_code == 0
+    assert [call.args[0] for call in runner.call_args_list] == [
+        ["git", "-C", str(tmp_path), "rev-parse", "--short", "HEAD"],
+        ["cmind", "script", "update_graphs.py", "sync"],
+    ]
+    assert runner.call_args.kwargs["env"]["CMIND_HOOK"] == name
+    assert runner.call_args.kwargs["env"]["CMIND_HOOK_SHA"] == "abc123"
+    assert not runner.call_args.kwargs.get("shell", False)
+    blocked.assert_not_called()
+    assert (logs / "hooks.log").is_file()
+    assert not (logs / "update_rpg.log").exists()
+    assert not (logs / ".update_rpg.lock").exists()
+
+
+# ---------------------------------------------------------------------------
+# Shared policy loading and repo-only config validation
+# ---------------------------------------------------------------------------
+
+def test_policy_loader_ignores_workspace_and_sys_path(tmp_path, monkeypatch, no_subprocess):
+    from cmind_cli import _assets
+
+    for parent in (tmp_path, tmp_path / ".cmind" / "scripts"):
+        common = parent / "common"
+        common.mkdir(parents=True)
+        (common / "__init__.py").write_text("raise AssertionError('untrusted common')\n")
+        (common / "ai_cli_policy.py").write_text("raise AssertionError('untrusted policy')\n")
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.syspath_prepend(str(tmp_path))
+    monkeypatch.setitem(sys.modules, "common.ai_cli_policy", ModuleType("common.ai_cli_policy"))
+    cmind_cli._ai_cli_policy.cache_clear()
+    try:
+        policy = cmind_cli._ai_cli_policy()
+        assert Path(policy.__file__).resolve() == (_assets.scripts_dir() / "common" / "ai_cli_policy.py").resolve()
+        assert policy.validate_provider("copilot") == "copilot"
+        assert cmind_cli._ai_cli_policy() is policy
+        assert cmind_cli._AI_TO_CLI_CMD == {
+            provider: " ".join(argv) for provider, argv in policy.PROVIDER_ARGV.items()
+        }
+    finally:
+        cmind_cli._ai_cli_policy.cache_clear()
+    no_subprocess.assert_not_called()
+
+
+@pytest.mark.parametrize("provider", list(cmind_cli._AI_TO_CLI_CMD))
+def test_workspace_config_writes_recommendation_only(tmp_path, no_subprocess, provider):
+    cmind_cli._write_workspace_config(tmp_path, provider)
+    text = (tmp_path / ".cmind" / "config.toml").read_text(encoding="utf-8")
+    assert cmind_cli.tomllib.loads(text) == {"cmind": {"recommended_provider": provider}}
+    assert "ai_cli_cmd" not in text
+    assert "Never execution authority" in text
+    policy = cmind_cli._ai_cli_policy()
+    assert policy.resolve_provider(tmp_path, environ={}) == ""
+    assert not policy.local_selection_path(tmp_path).exists()
+
+
+@pytest.mark.parametrize("content", [
+    b"# recommendation only\r\n[cmind]\r\nrecommended_provider = 'claude'\r\n",
+    b"# preserve formatting\r\n[cmind]\r\nai_provider = 'claude'\r\n",
+    b"# marker only\n[cmind]\n",
+    b"# no provider yet\n[other]\nsetting = 42\n",
+    *[f"[cmind]\nai_cli_cmd = '{command}'\n".encode() for command in cmind_cli._AI_TO_CLI_CMD.values()],
+])
+def test_workspace_config_preserves_valid_existing_bytes(tmp_path, no_subprocess, capsys, content):
+    config = tmp_path / ".cmind" / "config.toml"
+    config.parent.mkdir()
+    config.write_bytes(content)
+    cmind_cli._write_workspace_config(tmp_path, "copilot")
+    assert config.read_bytes() == content
+    output = " ".join(capsys.readouterr().out.split())
+    if b"ai_provider" in content or b"ai_cli_cmd" in content:
+        assert "legacy workspace AI hint preserved; it is not execution authority" in output
+    else:
+        assert "legacy workspace AI hint" not in output
+    assert not cmind_cli._ai_cli_policy().local_selection_path(tmp_path).exists()
+
+
+@pytest.mark.parametrize("content", [
+    "[cmind", 'cmind = "not a table"\n',
+    '[cmind]\nrecommended_provider = "UNTRUSTED_CUSTOM_COMMAND"\n',
+    '[cmind]\nrecommended_provider = ["copilot"]\n',
+    '[cmind]\nrecommended_provider = "copilot"\nai_provider = "claude"\n',
+    '[cmind]\nrecommended_provider = "copilot"\nai_cli_cmd = "copilot"\n',
+    '[cmind]\nai_provider = "UNTRUSTED_CUSTOM_COMMAND"\n',
+    '[cmind]\nai_provider = ["copilot"]\n',
+    '[cmind]\nai_provider = "claude"\nai_cli_cmd = "claude"\n',
+    '[cmind]\nai_cli_cmd = "/tmp/claude"\n',
+    '[cmind]\nai_cli_cmd = "claude --extra-option"\n',
+    '[cmind]\nai_cli_cmd = " copilot "\n',
+    '[cmind]\nai_cli_cmd = 42\n',
+])
+def test_workspace_config_rejects_invalid_without_rewriting(tmp_path, no_subprocess, content):
+    config = tmp_path / ".cmind" / "config.toml"
+    config.parent.mkdir()
+    original = content.encode()
+    config.write_bytes(original)
+    with pytest.raises(cmind_cli._ai_cli_policy().AICommandPolicyError):
+        cmind_cli._write_workspace_config(tmp_path, "copilot")
+    assert config.read_bytes() == original
+
+
+def test_workspace_config_rejects_unknown_selected_provider_without_creating_files(tmp_path, no_subprocess):
+    with pytest.raises(cmind_cli._ai_cli_policy().AICommandPolicyError):
+        cmind_cli._write_workspace_config(tmp_path, 'custom"\ncommand')
+    assert not (tmp_path / ".cmind").exists()
+
+
+@pytest.mark.parametrize("command", ["init", "update"])
+def test_invalid_config_preflight_precedes_any_provisioning_or_upgrade(tmp_path, monkeypatch, no_subprocess, command):
+    monkeypatch.chdir(tmp_path)
+    config = tmp_path / ".cmind" / "config.toml"
+    config.parent.mkdir()
+    original = b'[cmind]\nai_cli_cmd = "UNTRUSTED_CUSTOM_COMMAND --flag"\n'
+    config.write_bytes(original)
+    monkeypatch.setattr(cmind_cli, "show_banner", lambda: None)
+    blocked = Mock(side_effect=lambda *a, **kw: pytest.fail("Side effect before policy rejection"))
+    for name in (
+        "download_and_extract_template", "_write_source_marker", "_write_workspace_config",
+        "_setup_gitignore", "_generate_mcp_config", "_register_copilot_cli_global_mcp",
+        "_install_hooks", "ensure_cmind_runtime_dirs", "_detect_install_method", "_install_source",
+        "_upgrade_command", "check_tool", "select_with_arrows",
+    ):
+        monkeypatch.setattr(cmind_cli, name, blocked)
+    monkeypatch.setattr(cmind_cli.typer, "confirm", blocked)
+    monkeypatch.setattr(cmind_cli.os, "execvp", blocked)
+    policy = cmind_cli._ai_cli_policy()
+    monkeypatch.setattr(policy, "write_local_provider", blocked)
+    args = [command, "--ai", "copilot"]
+    if command == "init":
+        args.append("--here")
+
+    result = CliRunner().invoke(cmind_cli.app, args)
+
+    assert result.exit_code == 1, result.output
+    assert " ".join(result.output.split()) == cmind_cli._AI_POLICY_ERROR
+    assert "UNTRUSTED_CUSTOM_COMMAND" not in result.output
+    assert config.read_bytes() == original
+    assert list(tmp_path.iterdir()) == [config.parent]
+    assert not policy.local_selection_path(tmp_path).exists()
+    blocked.assert_not_called()
+    no_subprocess.assert_not_called()
+
+
+# ---------------------------------------------------------------------------
+# Explicit local consent versus integration-only init/update behavior
+# ---------------------------------------------------------------------------
+
+@pytest.fixture
+def cli_side_effects(project, monkeypatch, no_subprocess):
+    """Keep real policy/file writes, but stub all provisioning and execution."""
+    monkeypatch.chdir(project)
+    monkeypatch.setattr(cmind_cli, "show_banner", lambda: None)
+    # CliRunner replaces sys.stdin. A module-local view lets these tests model
+    # TTY consent without changing Click's captured input or running a prompt.
+    cli_sys = SimpleNamespace(**vars(sys))
+    cli_sys.stdin = Mock()
+    cli_sys.stdin.isatty.return_value = False
+    monkeypatch.setattr(cmind_cli, "sys", cli_sys)
+    monkeypatch.setattr(cmind_cli, "_detect_install_method", Mock(return_value="editable"))
+    monkeypatch.setattr(cmind_cli, "_install_source", Mock(return_value="editable"))
+    monkeypatch.setattr(cmind_cli.shutil, "which", lambda _: "/installed/cmind")
+    mocks = {}
+    for name in (
+        "download_and_extract_template", "_write_source_marker", "_setup_gitignore",
+        "ensure_cmind_runtime_dirs", "_generate_mcp_config", "_register_copilot_cli_global_mcp",
+        "_install_hooks", "_maybe_offer_initial_encode", "check_tool", "is_git_repo", "init_git_repo",
+    ):
+        mocks[name] = Mock()
+        monkeypatch.setattr(cmind_cli, name, mocks[name])
+    unexpected_prompt = Mock(side_effect=AssertionError("Unexpected interactive prompt"))
+    monkeypatch.setattr(cmind_cli, "select_with_arrows", unexpected_prompt)
+    monkeypatch.setattr(cmind_cli.typer, "confirm", unexpected_prompt)
+    mocks["prompt"] = unexpected_prompt
+    return mocks
+
+
+def _consent_cli_args(command, ai="copilot", *, encode=False):
+    args = [command, "--script", "sh", "--no-mcp", "--no-cmind-git"]
+    if ai is not None:
+        args += ["--ai", ai]
+    if command == "init":
+        args += ["--here", "--force", "--no-git", "--ignore-agent-tools"]
+        args.append("--encode" if encode else "--no-encode")
+    else:
+        args.append("--no-upgrade")
+    return args
+
+
+@pytest.mark.parametrize("command", ["init", "update"])
+@pytest.mark.parametrize("hint_key", ["recommended_provider", "ai_provider", "ai_cli_cmd"])
+@pytest.mark.parametrize("selected,hint", [("copilot", "claude"), ("claude", "copilot")])
+def test_explicit_cli_provider_wins_over_repository_hint(
+    project, monkeypatch, cli_side_effects, no_subprocess, command, hint_key, selected, hint,
+):
+    policy = cmind_cli._ai_cli_policy()
+    config = project / ".cmind" / "config.toml"
+    original = f"# keep this hint\r\n[cmind]\r\n{hint_key} = '{hint}'\r\n".encode()
+    config.write_bytes(original)
+    selection = policy.local_selection_path(project)
+
+    def hooks(*args, **kwargs):
+        assert not selection.exists()
+        assert config.read_bytes() == original
+
+    cli_side_effects["_install_hooks"].side_effect = hooks
+    save = Mock(wraps=policy.write_local_provider)
+    monkeypatch.setattr(policy, "write_local_provider", save)
+
+    result = CliRunner().invoke(cmind_cli.app, _consent_cli_args(command, selected))
+
+    assert result.exit_code == 0, result.output
+    save.assert_called_once()
+    assert save.call_args.args[0].resolve() == project.resolve()
+    assert save.call_args.args[1] == selected
+    assert policy.read_local_provider(project) == selected
+    assert policy.resolve_provider(project, environ={}) == selected
+    assert config.read_bytes() == original
+    assert cli_side_effects["download_and_extract_template"].call_args.args[1] == selected
+    assert f"User-local AI provider saved: {selected}" in " ".join(result.output.split())
+    no_subprocess.assert_not_called()
+
+
+@pytest.mark.parametrize("new_directory", [False, True])
+@pytest.mark.parametrize("existing_provider", [None, "claude"])
+def test_non_tty_init_without_ai_rejects_before_any_write_or_prompt(
+    project, isolated_home, monkeypatch, cli_side_effects, no_subprocess,
+    new_directory, existing_provider,
+):
+    policy = cmind_cli._ai_cli_policy()
+    config = project / ".cmind" / "config.toml"
+    config.write_bytes(b'[cmind]\nrecommended_provider = "copilot"\n')
+    target = project / "new-project" if new_directory else project
+    if existing_provider:
+        policy.write_local_provider(target, existing_provider)
+    save = Mock(wraps=policy.write_local_provider)
+    monkeypatch.setattr(policy, "write_local_provider", save)
+    before = {p.relative_to(project): p.read_bytes() for p in project.rglob("*") if p.is_file()}
+    home_before = {p.relative_to(isolated_home): p.read_bytes() for p in isolated_home.rglob("*") if p.is_file()}
+    # Do not pass --force: rejection must happen even before the merge prompt.
+    args = ["init", "new-project"] if new_directory else ["init", "--here"]
+
+    result = CliRunner().invoke(cmind_cli.app, args)
+
+    assert result.exit_code == 1, result.output
+    assert "non-interactive init requires --ai copilot or --ai claude" in " ".join(result.output.split())
+    assert {p.relative_to(project): p.read_bytes() for p in project.rglob("*") if p.is_file()} == before
+    assert {p.relative_to(isolated_home): p.read_bytes() for p in isolated_home.rglob("*") if p.is_file()} == home_before
+    if new_directory:
+        assert not target.exists()
+    assert policy.read_local_provider(target) == (existing_provider or "")
+    if not existing_provider:
+        assert not policy.local_selection_path(target).exists()
+        assert not (isolated_home / ".cmind").exists()
+    for mock in cli_side_effects.values():
+        mock.assert_not_called()
+    save.assert_not_called()
+    no_subprocess.assert_not_called()
+
+
+@pytest.mark.parametrize("hooks_succeed", [False, True])
+def test_interactive_init_choice_is_explicit_consent_only_after_hooks(
+    project, monkeypatch, cli_side_effects, no_subprocess, hooks_succeed,
+):
+    policy = cmind_cli._ai_cli_policy()
+    selection = policy.local_selection_path(project)
+    cmind_cli.sys.stdin.isatty.return_value = True
+    choose = Mock(return_value="claude")
+    monkeypatch.setattr(cmind_cli, "select_with_arrows", choose)
+    save = Mock(wraps=policy.write_local_provider)
+    monkeypatch.setattr(policy, "write_local_provider", save)
+
+    def hooks(*args, **kwargs):
+        assert not selection.exists()
+        if not hooks_succeed:
+            raise RuntimeError(cmind_cli._GIT_HOOK_CLEANUP_ERROR)
+
+    cli_side_effects["_install_hooks"].side_effect = hooks
+    result = CliRunner().invoke(cmind_cli.app, _consent_cli_args("init", None, encode=True))
+
+    choose.assert_called_once()
+    assert "provider to save locally" in choose.call_args.args[1]
+    assert result.exit_code == (0 if hooks_succeed else 1), result.output
+    if hooks_succeed:
+        save.assert_called_once()
+        assert policy.read_local_provider(project) == "claude"
+    else:
+        save.assert_not_called()
+        assert not selection.exists()
+        assert "Project ready." not in result.output
+        cli_side_effects["_maybe_offer_initial_encode"].assert_not_called()
+    no_subprocess.assert_not_called()
+
+
+@pytest.mark.parametrize("hint_key", ["recommended_provider", "ai_provider", "ai_cli_cmd"])
+def test_update_auto_detection_never_creates_local_consent(
+    project, isolated_home, monkeypatch, cli_side_effects, no_subprocess, hint_key,
+):
+    policy = cmind_cli._ai_cli_policy()
+    config = project / ".cmind" / "config.toml"
+    original = f"[cmind]\n{hint_key} = 'copilot'\n".encode()
+    config.write_bytes(original)
+    (project / ".claude").mkdir()
+    save = Mock(wraps=policy.write_local_provider)
+    monkeypatch.setattr(policy, "write_local_provider", save)
+
+    result = CliRunner().invoke(cmind_cli.app, _consent_cli_args("update", None))
+
+    assert result.exit_code == 0, result.output
+    assert cli_side_effects["download_and_extract_template"].call_args.args[1] == "claude"
+    assert policy.resolve_provider(project, environ={}) == ""
+    assert not policy.local_selection_path(project).exists()
+    assert not (isolated_home / ".cmind" / "execution").exists()
+    assert config.read_bytes() == original
+    assert "Integration only: user-local AI selection will not be changed" in " ".join(result.output.split())
+    save.assert_not_called()
+    no_subprocess.assert_not_called()
+
+
+@pytest.mark.parametrize("provider,expected_integration", [("claude", "claude"), ("gemini", "copilot")])
+def test_update_without_ai_preserves_local_bytes_and_prefers_supported_local_provider(
+    project, monkeypatch, cli_side_effects, no_subprocess, provider, expected_integration,
+):
+    policy = cmind_cli._ai_cli_policy()
+    policy.write_local_provider(project, provider)
+    selection = policy.local_selection_path(project)
+    # Valid but non-default formatting detects even a same-value rewrite.
+    original = (json.dumps(json.loads(selection.read_text(encoding="utf-8")), indent=2) + "\r\n").encode()
+    selection.write_bytes(original)
+    config = project / ".cmind" / "config.toml"
+    hint = b"[cmind]\nrecommended_provider = 'copilot'\n"
+    config.write_bytes(hint)
+    (project / ".github").mkdir()
+    detect = Mock(wraps=cmind_cli._detect_ai_agent)
+    monkeypatch.setattr(cmind_cli, "_detect_ai_agent", detect)
+    save = Mock(wraps=policy.write_local_provider)
+    monkeypatch.setattr(policy, "write_local_provider", save)
+
+    result = CliRunner().invoke(cmind_cli.app, _consent_cli_args("update", None))
+
+    assert result.exit_code == 0, result.output
+    assert cli_side_effects["download_and_extract_template"].call_args.args[1] == expected_integration
+    assert selection.read_bytes() == original
+    assert policy.read_local_provider(project) == provider
+    assert config.read_bytes() == hint
+    if provider in cmind_cli.AGENT_CONFIG:
+        detect.assert_not_called()
+    else:
+        detect.assert_called_once()
+    save.assert_not_called()
+    no_subprocess.assert_not_called()
+
+
+def test_update_non_tty_with_only_repo_hint_fails_actionably_without_prompt(
+    project, monkeypatch, cli_side_effects, no_subprocess,
+):
+    policy = cmind_cli._ai_cli_policy()
+    config = project / ".cmind" / "config.toml"
+    original = b"[cmind]\nrecommended_provider = 'copilot'\n"
+    config.write_bytes(original)
+    save = Mock(wraps=policy.write_local_provider)
+    monkeypatch.setattr(policy, "write_local_provider", save)
+
+    result = CliRunner().invoke(cmind_cli.app, _consent_cli_args("update", None))
+
+    assert result.exit_code == 1, result.output
+    output = " ".join(result.output.split())
+    assert "cannot determine AI integration in non-interactive update" in output
+    assert "--ai copilot or --ai claude" in output
+    assert config.read_bytes() == original
+    assert not policy.local_selection_path(project).exists()
+    for mock in cli_side_effects.values():
+        mock.assert_not_called()
+    cmind_cli._detect_install_method.assert_not_called()
+    save.assert_not_called()
+    no_subprocess.assert_not_called()
+
+
+def test_update_interactive_choice_is_integration_only(
+    project, monkeypatch, cli_side_effects, no_subprocess,
+):
+    policy = cmind_cli._ai_cli_policy()
+    cmind_cli.sys.stdin.isatty.return_value = True
+    choose = Mock(return_value="copilot")
+    monkeypatch.setattr(cmind_cli, "select_with_arrows", choose)
+    save = Mock(wraps=policy.write_local_provider)
+    monkeypatch.setattr(policy, "write_local_provider", save)
+
+    result = CliRunner().invoke(cmind_cli.app, _consent_cli_args("update", None))
+
+    assert result.exit_code == 0, result.output
+    choose.assert_called_once()
+    assert "integration only" in choose.call_args.args[1]
+    assert not policy.local_selection_path(project).exists()
+    assert policy.resolve_provider(project, environ={}) == ""
+    save.assert_not_called()
+    no_subprocess.assert_not_called()
+
+
+@pytest.mark.parametrize("command", ["init", "update"])
+def test_explicit_provider_change_follows_hooks_and_precedes_success_and_encode(
+    project, monkeypatch, cli_side_effects, no_subprocess, command,
+):
+    policy = cmind_cli._ai_cli_policy()
+    policy.write_local_provider(project, "claude")
+    selection = policy.local_selection_path(project)
+    original = selection.read_bytes()
+    events = []
+    write_local = policy.write_local_provider
+    complete = cmind_cli.StepTracker.complete
+
+    def hooks(*args, **kwargs):
+        assert selection.read_bytes() == original
+        events.append("hooks")
+
+    def save(workspace, provider):
+        assert events == ["hooks"]
+        assert selection.read_bytes() == original
+        write_local(workspace, provider)
+        events.append("save")
+
+    def completed(tracker, key, detail=""):
+        if key == "final":
+            assert events == ["hooks", "save"]
+            assert policy.read_local_provider(project) == "copilot"
+            events.append("final")
+        return complete(tracker, key, detail)
+
+    def encode(*args, **kwargs):
+        assert kwargs["encode_choice"] is True
+        assert events == ["hooks", "save", "final"]
+        assert policy.read_local_provider(project) == "copilot"
+        events.append("encode")
+
+    cli_side_effects["_install_hooks"].side_effect = hooks
+    cli_side_effects["_maybe_offer_initial_encode"].side_effect = encode
+    monkeypatch.setattr(policy, "write_local_provider", save)
+    monkeypatch.setattr(cmind_cli.StepTracker, "complete", completed)
+
+    result = CliRunner().invoke(cmind_cli.app, _consent_cli_args(command, encode=True))
+
+    assert result.exit_code == 0, result.output
+    assert events == ["hooks", "save", "final"] + (["encode"] if command == "init" else [])
+    assert policy.read_local_provider(project) == "copilot"
+    assert selection.read_bytes() != original
+    no_subprocess.assert_not_called()
+
+
+@pytest.mark.parametrize("command", ["init", "update"])
+@pytest.mark.parametrize("existing_provider", [None, "claude"])
+@pytest.mark.parametrize("failure", ["os-error", "policy-error", "atomic-replace"])
+def test_local_selection_write_failure_is_fatal_before_success_or_encode(
+    project, monkeypatch, cli_side_effects, no_subprocess, command, existing_provider, failure,
+):
+    policy = cmind_cli._ai_cli_policy()
+    selection = policy.local_selection_path(project)
+    if existing_provider:
+        policy.write_local_provider(project, existing_provider)
+    original = selection.read_bytes() if selection.exists() else None
+    save = Mock(wraps=policy.write_local_provider)
+    if failure == "atomic-replace":
+        monkeypatch.setattr(policy.os, "replace", Mock(side_effect=PermissionError("PRIVATE_LOCAL_ERROR")))
+    elif failure == "policy-error":
+        save.side_effect = policy.AICommandPolicyError("PRIVATE_LOCAL_ERROR")
+    else:
+        save.side_effect = PermissionError("PRIVATE_LOCAL_ERROR")
+    monkeypatch.setattr(policy, "write_local_provider", save)
+
+    result = CliRunner().invoke(cmind_cli.app, _consent_cli_args(command, encode=True))
+
+    assert result.exit_code == 1, result.output
+    output = " ".join(result.output.replace("│", " ").split())
+    assert "Cannot read or save user-local AI selection" in output
+    assert "--ai copilot or --ai claude" in output
+    assert "PRIVATE_LOCAL_ERROR" not in output
+    assert "Project ready." not in output
+    assert "updated successfully" not in output
+    assert "User-local AI provider saved" not in output
+    cli_side_effects["_install_hooks"].assert_called_once()
+    cli_side_effects["_maybe_offer_initial_encode"].assert_not_called()
+    save.assert_called_once()
+    if original is None:
+        assert not selection.exists()
+    else:
+        assert selection.read_bytes() == original
+    assert not list(selection.parent.glob(".selection-*.tmp"))
+    no_subprocess.assert_not_called()
+
+
+def test_invalid_local_selection_blocks_implicit_update_without_overwriting(
+    project, monkeypatch, cli_side_effects, no_subprocess,
+):
+    policy = cmind_cli._ai_cli_policy()
+    selection = policy.local_selection_path(project)
+    selection.parent.mkdir(parents=True)
+    original = b'{"ai_provider": "claude"}\n'
+    selection.write_bytes(original)
+    (project / ".github").mkdir()
+    detect = Mock(wraps=cmind_cli._detect_ai_agent)
+    monkeypatch.setattr(cmind_cli, "_detect_ai_agent", detect)
+
+    result = CliRunner().invoke(cmind_cli.app, _consent_cli_args("update", None))
+
+    assert result.exit_code == 1, result.output
+    assert "Cannot read or save user-local AI selection" in " ".join(result.output.split())
+    assert selection.read_bytes() == original
+    detect.assert_not_called()
+    for mock in cli_side_effects.values():
+        mock.assert_not_called()
+    cmind_cli._detect_install_method.assert_not_called()
+    no_subprocess.assert_not_called()
+
+
+def test_source_marker_and_storage_updates_cannot_erase_local_selection(project, no_subprocess):
+    policy = cmind_cli._ai_cli_policy()
+    policy.write_local_provider(project, "claude")
+    selection = policy.local_selection_path(project)
+    original = selection.read_bytes()
+
+    cmind_cli._write_workspace_config(project, "copilot")
+    for channel in (cmind_cli._SOURCE_BUNDLE, cmind_cli._SOURCE_LEGACY):
+        cmind_cli._write_source_marker(project, channel)
+        assert cmind_cli._read_source_marker(project) == channel
+        assert selection.read_bytes() == original
+        assert policy.read_local_provider(project) == "claude"
+        assert not selection.is_relative_to(cmind_cli._storage.home_workspace_dir(project))
+        assert "ai_provider" not in cmind_cli._storage.read_meta(project)
+    assert policy.read_workspace_provider(project) == "copilot"
+    assert policy.resolve_provider(project, environ={}) == "claude"
+    no_subprocess.assert_not_called()
 
 
 # ---------------------------------------------------------------------------
