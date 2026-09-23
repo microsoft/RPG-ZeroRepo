@@ -14,7 +14,7 @@ and kills the whole script instead of completing.
 
 ## Reproduce it (cheap — no LLM calls, < 1 second)
 
-```
+```text
 python repro_runner.py         # before the fix: child crashes, exit code 1
 python repro_runner.py --fix   # after the fix:  child completes, exit code 0
 ```
@@ -76,8 +76,7 @@ in this repo:**
   required for the fix to be correct, only for fully explaining their
   report.
 
-## Is "force everything to UTF-8" safe for text that's *supposed* to
-   contain special characters?
+## Is "force everything to UTF-8" safe for text that's *supposed* to contain special characters?
 
 Yes — this is not a lossy workaround. `encoding="utf-8"` is a universal
 encoding: every valid Unicode code point (Vietnamese, Chinese, arrows,
