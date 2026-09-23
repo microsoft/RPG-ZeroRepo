@@ -22,6 +22,7 @@ if str(SCRIPTS_DIR) not in sys.path:
     sys.path.insert(0, str(SCRIPTS_DIR))
 
 from common.paths import REPO_RPG_FILE, DEP_GRAPH_FILE, REPO_DIR, RPG_EDIT_PLAN_FILE  # noqa: E402
+from common.trusted_tools import resolve_git  # noqa: E402
 
 
 def _backup(rpg_path: Path, dep_graph_path: Path, ts: str) -> Dict[str, str]:
@@ -165,7 +166,7 @@ def main():
             repo_dir = args.repo_dir or REPO_DIR
             try:
                 proc = subprocess.run(
-                    ["git", "-C", str(repo_dir), "branch", "-D", args.rollback_branch],
+                    [resolve_git(repo_dir), "-C", str(repo_dir), "branch", "-D", args.rollback_branch],
                     capture_output=True, text=True, timeout=10,
                 )
                 branch_result = {

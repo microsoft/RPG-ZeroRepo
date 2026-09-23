@@ -11,6 +11,19 @@ runs pytest, and fixes issues — up to 5 iterations per attempt, 2 attempts per
 
 **Remember to re-read this document after context compact!**
 
+## Execution Prerequisites and Security Stops
+
+AI calls require a trusted constructor/process choice or valid user-local
+selection; tracked provider hints are not authority. Normal provider
+approvals apply. **Configuration, authentication, access, or approval blocks
+override every autonomous, retry, repair, resume, and `next_action` instruction
+below, including sub-agent work.** Show the exact error and any report path,
+preserve artifacts and branches, and pause for the user. Do not retry, advance
+to another batch, modify code/state/configuration, run init/update, or grant
+trust/permission overrides as recovery. These are not checkpoint or ordinary
+test failures. Resume only after the user resolves the blocker and explicitly
+requests another attempt.
+
 ## Workflow
 
 ### Step 1: Pre-Check
@@ -23,7 +36,8 @@ cmind script check_code_gen.py --json
 
 **If type is "error"**:
 
-* Fix the reported issues or run the prerequisite command first
+* Apply the security stop rule first. For ordinary artifact/prerequisite
+   issues, fix the reported issue or run the prerequisite command as appropriate.
 
 **If type is "init"**:
 
@@ -71,15 +85,16 @@ Remember both choices for the session.
 ## Main Loop: Step 4
 
 > **⚠️ CRITICAL: Autonomous Continuous Operation**
-> This workflow MUST run autonomously in a tight loop. **NEVER stop, pause, or wait
-> for user input between batches.** After completing one batch, IMMEDIATELY proceed
-> to the next. The only acceptable reasons to stop are:
+> Subject to the security stop rule above, run continuously between batches
+> without unnecessary prompts. After completing one batch, proceed to the next
+> unless a stop condition applies. Acceptable reasons to stop include:
 >
+> * Configuration, authentication, access, or provider approval blocks
 > * Unrecoverable errors (merge conflicts, script crashes)
 > * All tasks completed
 >
 > Brief one-line status is OK (e.g., "Batch 5 done, 15/179 tasks, continuing...")
-> but you MUST immediately run the next command.
+> and should be followed by the next command only when no stop condition applies.
 
 ### Step 4: Run Batches
 
@@ -89,9 +104,12 @@ Remember both choices for the session.
 2. Sets up the dev venv (`.venv_dev/`) with pytest + pytest-timeout
 3. Dispatches a sub-agent that autonomously runs the TDD cycle
 4. Post-verifies by running its own independent pytest
-5. On failure: auto-retries once with resume context
+5. On ordinary implementation/test failure: auto-retries once with resume context
 6. On success: merges branch into main, updates state
-7. On final failure: preserves branch, marks failed, continues
+7. On final implementation/test failure: preserves branch, marks failed, continues
+
+If output reveals a security stop, do not dispatch more work or reinterpret it
+as a resumable batch failure, regardless of the suggested `next_action`.
 
 **Single-batch mode:**
 
@@ -116,11 +134,11 @@ cmind script run_batch.py --next --merge-file --max-units <N> --json
 | Field                       | Meaning                                                              |
 | --------------------------- | -------------------------------------------------------------------- |
 | `type: "batch_complete"`    | Batch passed. Check `next_action` and continue.                      |
-| `type: "batch_failed"`      | Batch failed after 2 attempts. Branch preserved. Continue to next.   |
+| `type: "batch_failed"`      | Ordinary batch failure after 2 attempts: branch preserved; continue only if no security stop occurred. |
 | `type: "complete"`          | All tasks done. Proceed to Step 5.                                   |
-| `success: false` + `error`  | Script error. Fix and retry.                                         |
+| `success: false` + `error`  | Show the exact error. Security blocks stop; only ordinary implementation failures enter fix/retry. |
 
-**After each batch completes, IMMEDIATELY run the same command again for the next batch.**
+**After each batch completes, run the same command for the next batch only if no security stop occurred.**
 
 Continue until `type` is `"complete"` or no tasks remain.
 
@@ -196,13 +214,14 @@ cmind script run_batch.py --global-review --json
 
 ## Recovery
 
-To resume from any state:
+To inspect an ordinary interrupted state (not to bypass a security stop):
 
 ```bash
 cmind script check_code_gen.py --json
 ```
 
-Follow the `next_action` field — it always tells you the exact command to run.
+Follow the `next_action` field only if the security stop rule does not apply;
+it is guidance, not authorization to retry a blocked operation.
 State is persisted in `.cmind/data/code_gen_state.jsonl`.
 
 ## Notes
@@ -211,4 +230,5 @@ State is persisted in `.cmind/data/code_gen_state.jsonl`.
 * Failed batches preserve their branch for manual inspection
 * The dev venv at `.venv_dev/` is shared across all batches
 * Sub-agents can install dependencies and update requirements.txt incrementally
-* `run_batch.py` does NOT require manual intervention between steps
+* Ordinary batches need no manual intervention between steps; provider approvals
+   and security stops still require the user and must never be bypassed.

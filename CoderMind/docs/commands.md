@@ -8,6 +8,16 @@ CoderMind provides 15 slash commands that work in three paths:
 
 > **Note on data paths.** Throughout this document, paths shown as `.cmind/data/...` and `.cmind/logs/...` are stable logical names. The actual files live **outside the workspace** under `~/.cmind/workspaces/<workspace-id>/{data,logs}/`, where `<workspace-id>` is a slug-based identifier and may include an overflow `-<hash6>` suffix, so that runtime artefacts never enter the user's git repository. Reports (`rpg.html`, review HTML, etc.) stay in the workspace at `<workspace>/.cmind/reports/` because they are small user-facing artefacts users may want to commit. Run `cmind version` from inside the workspace to see the resolved Data / Logs paths. See [project-structure.md](project-structure.md) for the full layout.
 
+## AI Execution Prerequisites
+
+AI-backed stages require an explicit trusted constructor choice, a trusted process selection (`CMIND_AI_PROVIDER` or exact legacy `CMIND_AI_CLI_CMD`), or a valid user-local workspace selection, in that order. Tracked `recommended_provider` and preserved legacy `ai_provider`/`ai_cli_cmd` values are **hints and workspace markers only**; neither they, release-baked defaults, detected integrations, nor RPG metadata authorize execution. Consulted malformed configuration fails closed, and invalid repository hints still fail preflight with environment overrides.
+
+After a clone, move, or change of user, explicitly select a provider with `cmind init --here --ai claude` or `cmind update --ai claude` (or `copilot`). Init also accepts an interactive provider choice; non-TTY init requires `--ai`. The local choice is saved only after Git hook reconciliation succeeds; Git hook or local-save failure must not report success or start initial encoding. Separate startup status integration installation is best-effort. Update without `--ai` preserves local state, including absence, even if it detects an integration. See [user-local identity and storage](configuration.md#user-local-execution-selection), [trusted CI without local persistence](configuration.md#trusted-ci-process-selection), and [Windows executable/npm rules](configuration.md#executable-and-permission-policy). Normal provider approvals still apply; permission-bypass flags remain removed.
+
+### Authorization errors: stop, do not auto-repair
+
+Configuration, authentication, access, or approval blocks override all automatic retry, resume, and continuous-operation instructions below. Surface the exact error and any reported diagnostic artifact path, preserve existing artifacts, and pause for the user's decision. Do not treat the block as a checkpoint, run init/update automatically, rewrite configuration or local selection, set trust/environment overrides, or grant permissions. Resume only after the user resolves the blocker through normal controls and explicitly requests another attempt.
+
 ## Command Overview
 
 ### Phase 1: Feature Specification
@@ -51,7 +61,7 @@ CoderMind provides 15 slash commands that work in three paths:
 | Command | Description |
 | ------- | ----------- |
 | `/cmind.encode` | Encode an existing repository into `.cmind/data/rpg.json` |
-| `/cmind.update_rpg` | Manually run incremental RPG update when the automatic hook is skipped or fails |
+| `/cmind.update_rpg` | Explicitly run an LLM-driven incremental RPG update in the foreground |
 
 Both directions produce the same RPG structure at `.cmind/data/rpg.json`, enabling AI agents to query the graph via the **MCP server** (`search_rpg`, `explore_rpg`, `get_node_detail`, `list_rpg_tree`). See [configuration.md](configuration.md) for MCP details.
 
@@ -509,6 +519,8 @@ Encode the current repository into an RPG from scratch.
 
 If `rpg.json` already exists, the command asks whether to full re-encode, switch to `/cmind.update_rpg`, or quit.
 
+On an error, preserve the existing graph and any diagnostic/report artifact, show the exact error and reported path, and ask the user how to proceed. Do not automatically delete the graph or rebuild it as recovery.
+
 **Example:**
 
 ```text
@@ -519,9 +531,11 @@ If `rpg.json` already exists, the command asks whether to full re-encode, switch
 
 ### `/cmind.update_rpg`
 
-Manually trigger an incremental RPG update when the automatic hook did not run or when the user wants an immediate foreground update.
+Explicitly request an LLM-driven incremental RPG update in the foreground.
 
-Under normal use, CoderMind installs a post-commit hook that updates the RPG in the background after each commit. This command is the manual fallback.
+Git hooks are off by default; opting in installs deterministic sync only. Post-commit background LLM updates have been removed, so this command (or `cmind script update_graphs.py update-rpg --json`) is the explicit update path, not a fallback for an automatic AI job. Normal provider permissions apply and may require approval or halt a noninteractive run.
+
+Invoking this command requests the update but does not import execution consent from the tracked recommendation. The [AI execution prerequisites](#ai-execution-prerequisites) still apply.
 
 **Input:** existing `.cmind/data/rpg.json` and a git repository with at least two commits
 
@@ -530,15 +544,17 @@ Under normal use, CoderMind installs a post-commit hook that updates the RPG in 
 **Process:**
 
 1. **Pre-check** — runs `cmind script rpg_encoder/check_encode.py --json` and stops if `rpg.json` is missing or corrupt.
-2. **Commit baseline check** — verifies `HEAD~1` exists. If there is no previous commit, run `/cmind.encode` instead.
-3. **Incremental update** — runs `cmind script update_graphs.py update-rpg --json`, comparing the current workspace against `HEAD~1`, the same baseline used by the hook.
+2. **Commit baseline check** — verifies `HEAD~1` resolves locally, including in shallow clones. If unavailable, stop and let the user choose whether to run `/cmind.encode` instead.
+3. **Incremental update** — runs `cmind script update_graphs.py update-rpg --json`, comparing the current workspace against `HEAD~1`.
 4. **Report result** — displays node/edge deltas, functional areas, alignment status, and output path.
+
+Uncommitted working-tree changes are allowed; the comparison is not limited to committed changes. `HEAD~1` is a fixed baseline, not necessarily the graph's last successful update. After several unsynced commits or a branch switch, ask the user whether to full re-encode instead of assuming this incremental update covers the missing history. Do not stash, commit, fetch history, or rebuild automatically to satisfy prerequisites.
 
 Use this command when:
 
-- The post-commit hook failed or was skipped.
-- `.cmind/logs/update_rpg.log` shows an error.
-- The RPG seems stale and you want to force a synchronous update.
+- Code changes, committed or still in the working tree, require an LLM-driven feature graph refresh against `HEAD~1`.
+- The RPG seems stale and you want to inspect an update immediately.
+- A previous explicit update failed and its configuration or approval issue has been resolved.
 
 **Example:**
 
@@ -561,7 +577,7 @@ CoderMind registers an MCP server named `rpg-tools` so AI agents can query `.cmi
 
 If `.cmind/data/rpg.json` is not available yet, the tools return an `rpg_unavailable` response that asks the agent to run `/cmind.encode`.
 
-See [configuration.md](configuration.md) for MCP registration, auto-approval, hooks, and initialization options.
+See [configuration.md](configuration.md) for local provider selection, MCP permissions, opt-in sync hooks, and initialization/migration options.
 
 ---
 

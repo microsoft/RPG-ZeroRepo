@@ -1,6 +1,6 @@
 ---
 name: cmind.update_rpg
-description: Manually trigger an incremental RPG update (fallback for when the post-commit hook didn't run)
+description: Explicitly run an AI-driven incremental RPG update in the foreground
 ---
 
 ## User Input
@@ -14,22 +14,30 @@ proceed with default behavior.
 
 ## Outline
 
-After every `git commit`, the **post-commit hook** automatically runs an
-incremental RPG update in the background — so under normal use **you do
-not need to run this command**.
+This command explicitly requests an LLM-driven feature graph diff and
+dependency graph rebuild in the foreground. It is **not a Git hook
+fallback**: Git hooks are OFF by default, and `--git-hooks` installs only
+deterministic foreground sync, never AI calls or background workers.
 
-This slash command is a **manual fallback** for the few cases where the
-automatic update didn't happen, e.g.:
+The comparison is the **current working tree against `HEAD~1`**.
+Uncommitted changes are allowed; do not require a clean tree or commit/stash
+the user's changes. `HEAD~1` is fixed, not the graph's last synced commit.
+If the graph is stale across several commits or a branch switch, ask the
+user whether a full `/cmind.encode` is more appropriate; do not rebuild
+automatically. An existing usable RPG and locally available parent commit
+are required.
 
-* You committed with `git commit --no-verify` (skipping hooks).
-* The background hook errored out (network blip, LLM timeout) — run
-  `cmind version` to locate the workspace's logs directory and tail
-  the latest `update_rpg.log` there.
-* You want to force a fresh update synchronously and see the result
-  immediately instead of waiting for the async hook.
+### Execution prerequisites and stop rule
 
-It compares the workspace against `HEAD~1` (same baseline the hook
-uses) and runs the LLM-driven feature graph diff + dep_graph rebuild.
+AI calls require a trusted explicit constructor choice, trusted process
+environment selection, or valid user-local selection. Tracked
+`recommended_provider` and valid legacy hints are not execution authority.
+Normal provider approvals apply. On configuration, authentication, access,
+or approval blocks at any step, surface the exact error and any reported
+diagnostic artifact path, preserve artifacts, and pause for the user.
+Do not retry, run init/update, rewrite configuration/local selection, or
+grant trust/permission overrides to recover. Continue only after explicit
+user resolution and authorization to retry.
 
 ### Step 1: Pre-Check
 
@@ -41,29 +49,32 @@ cmind script rpg_encoder/check_encode.py --json
 
 Inspect the `type` field in the JSON output:
 
-* **`error`** → display `message` and stop. The `rpg.json` file is
-  corrupt; the user may need to delete it and rerun `/cmind.encode`.
-* **`init`** → no `rpg.json` yet. Tell the user to run `/cmind.encode`
-  first to create the baseline graph, then terminate.
+* **`error`** → display the exact `message` and any reported artifact
+  path, preserve the graph/reports, and stop. Do not assume every error
+  means corruption or delete/rebuild the graph automatically; ask the user
+  how to proceed.
+* **`init`** → no `rpg.json` yet. Explain that `/cmind.encode` can create
+  the baseline graph and ask the user to request it, then terminate.
 * **`update`** → display `result.stats.repo_name`, Feature graph
   `node_count` / `edge_count`, and Dependency graph `dep_nodes` /
   `dep_edges`, then proceed to Step 2.
 
-Also verify there is at least one previous commit (the update needs
-`HEAD~1` as baseline):
+Also verify the parent commit is available locally (at least two commits;
+shallow history may not contain the needed parent):
 
 ```bash
-git rev-list --count HEAD
+git rev-parse --verify HEAD~1
 ```
 
-If the count is `< 2`, tell the user there is no previous commit to
-diff against, and suggest running `/cmind.encode` instead. Terminate.
+If this fails, show the exact error and explain that the required baseline
+is unavailable. Suggest `/cmind.encode` as a user-chosen alternative and
+stop; do not fetch history, make commits, or run encoding automatically.
 
 ### Step 2: Run the Update
 
-Invoke the same script the post-commit hook uses. It creates and cleans
-up its own temporary worktree internally — **you do not need to manage
-`git worktree` manually**.
+Explicitly invoke the AI update script, independently of Git hooks. It
+creates and cleans up its own temporary worktree internally — **you do
+not need to manage `git worktree` manually**.
 
 ```bash
 cmind script update_graphs.py update-rpg --json
@@ -90,23 +101,26 @@ RPG update complete!
   Saved to: <output_path>
 ```
 
-**If `status` is `"error"`**:
+**If `status` is `"error"`, an `error` field is present, or the process exits
+non-zero**:
 
-* Show the `error` field.
+* Show the exact `error` / stderr and any reported diagnostic artifact path.
+  Preserve the existing graph and reports; stop rather than claiming success.
 * Tell the user to run `cmind version` to locate the logs directory
   and inspect `update_rpg.log` for the full trace.
-* Common causes: LLM API misconfigured, network failure, dirty worktree
-  blocking `git worktree add`.
+* Configuration, authentication, executable/access, or provider approval
+  blocks follow the stop rule above, not an automatic retry or repair path.
+* Other possible causes include network failures or errors creating the
+  temporary worktree. Uncommitted workspace changes alone are not a blocker.
 
 ### Step 4: Next Steps (optional)
 
 ```text
 Tips:
-  - The post-commit hook runs this same update automatically after
-    every commit; you only need to invoke this command when the
-    automatic update failed or was skipped.
-  - /cmind.encode — Run a full re-encode if the RPG seems stale or
-    has drifted significantly from the codebase.
+  - /cmind.update_rpg explicitly requests an AI update; Git sync
+    hooks and session startup do not request it for you.
+  - /cmind.encode — Choose a full re-encode if the graph needs a
+    new baseline; rebuilding requires the user's explicit decision.
   - The latest `update_rpg.log` (path shown by `cmind version`) keeps
     the most recent run output.
 ```

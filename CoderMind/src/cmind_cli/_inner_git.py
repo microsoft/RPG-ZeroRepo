@@ -180,8 +180,12 @@ def has_inner_git(workspace: Path) -> bool:
 
 
 def _git_available() -> bool:
-    from shutil import which
-    return which("git") is not None
+    from ._trusted_tools import resolve_git
+    try:
+        resolve_git(find_workspace_root() or Path.cwd())
+        return True
+    except OSError:
+        return False
 
 
 def _run_git(workspace: Path, *args: str, check: bool = False, timeout: int = 30) -> subprocess.CompletedProcess[str]:
@@ -203,7 +207,8 @@ def _run_git(workspace: Path, *args: str, check: bool = False, timeout: int = 30
     # corrupted (entries from $HOME/.cmind get written into the outer index.lock).
     for _v in ("GIT_INDEX_FILE", "GIT_DIR", "GIT_WORK_TREE", "GIT_OBJECT_DIRECTORY"):
         env.pop(_v, None)
-    cmd = ["git", "-C", str(_inner_git_dir(workspace))] + list(args)
+    from ._trusted_tools import resolve_git
+    cmd = [resolve_git(workspace), "-C", str(_inner_git_dir(workspace))] + list(args)
     return subprocess.run(
         cmd,
         check=check,

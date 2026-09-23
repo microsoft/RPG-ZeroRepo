@@ -52,9 +52,14 @@ import truststore
 from datetime import datetime, timezone
 import platform
 import importlib.metadata
+import importlib.util
+from functools import lru_cache
+from types import ModuleType
 import tomllib
 
 from . import _storage
+from ._trusted_tools import cli_argv as _cli_argv, resolve_git as _resolve_git, resolve_tool as _resolve_tool
+from ._trusted_tools import cli_shell_command as _cli_shell_command
 
 ssl_context = truststore.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
 client = httpx.Client(verify=ssl_context)
@@ -118,7 +123,7 @@ def _get_repo_info() -> Tuple[str, str]:
     for remote_name in ("upstream", "origin"):
         try:
             result = subprocess.run(
-                ["git", "remote", "get-url", remote_name],
+                [_resolve_git(Path.cwd()), "remote", "get-url", remote_name],
                 capture_output=True,
                 text=True,
                 timeout=5,
@@ -326,14 +331,8 @@ CLAUDE_LOCAL_PATH = Path.home() / ".claude" / "local" / "claude"
 # assets under ``cmind_cli/core_pack/`` so that ``cmind init`` works
 # offline.  This block exposes:
 #
-#   _AI_TO_CLI_CMD        — single source of truth for "selected AI" →
-#                           "AI CLI command to invoke from scripts".
-#                           Must stay in sync with the corresponding case
-#                           statement in
-#                           ``.github/workflows/scripts/cmind/create-release-packages.sh``
-#                           (the release-zip pipeline) and with
-#                           ``scripts/common/llm_client.py:_CLI_TO_AGENT``
-#                           (the reverse mapping consumed by detect_agent_type()).
+#   _AI_TO_CLI_CMD        — compatibility view of the shared closed provider
+#                           policy; never accepts workspace command strings.
 #
 #   _SOURCE_BUNDLE / _SOURCE_LEGACY  — provisioning channel; persisted as
 #                                       ``channel`` in ``~/.cmind/workspaces/
@@ -342,22 +341,53 @@ CLAUDE_LOCAL_PATH = Path.home() / ".claude" / "local" / "claude"
 #                                       user's original choice.  Mirrors the
 #                                       constants in :mod:`cmind_cli._storage`.
 
+@lru_cache(maxsize=1)
+def _ai_cli_policy() -> ModuleType:
+    """Load the shared stdlib-only policy from trusted installed assets.
+
+    Do not import ``common`` through sys.path: the caller's workspace may
+    contain a package with that name. The editable fallback is likewise
+    anchored to this installation, never to the working directory.
+    """
+    from . import _assets
+
+    path = (_assets.scripts_dir() / "common" / "ai_cli_policy.py").resolve()
+    spec = importlib.util.spec_from_file_location("_cmind_cli_ai_cli_policy", path)
+    if spec is None or spec.loader is None:
+        raise RuntimeError("Cannot load the installed AI provider policy.")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
 _AI_TO_CLI_CMD = {
-    # NOTE: values below are copied verbatim from
-    # .github/workflows/scripts/cmind/create-release-packages.sh lines ~142-169
-    # to guarantee bundle mode and legacy-download mode behave identically.
-    "copilot":      "copilot",
-    "claude":       "claude",
-    "gemini":       "gemini -p",
-    "qwen":         "qwen -p",
-    "cursor-agent": "agent -p",
-    "auggie":       "augment -p",
-    "codex":        "codex exec",
-    "codebuddy":    "codebuddy -p",
-    "qoder":        "qodercli -p",
-    "opencode":     "opencode run",
-    "amp":          "amp --execute",
+    provider: " ".join(argv)
+    for provider, argv in _ai_cli_policy().PROVIDER_ARGV.items()
 }
+
+_AI_POLICY_ERROR = (
+    "Cannot use workspace AI recommendation. Check the TOML syntax and use only "
+    "one built-in recommended_provider, legacy ai_provider or exact legacy ai_cli_cmd. "
+    "Repository hints never authorize execution. Select a provider explicitly with "
+    "--ai for user-local storage, or in a trusted CI environment. "
+    "Custom commands, executable paths and extra arguments are not allowed."
+)
+_LOCAL_AI_SELECTION_ERROR = (
+    "Cannot read or save user-local AI selection. Check ~/.cmind/execution "
+    "permissions and workspace identity, then retry cmind init/update with "
+    "--ai copilot or --ai claude. Repository recommendations cannot authorize execution."
+)
+
+
+def _preflight_workspace_policy(project_path: Path) -> None:
+    """Reject invalid config before provisioning, hook changes or self-upgrade."""
+    policy = _ai_cli_policy()
+    try:
+        policy.read_workspace_provider(project_path)
+    except policy.AICommandPolicyError:
+        console.print(_AI_POLICY_ERROR, style="red", markup=False)
+        raise typer.Exit(1) from None
+
 
 # Re-exported (under the older names) to minimise churn at call sites;
 # the canonical strings now live in :mod:`cmind_cli._storage`.
@@ -413,31 +443,52 @@ def _write_source_marker(project_path: Path, source: str) -> None:
 
 
 def _write_workspace_config(project_path: Path, selected_ai: str) -> None:
-    """Materialise ``.cmind/config.toml`` with the selected AI's CLI command.
+    """Write a workspace marker with a non-authoritative provider recommendation.
 
-    Idempotent: if the file already exists and already contains
-    ``ai_cli_cmd``, leave it alone (the user may have customised it).
-    Only writes a fresh file when one is missing.
+    Validate existing configuration and preserve valid files byte-for-byte,
+    including exact legacy built-in commands. Invalid files are rejected,
+    not silently kept or overwritten. Only missing files are created; local
+    execution consent is stored separately after hooks succeed.
     """
     cfg_path = project_path / _CONFIG_RELPATH
-    cli_cmd = _AI_TO_CLI_CMD.get(selected_ai, selected_ai)
+    policy = _ai_cli_policy()
+    policy.read_workspace_provider(project_path)
 
     if cfg_path.exists():
-        # Don't clobber user edits.  We could merge here, but plain
-        # workspaces don't need the complexity and a stale value is a
-        # supported configuration (env var override remains available).
+        with cfg_path.open("rb") as stream:
+            table = tomllib.load(stream).get("cmind", {})
+        if "ai_provider" in table or "ai_cli_cmd" in table:
+            console.print(
+                "Warning: legacy workspace AI hint preserved; it is not execution authority. "
+                "Only an explicit provider choice can be saved to user-local storage.",
+                style="yellow", markup=False,
+            )
         return
 
+    provider = policy.validate_provider(selected_ai)
     cfg_path.parent.mkdir(parents=True, exist_ok=True)
     cfg_path.write_text(
         "# CoderMind workspace configuration\n"
-        "# Managed by `cmind init` / `cmind update`.  Safe to commit.\n"
+        "# Tracked workspace marker and provider recommendation only.\n"
+        "# Never execution authority: select a provider explicitly in user-local storage\n"
+        "# with cmind init/update --ai, or through a trusted CI environment.\n"
+        "# Git hooks never authorize automatic AI calls.\n"
         "# See: https://github.com/microsoft/RPG-ZeroRepo (CoderMind/docs/configuration.md)\n"
         "\n"
         "[cmind]\n"
-        f'ai_cli_cmd = "{cli_cmd}"\n',
+        f'recommended_provider = "{provider}"\n',
         encoding="utf-8",
     )
+
+
+def _save_local_ai_selection(project_path: Path, selected_ai: str) -> None:
+    """Persist explicit consent only after successful hook reconciliation."""
+    policy = _ai_cli_policy()
+    try:
+        policy.write_local_provider(project_path, selected_ai)
+    except (policy.AICommandPolicyError, OSError):
+        raise RuntimeError(_LOCAL_AI_SELECTION_ERROR) from None
+    console.print(f"[cyan]User-local AI provider saved:[/cyan] {selected_ai}")
 
 
 def _detect_install_method() -> str:
@@ -843,8 +894,8 @@ _GITIGNORE_CMIND_COMMON = """\
 # descend into a directory ignored as a whole, so the ``!`` negation
 # below would have no effect with the directory form.
 .cmind/*
-# but DO track the workspace AI config so collaborators see the same
-# default — see docs/configuration.md
+# DO track the workspace marker and provider recommendation only.
+# Execution authority stays user-local or in trusted CI, never in this file.
 !.cmind/config.toml
 
 # Legacy runtime dir from pre-cmind (rpgkit) workspaces — kept so users
@@ -1218,7 +1269,7 @@ def is_git_repo(path: Path = None) -> bool:
     try:
         # Use git command to check if inside a work tree
         subprocess.run(
-            ["git", "rev-parse", "--is-inside-work-tree"],
+            [_resolve_git(path), "rev-parse", "--is-inside-work-tree"],
             check=True,
             capture_output=True,
             cwd=path,
@@ -1347,10 +1398,11 @@ def init_git_repo(
         os.chdir(project_path)
         if not quiet:
             console.print("[cyan]Initializing git repository...[/cyan]")
-        subprocess.run(["git", "init"], check=True, capture_output=True, text=True)
-        subprocess.run(["git", "add", "."], check=True, capture_output=True, text=True)
+        git = _resolve_git(project_path)
+        subprocess.run([git, "init"], check=True, capture_output=True, text=True)
+        subprocess.run([git, "add", "."], check=True, capture_output=True, text=True)
         subprocess.run(
-            ["git", "commit", "-m", "Initial commit from CoderMind template"],
+            [git, "commit", "-m", "Initial commit from CoderMind template"],
             check=True,
             capture_output=True,
             text=True,
@@ -1956,23 +2008,15 @@ def _run_initial_encode(project_path: Path) -> bool:
     get here and we don't want a flaky LLM call to make the whole
     command look like it failed.
     """
-    encoder = project_path / ".cmind" / "scripts" / "rpg_encoder" / "run_encode.py"
-    if not encoder.is_file():
-        # Scripts live inside the installed wheel under
-        # ``cmind_cli/core_pack/scripts/``.  Resolve the encoder
-        # from there so the optional initial-encode kickoff works after
-        # ``cmind init`` — which no longer copies scripts into the
-        # workspace.
-        from . import _assets
-        candidate = _assets.scripts_dir() / "rpg_encoder" / "run_encode.py"
-        if candidate.is_file():
-            encoder = candidate
-        else:
-            console.print(
-                f"[yellow]Encoder script not found at {candidate}; "
-                f"run [cyan]/cmind.encode[/] in your AI agent later.[/yellow]"
-            )
-            return False
+    # Use the same installed-asset boundary as `cmind script`. Legacy scripts
+    # delivered in a cloned workspace are data, never an execution fallback.
+    encoder = _resolve_script_path("rpg_encoder/run_encode.py")
+    if encoder is None:
+        console.print(
+            "[yellow]Installed encoder script not found; repair the CoderMind "
+            "installation before running [cyan]/cmind.encode[/].[/yellow]"
+        )
+        return False
 
     # Keep all generated artefacts (logs/data/inner-git) in the
     # per-workspace home dir under ~/.cmind/workspaces/<workspace-id>/.  The
@@ -2199,8 +2243,9 @@ def _run_initial_encode(project_path: Path) -> bool:
             Panel(
                 "[green]Encoder finished successfully.[/]\n\n"
                 "The RPG graph is now available under your home-dir "
-                "workspace store ([cyan]rpg.json[/]).  The post-commit hook will "
-                "keep it in sync on every commit; the MCP tools "
+                "workspace store ([cyan]rpg.json[/]). Opt-in Git hooks perform "
+                "deterministic sync only; AI updates require an explicit "
+                "[cyan]cmind script update_graphs.py update-rpg[/] invocation. The MCP tools "
                 "([cyan]search_rpg[/], [cyan]explore_rpg[/], …) are now usable.",
                 title="[bold green]Encode complete[/bold green]",
                 border_style="green",
@@ -2331,10 +2376,8 @@ def _install_claude_hooks(project_path: Path) -> None:
     if settings_path.exists():
         shutil.copy2(settings_path, settings_dir / "settings.json.bak")
 
-    # The command is executed by Claude Code via ``sh -c``, so we inline
-    # the same PATH-fallback used by git hooks (see _HOOK_PATH_FALLBACK).
-    # Use ``;`` rather than ``&&`` so the cmind call always runs after
-    # the (possibly no-op) PATH adjustment.
+    # Claude executes via sh: quote the current installation's absolute entry,
+    # never resolve a bare cmind in the repository or inherited shell PATH.
     marker = "update_graphs.py"  # used for idempotent dedupe across upgrades
 
     rpg_session_entry = {
@@ -2343,8 +2386,7 @@ def _install_claude_hooks(project_path: Path) -> None:
             {
                 "type": "command",
                 "command": (
-                    f"{_HOOK_PATH_FALLBACK}; "
-                    "cmind script update_graphs.py status 2>/dev/null"
+                    f"{_cli_shell_command('script', 'update_graphs.py', 'status')} 2>/dev/null"
                     " || echo '[CoderMind] RPG status unavailable'"
                 ),
                 "timeout": 10,
@@ -2423,7 +2465,7 @@ def _read_core_hooks_path(project_path: Path) -> Optional[Path]:
     """
     try:
         result = subprocess.run(
-            ["git", "config", "--get", "core.hooksPath"],
+            [_resolve_git(project_path), "config", "--get", "core.hooksPath"],
             cwd=project_path,
             capture_output=True,
             text=True,
@@ -2501,11 +2543,52 @@ def _resolve_git_hooks_dir(project_path: Path) -> Optional[Path]:
 
 
 # Each entry describes a CoderMind-owned hook snippet shape that can be
-# recognized without sentinels. The first element is a substring of the
-# snippet's marker comment; the second is the total number of consecutive
-# lines occupied by that snippet. These are removed before the sentinel
-# block is written so users do not end up with duplicate CoderMind logic.
+# recognized without sentinels. The marker must match a whole comment;
+# the count bounds the known body, which is checked before removal so a
+# shorter legacy snippet never consumes the next user-authored line.
 LegacyBlock = Tuple[str, int]
+
+_LEGACY_GIT_HOOK_BLOCKS: Dict[str, Tuple[LegacyBlock, ...]] = {
+    "pre-commit": (
+        ("# CoderMind: pre-commit dispatcher", 3),
+        ("# CoderMind: full RPG sync on commit", 2),
+        ("# CoderMind: incremental RPG sync on commit", 3),
+    ),
+    "post-commit": (
+        ("# CoderMind: post-commit dispatcher", 3),
+        ("# CoderMind: advance meta.git after commit", 2),
+        ("# CoderMind: advance meta.git + background feature graph update", 5),
+    ),
+    "post-merge": (
+        ("# CoderMind: post-merge dispatcher", 3),
+        ("# CoderMind: incremental RPG sync after merge / pull", 3),
+    ),
+}
+
+
+def _is_legacy_hook_sync(line: str) -> bool:
+    """Recognize the old cmind/Python sync command, not arbitrary shell lines."""
+    try:
+        parts = shlex.split(line)
+    except ValueError:
+        return False
+    if parts[-2:] == ["||", "true"]:
+        parts = parts[:-2]
+    if parts[-1:] == ["2>/dev/null"]:
+        parts = parts[:-1]
+    if parts[:2] == ["cmind", "script"]:
+        args = parts[2:]
+    elif parts and re.fullmatch(
+        r"python(?:\d+(?:\.\d+)*)?(?:\.exe)?",
+        parts[0].replace("\\", "/").rsplit("/", 1)[-1],
+    ):
+        args = parts[1:]
+    else:
+        return False
+    return bool(args) and (
+        args[0].replace("\\", "/").rsplit("/", 1)[-1] == "update_graphs.py"
+        and args[1:] in (["sync"], ["sync", "--staged-only"])
+    )
 
 
 def _strip_hook_block(
@@ -2526,57 +2609,77 @@ def _strip_hook_block(
        Range-based, so multi-line bodies of any shape are atomically
        removed in one shot.
 
-        2. Strip each compatibility snippet described by
-             ``(marker_substring, line_count)``. The marker line plus
-             ``line_count - 1`` lines following it are dropped. Multiple
-             shapes are removed in a single pass so the order of entries in
-             ``legacy_blocks`` doesn't matter.
+    2. Strip recognized compatibility bodies following exact legacy
+       markers, bounded by their historical line counts. Incomplete or
+       unrecognized bodies are preserved, not guessed at.
 
     Lines outside both passes are preserved verbatim so user-authored
-    hook content (and shebangs) survive untouched.
+    hook content (including line endings and shebangs) survives untouched.
+    An unmatched begin sentinel is preserved rather than deleting the tail.
     """
     begin_sent = f"# CMIND-BEGIN {block_name}"
     end_sent = f"# CMIND-END {block_name}"
-    lines = text.splitlines()
+    lines = text.splitlines(keepends=True)
 
     # Pass 1: strip sentinel block (matching pair).
     after_sentinels: list[str] = []
-    inside = False
-    for line in lines:
-        stripped = line.strip()
-        if not inside and stripped == begin_sent:
-            inside = True
-            continue
-        if inside and stripped == end_sent:
-            inside = False
-            continue
-        if inside:
-            continue
-        after_sentinels.append(line)
+    i = 0
+    while i < len(lines):
+        if lines[i].strip() == begin_sent:
+            end = next(
+                (j for j in range(i + 1, len(lines)) if lines[j].strip() == end_sent),
+                None,
+            )
+            if end is not None:
+                i = end + 1
+                continue
+            # With no matching end, ownership of the remaining body is
+            # unknown. Do not run legacy cleanup on that ambiguous tail.
+            return "".join(after_sentinels) + "".join(lines[i:])
+        after_sentinels.append(lines[i])
+        i += 1
 
-    # Pass 2: strip compatibility snippets by (marker, line_count).
-    if not legacy_blocks:
-        return "\n".join(after_sentinels)
-
+    # Pass 2: recognize complete legacy bodies, never blindly skip lines.
     out: list[str] = []
-    skip = 0
-    for line in after_sentinels:
-        if skip > 0:
-            skip -= 1
+    i = 0
+    while i < len(after_sentinels):
+        count = next(
+            (count for marker, count in legacy_blocks
+             if after_sentinels[i].strip() == marker),
+            0,
+        )
+        body = [line.strip() for line in after_sentinels[i + 1:i + count]]
+        consumed = 0
+        if count == 5:
+            # Historical sync + setsid worker (one shell line), guarded by
+            # an if/fi lock check. Remove only the complete known shape.
+            if (
+                len(body) == 4
+                and _is_legacy_hook_sync(body[0])
+                and body[1].startswith("if [ ! -f ")
+                and body[1].endswith("]; then")
+                and body[2].startswith("setsid ")
+                and re.search(r"update_graphs\.py['\"]?\s+update-rpg(?:\s|$)", body[2])
+                and body[3] == "fi"
+            ):
+                consumed = 5
+        elif body:
+            offset = 1 if body[0] == _HOOK_PATH_FALLBACK else 0
+            if len(body) > offset and (
+                _is_legacy_hook_sync(body[offset])
+                or body[offset] == f"cmind hook {block_name} 2>/dev/null || true"
+            ):
+                consumed = 2 + offset
+        if consumed:
+            i += consumed
             continue
-        matched = False
-        for marker, count in legacy_blocks:
-            if marker in line:
-                skip = max(count - 1, 0)
-                matched = True
-                break
-        if not matched:
-            out.append(line)
-    return "\n".join(out)
+        out.append(after_sentinels[i])
+        i += 1
+    return "".join(out)
 
 
 # ---------------------------------------------------------------------------
-# PATH fallback for hook bodies
+# Historical PATH fallback, retained ONLY for recognizing legacy hook bodies
 # ---------------------------------------------------------------------------
 #
 # Hooks invoke ``cmind`` (the globally-installed CLI) rather than a
@@ -2585,11 +2688,8 @@ def _strip_hook_block(
 # the process environment may not include the user's shell PATH, so
 # ``cmind`` is unresolvable and the hook silently fails.
 #
-# This snippet is prepended to every hook body.  When ``cmind`` is
-# already on PATH (terminal invocations) the test short-circuits and
-# the ``export`` is skipped — zero overhead.  When it isn't, we
-# prepend ``$HOME/.local/bin`` which is ``uv tool install``'s default
-# bin directory.
+# New hooks pin the interpreter and installed bootstrap; they do not emit this
+# snippet. Keep the exact old text so reconciliation can remove known bodies.
 _HOOK_PATH_FALLBACK = (
     'command -v cmind >/dev/null 2>&1 || '
     'export PATH="$HOME/.local/bin:$PATH"'
@@ -2651,47 +2751,44 @@ def _install_hook_snippet(
 
 
 def _uninstall_git_pre_commit_hook(project_path: Path) -> bool:
-    """Remove any CoderMind-owned ``pre-commit`` block.
+    """Remove retired CoderMind-owned ``pre-commit`` blocks only."""
+    return _uninstall_git_hook(project_path, "pre-commit")
 
-    The active git hook contract uses ``post-commit`` and ``post-merge``.
-    CoderMind-owned pre-commit blocks are stripped here; user-authored hook
-    content (and other tools' blocks such as husky / pre-commit /
-    lefthook) is preserved untouched.
 
-    Returns ``True`` when the workspace had a hooks dir to clean,
-    ``False`` only when no git checkout was found at all.
+def _uninstall_git_hook(project_path: Path, hook_name: str) -> bool:
+    """Remove only cmind-owned blocks, preserving user bytes and file mode.
+
+    Returns False when no Git checkout is found. Missing or unrelated
+    hooks are no-ops; in particular, never delete a user's empty hook.
+    Read/decode/removal errors propagate; never decode malformed bytes lossily.
     """
     hooks_dir = _resolve_git_hooks_dir(project_path)
     if hooks_dir is None:
         return False
 
-    hook_path = hooks_dir / "pre-commit"
-    if not hook_path.is_file():
+    hook_path = hooks_dir / hook_name
+    try:
+        existing = hook_path.read_bytes().decode("utf-8")
+    except FileNotFoundError:
         return True
 
-    existing = hook_path.read_text(encoding="utf-8")
-    legacy = (
-        ("# CoderMind: pre-commit dispatcher", 3),
-        ("# CoderMind: full RPG sync on commit", 2),
-        ("# CoderMind: incremental RPG sync on commit", 3),
+    cleaned = _strip_hook_block(
+        existing, hook_name, _LEGACY_GIT_HOOK_BLOCKS[hook_name]
     )
-    cleaned = _strip_hook_block(existing, "pre-commit", legacy).rstrip("\n")
+    if cleaned == existing:
+        return True
 
     # If nothing user-authored remains, delete the hook file so git
     # falls back to its default no-hook behaviour.
     if not cleaned.strip() or cleaned.strip() == "#!/bin/sh":
-        try:
-            hook_path.unlink()
-        except OSError:
-            pass
+        hook_path.unlink()
     else:
-        hook_path.write_text(cleaned + "\n", encoding="utf-8")
-        hook_path.chmod(0o755)
+        hook_path.write_bytes(cleaned.encode("utf-8"))
     return True
 
 
 def _install_git_post_merge_hook(project_path: Path) -> bool:
-    """Install the RPG sync command into ``post-merge``.
+    """Install opt-in deterministic sync into ``post-merge``, never AI work.
 
     Fires after ``git pull`` / ``git merge`` so the dep_graph stays
     aligned with code the user just received from a teammate.  Cannot
@@ -2710,41 +2807,28 @@ def _install_git_post_merge_hook(project_path: Path) -> bool:
     marker = "# CoderMind: post-merge dispatcher"
     body = (
         f"{marker}\n"
-        f"{_HOOK_PATH_FALLBACK}\n"
-        f"cmind hook post-merge 2>/dev/null || true"
+        f"{_cli_shell_command('hook', 'post-merge')} 2>/dev/null || true"
     )
     return _install_hook_snippet(
         hooks_dir,
         "post-merge",
         "post-merge",
         body,
-        legacy_blocks=(
-            ("# CoderMind: incremental RPG sync after merge / pull", 3),
-        ),
+        legacy_blocks=_LEGACY_GIT_HOOK_BLOCKS["post-merge"],
     )
 
 
 def _install_git_post_commit_hook(project_path: Path) -> bool:
-    """Install the ``post-commit`` dispatcher stub.
+    """Install the opt-in, deterministic ``post-commit`` sync dispatcher.
 
     The on-disk hook is a short shell snippet that delegates to
-    ``cmind hook post-commit``. All orchestration lives in the
-    :func:`hook` Python command:
+    ``cmind hook post-commit``. The Python dispatcher only runs
+    ``update_graphs.py sync``, logging to the home-side ``hooks.log``.
+    No hook launches an AI call or a background worker. AI-driven updates
+    require an explicit user invocation of
+    ``cmind script update_graphs.py update-rpg`` instead.
 
-        * **Foreground sync**: ``update_graphs.py sync`` advances
-            ``meta.git`` to the new HEAD. Output is teed into
-            ``~/.cmind/workspaces/<workspace-id>/logs/hooks.log``.
-
-        * **Background update**: ``update_graphs.py update-rpg`` is
-            detached via ``subprocess.Popen(start_new_session=True)``. A
-            mkdir-based directory lock at
-            ``~/.cmind/workspaces/<workspace-id>/logs/.update_rpg.lock`` serialises
-            overlapping commits; locks older than 60 minutes are treated as
-            orphaned and removed. The worker's stdout/stderr land in
-            ``~/.cmind/workspaces/<workspace-id>/logs/update_rpg.log``.
-
-    Both steps are best-effort: every failure path is swallowed inside
-    :func:`hook` so a hook misbehaviour never blocks ``git commit``.
+    Sync is best-effort so a hook failure never blocks ``git commit``.
 
     CoderMind-owned multi-line shell bodies are stripped on upgrade by
     the ``legacy_blocks`` compatibility patterns below.
@@ -2756,20 +2840,14 @@ def _install_git_post_commit_hook(project_path: Path) -> bool:
     marker = "# CoderMind: post-commit dispatcher"
     body = (
         f"{marker}\n"
-        f"{_HOOK_PATH_FALLBACK}\n"
-        f"cmind hook post-commit 2>/dev/null || true"
+        f"{_cli_shell_command('hook', 'post-commit')} 2>/dev/null || true"
     )
     return _install_hook_snippet(
         hooks_dir,
         "post-commit",
         "post-commit",
         body,
-        legacy_blocks=(
-            # Two-line sync-only snippet.
-            ("# CoderMind: advance meta.git after commit", 2),
-            # Five-line sync + setsid background-update snippet.
-            ("# CoderMind: advance meta.git + background feature graph update", 5),
-        ),
+        legacy_blocks=_LEGACY_GIT_HOOK_BLOCKS["post-commit"],
     )
 
 
@@ -2800,15 +2878,13 @@ def _install_copilot_hooks(project_path: Path) -> None:
             # Backup is best-effort; never block installation on it.
             pass
 
+    command = _cli_argv("script", "update_graphs.py", "status")
     rpg_status_task = {
         "label": "CoderMind: load status",
-        "type": "shell",
-        # Invoke the globally-installed CLI rather than a workspace
-        # script copy (which no longer exists).  Same
-        # rationale as the git-hook bodies: portable command name,
-        # auto-tracks the installed wheel's scripts.
-        "command": "cmind",
-        "args": ["script", "update_graphs.py", "status"],
+        "type": "process",
+        # Process tasks avoid shell parsing and use this installation directly.
+        "command": command[0],
+        "args": command[1:],
         "presentation": {
             "echo": False,
             "reveal": "silent",
@@ -2840,17 +2916,28 @@ def _install_copilot_hooks(project_path: Path) -> None:
     existing["tasks"] = tasks_list
 
     tasks_path.write_text(json.dumps(existing, indent=2) + "\n", encoding="utf-8")
-    # Tasks file is workspace-specific (absolute Python path); it is
-    # ignored via :func:`_setup_gitignore`, which runs earlier in the
-    # init flow.
+    # Workspace integration preferences are ignored via _setup_gitignore,
+    # which runs earlier in the init flow.
+
+
+_GIT_HOOK_CLEANUP_ERROR = (
+    "Could not complete CoderMind Git hook cleanup. "
+    "Check pre-commit, post-commit and post-merge files and permissions, then retry."
+)
+_GIT_HOOK_INSTALL_ERROR = (
+    "Could not install CoderMind Git sync hooks. "
+    "Check post-commit and post-merge files and permissions, then retry."
+)
 
 
 def _install_hooks(
     project_path: Path,
     selected_ai: str,
     tracker=None,
+    *,
+    git_hooks: bool = False,
 ) -> None:
-    """Install RPG auto-update hooks for the selected AI assistant.
+    """Install status integrations and reconcile opt-in, sync-only Git hooks.
 
     - Claude:  merges a ``SessionStart`` hook into ``.claude/settings.json``
       that runs ``update_graphs.py status`` so stdout (RPG stats + MCP
@@ -2859,31 +2946,53 @@ def _install_hooks(
       ``.vscode/tasks.json`` that runs the same status command on
       workspace open — VS Code's closest analogue to a SessionStart
       hook for GitHub Copilot.
-    - All:     installs an RPG sync trigger on ``.git/hooks/post-commit``
-      (fired after every successful commit) AND ``.git/hooks/post-merge``
-      (fired after ``git pull`` / ``git merge`` so teammate-incoming
-      changes get picked up immediately). Any legacy ``pre-commit``
-      block from earlier releases is stripped on upgrade — the design
-      now relies on post-commit only, so commit latency stays low and
-      the inner-git history is cleaner.
-      Complements the MCP server already registered in
-      ``.mcp.json`` / ``.vscode/mcp.json``.
+    - Git hooks default to disabled: remove only CoderMind-owned pre-commit,
+      post-commit and post-merge blocks, including known legacy bodies.
+      User hooks are preserved. ``git_hooks=True`` opts into deterministic
+      sync dispatchers for post-commit/post-merge, never background AI work.
+      Retired pre-commit blocks are removed in either mode.
+    - Cleanup attempts every known hook independently in both modes. Any
+      cleanup failure prevents installation; cleanup/installation failures
+      raise RuntimeError so init/update cannot report success or encode.
+      Status integration failures remain best-effort after reconciliation.
     """
+    # Do not let one unreadable hook leave other retired/AI hooks active.
+    # Opt-in installs also wait until all old hook cleanup is certain.
+    cleanup_failed = False
+    for hook_name in _LEGACY_GIT_HOOK_BLOCKS:
+        try:
+            if hook_name == "pre-commit":
+                _uninstall_git_pre_commit_hook(project_path)
+            else:
+                _uninstall_git_hook(project_path, hook_name)
+        except Exception:
+            cleanup_failed = True
+    if cleanup_failed:
+        if tracker:
+            tracker.error("hooks", _GIT_HOOK_CLEANUP_ERROR)
+        raise RuntimeError(_GIT_HOOK_CLEANUP_ERROR) from None
+
+    installed = []
+    if git_hooks is True:
+        try:
+            if _install_git_post_commit_hook(project_path):
+                installed.append("git:post-commit (sync only)")
+            if _install_git_post_merge_hook(project_path):
+                installed.append("git:post-merge (sync only)")
+        except Exception:
+            if tracker:
+                tracker.error("hooks", _GIT_HOOK_INSTALL_ERROR)
+            raise RuntimeError(_GIT_HOOK_INSTALL_ERROR) from None
+    else:
+        installed.append("git hooks disabled (cmind blocks removed)")
+
     try:
-        installed = []
         if selected_ai == "claude":
             _install_claude_hooks(project_path)
             installed.append("claude")
         elif selected_ai == "copilot":
             _install_copilot_hooks(project_path)
             installed.append("copilot")
-
-        # Strip any leftover pre-commit block from older installs.
-        _uninstall_git_pre_commit_hook(project_path)
-        if _install_git_post_commit_hook(project_path):
-            installed.append("git:post-commit")
-        if _install_git_post_merge_hook(project_path):
-            installed.append("git:post-merge")
 
         if tracker:
             if installed:
@@ -2894,7 +3003,7 @@ def _install_hooks(
         if tracker:
             tracker.error("hooks", str(e))
         else:
-            console.print(f"[yellow]Warning: Could not install hooks: {e}[/yellow]")
+            console.print(f"[yellow]Warning: Could not reconcile hooks: {e}[/yellow]")
 
 
 def _is_private_repo(
@@ -3664,7 +3773,7 @@ def init(
     ai_assistant: str = typer.Option(
         None,
         "--ai",
-        help="AI assistant to use: copilot or claude",
+        help="Explicit user-local AI provider and integration: copilot or claude",
     ),
     script_type: str = typer.Option(
         None, "--script", help="Script type to use: sh or ps"
@@ -3723,12 +3832,19 @@ def init(
         False,
         "--no-cmind-git",
         help=(
-            "Skip initialising a private git repository inside .cmind/. "
-            "Default is ON: cmind init seeds .cmind/.git "
-            "so every subsequent `cmind script` invocation auto-snapshots "
-            "the workspace state, letting you `git log` / `git diff` "
-            "between pipeline stages without extra tooling.  This flag "
-            "disables the feature for the current init only."
+            "Skip initialising the home-side private snapshot repository at "
+            "~/.cmind/workspaces/<workspace-id>/.git. By default eligible pipeline "
+            "stages snapshot generated state there. This flag skips initialization "
+            "for this invocation; it does not disable an existing snapshot repo "
+            "or control project Git sync hooks."
+        ),
+    ),
+    git_hooks: bool = typer.Option(
+        False,
+        "--git-hooks/--no-git-hooks",
+        help=(
+            "Opt into deterministic post-commit/post-merge sync (never AI calls). "
+            "Default: remove CoderMind-owned Git hook blocks; preserve user hooks."
         ),
     ),
 ):
@@ -3776,7 +3892,21 @@ def init(
     if here:
         project_name = Path.cwd().name
         project_path = Path.cwd()
+    else:
+        project_path = Path(project_name).resolve()
 
+    _preflight_workspace_policy(project_path)
+
+    explicit_ai = isinstance(ai_assistant, str)
+    if not explicit_ai and not sys.stdin.isatty():
+        console.print(
+            "Error: non-interactive init requires --ai copilot or --ai claude. "
+            "Repository recommendations and detected integrations are not execution consent.",
+            style="red", markup=False,
+        )
+        raise typer.Exit(1)
+
+    if here:
         existing_items = list(project_path.iterdir())
         if existing_items:
             console.print(
@@ -3795,7 +3925,6 @@ def init(
                     console.print("[yellow]Operation cancelled[/yellow]")
                     raise typer.Exit(0)
     else:
-        project_path = Path(project_name).resolve()
         if project_path.exists():
             error_panel = Panel(
                 f"Directory '[cyan]{project_name}[/cyan]' already exists\n"
@@ -3830,7 +3959,7 @@ def init(
                 "[yellow]Git not found - will skip repository initialization[/yellow]"
             )
 
-    if ai_assistant:
+    if explicit_ai:
         if ai_assistant not in AGENT_CONFIG:
             console.print(
                 f"[red]Error:[/red] Invalid AI assistant '{ai_assistant}'. Choose from: {', '.join(AGENT_CONFIG.keys())}"
@@ -3841,7 +3970,7 @@ def init(
         # Create options dict for selection (agent_key: display_name)
         ai_choices = {key: config["name"] for key, config in AGENT_CONFIG.items()}
         selected_ai = select_with_arrows(
-            ai_choices, "Choose your AI assistant:", "copilot"
+            ai_choices, "Choose AI provider to save locally (also configures integration):", "copilot"
         )
 
     if not ignore_agent_tools:
@@ -3892,7 +4021,8 @@ def init(
         else:
             selected_script = default_script
 
-    console.print(f"[cyan]Selected AI assistant:[/cyan] {selected_ai}")
+    console.print(f"[cyan]Selected AI integration:[/cyan] {selected_ai}")
+    console.print("[dim]Explicit provider choice will be saved locally after hooks succeed.[/dim]")
     console.print(f"[cyan]Selected script type:[/cyan] {selected_script}")
 
     tracker = StepTracker("Initialize CoderMind Project")
@@ -3901,7 +4031,7 @@ def init(
 
     tracker.add("precheck", "Check required tools")
     tracker.complete("precheck", "ok")
-    tracker.add("ai-select", "Select AI assistant")
+    tracker.add("ai-select", "Choose local AI provider and integration")
     tracker.complete("ai-select", f"{selected_ai}")
     tracker.add("script-select", "Select script type")
     tracker.complete("script-select", selected_script)
@@ -3917,7 +4047,7 @@ def init(
         ("copilot-cli-mcp", "Register rpg-tools in ~/.copilot/mcp-config.json"),
         ("cleanup", "Cleanup"),
         ("git", "Initialize git repository"),
-        ("hooks", "Install auto-update hooks"),
+        ("hooks", "Configure status integrations and opt-in Git sync hooks"),
         ("final", "Finalize"),
     ]:
         tracker.add(key, label)
@@ -3940,12 +4070,11 @@ def init(
                 debug=debug,
             )
 
-            # .cmind/.source is written by whichever provisioning path
-            # actually ran (_install_from_bundle / _download_and_extract_release_zip).
+            # Provisioning records the channel in home-side .meta.toml,
+            # separately from user-local execution selection.
 
-            # Materialise .cmind/config.toml with the resolved AI CLI
-            # command.  llm_client.py reads this at runtime to invoke
-            # the right sub-agent.
+            # Track only a marker/recommendation, never execution consent.
+            # Preserve valid pre-existing configs byte-for-byte.
             _write_workspace_config(project_path, selected_ai)
 
             # Materialize .gitignore *before* MCP/hook generation so the
@@ -3995,9 +4124,16 @@ def init(
             else:
                 tracker.skip("git", "--no-git flag")
 
-            _install_hooks(project_path, selected_ai, tracker=tracker)
+            _install_hooks(project_path, selected_ai, tracker=tracker, git_hooks=git_hooks)
 
+            # Reaching this point requires --ai or an interactive init choice.
+            # Do not authorize execution if hook migration failed.
+            _save_local_ai_selection(project_path, selected_ai)
             tracker.complete("final", "project ready")
+        except _ai_cli_policy().AICommandPolicyError:
+            tracker.error("final", _AI_POLICY_ERROR)
+            console.print(_AI_POLICY_ERROR, style="red", markup=False)
+            raise typer.Exit(1) from None
         except Exception as e:
             tracker.error("final", str(e))
             console.print(
@@ -4139,7 +4275,7 @@ def init(
         "",
         "   For existing repositories / code-to-RPG:",
         f"   {step_num}.6  [cyan]/cmind.encode[/] - Encode an existing repo into RPG",
-        f"   {step_num}.7  [cyan]/cmind.update_rpg[/] - Manual incremental RPG update fallback",
+        f"   {step_num}.7  [cyan]/cmind.update_rpg[/] - Explicit AI-driven incremental RPG update",
         f"   {step_num}.8  [dim][Optional][/dim] [cyan]/cmind.rpg_edit <edit instructions>[/] - Surgical RPG/code edit",
         "",
         "   For finer-grained commands and stage-by-stage reruns, see:",
@@ -4166,7 +4302,8 @@ def init(
     steps_lines.append(
         "   [yellow]Note:[/] the MCP tools query [cyan]rpg.json[/] in the workspace's home-dir "
         "store, which is created by the encoder. For existing codebases, run [cyan]/cmind.encode[/] "
-        "once now to populate it; the post-commit hook keeps it in sync afterwards."
+        "once now to populate it. Git sync hooks require [cyan]--git-hooks[/] on each init/update; "
+        "AI-driven updates require an explicit [cyan]cmind script update_graphs.py update-rpg[/] invocation."
     )
 
     steps_panel = Panel(
@@ -4179,19 +4316,19 @@ def init(
     if selected_ai == "claude":
         claude_settings = project_path / ".claude" / "settings.json"
         permissions_hint = Panel(
-            f"The template pre-configures [cyan].claude/settings.json[/cyan] with broad permissions "
-            f"(e.g. [cyan]Bash[/cyan], [cyan]Write[/cyan], [cyan]Edit[/cyan]) so that Claude Code can run scripts and "
-            f"modify files without repeated approval prompts.\n"
-            f"These permissions may be more permissive than you need. "
-            f"You can review and adjust them at any time by editing [cyan]{claude_settings.relative_to(project_path)}[/cyan].",
-            title="[yellow]Pre-granted Permissions[/yellow]",
+            f"The status integration adds [cyan]mcp__rpg-tools[/cyan] for read-only graph queries "
+            f"and preserves existing settings. It does not grant blanket Bash, Write or Edit access.\n"
+            f"AI calls keep the provider's normal permission checks. Existing or legacy template "
+            f"permissions may still be broad; this update does not revoke them. Review "
+            f"[cyan]{claude_settings.relative_to(project_path)}[/cyan] separately.",
+            title="[yellow]Review Assistant Permissions[/yellow]",
             border_style="yellow",
             padding=(1, 2),
         )
         console.print()
         console.print(permissions_hint)
 
-    # Initialise the private snapshot repo inside .cmind/.  Done BEFORE
+    # Initialise the private snapshot repo in the home-side RPG store. Done BEFORE
     # the optional initial encode so the encoder's output, if it runs,
     # becomes a fresh commit on top of the [init] baseline — a useful
     # diff target.
@@ -4227,7 +4364,10 @@ def update(
     ai_assistant: str = typer.Option(
         None,
         "--ai",
-        help="AI assistant to use (auto-detected from existing project if not specified)",
+        help=(
+            "Explicitly save a user-local AI provider and select its integration. "
+            "Without --ai, refresh integrations only; local execution consent is unchanged."
+        ),
     ),
     script_type: str = typer.Option(
         None, "--script", help="Script type to use: sh or ps"
@@ -4267,19 +4407,32 @@ def update(
         False,
         "--no-cmind-git",
         help=(
-            "Skip backfilling the private snapshot repo at .cmind/.git "
+            "Skip backfilling the private snapshot repo at "
+            "~/.cmind/workspaces/<workspace-id>/.git "
             "for older workspaces that don't have one yet.  Default is ON: "
             "if the inner repo is missing, `cmind update` creates it and "
             "commits a catch-up snapshot.  Pre-existing inner repos are "
             "never touched."
         ),
     ),
+    git_hooks: bool = typer.Option(
+        False,
+        "--git-hooks/--no-git-hooks",
+        help=(
+            "Opt into deterministic post-commit/post-merge sync (never AI calls). "
+            "Default: remove CoderMind-owned Git hook blocks; preserve user hooks."
+        ),
+    ),
 ):
     """Update CoderMind template files in an existing project to the latest version.
 
     This command updates scripts, templates, command definitions, MCP
-    config, gitignore rules, and git hooks in the current directory.
-    It auto-detects the AI assistant from existing project configuration.
+    config and gitignore rules in the current directory. Git hooks are
+    disabled unless --git-hooks is supplied; only CoderMind-owned blocks
+    are removed by default. Opt-in hooks perform deterministic sync only.
+    Without --ai, it prefers the existing local provider for templates, then
+    detects agent directories; neither detection nor a repository recommendation
+    grants execution consent. Only explicit --ai changes the local provider.
 
     Equivalent to re-running 'cmind init --here --force' but with proper
     semantics and automatic detection of existing settings.
@@ -4292,6 +4445,7 @@ def update(
     show_banner()
 
     project_path = Path.cwd()
+    _preflight_workspace_policy(project_path)
 
     # Verify this is an existing CoderMind project
     cmind_dir = project_path / ".cmind"
@@ -4308,8 +4462,9 @@ def update(
         )
         raise typer.Exit(1)
 
-    # Determine AI assistant
-    if ai_assistant:
+    # Integration selection and execution consent are deliberately separate.
+    explicit_ai = isinstance(ai_assistant, str)
+    if explicit_ai:
         if ai_assistant not in AGENT_CONFIG:
             console.print(
                 f"[red]Error:[/red] Invalid AI assistant '{ai_assistant}'. "
@@ -4318,18 +4473,37 @@ def update(
             raise typer.Exit(1)
         selected_ai = ai_assistant
     else:
-        detected = _detect_ai_agent(project_path)
-        if detected:
+        policy = _ai_cli_policy()
+        try:
+            local_provider = policy.read_local_provider(project_path)
+        except (policy.AICommandPolicyError, OSError):
+            console.print(_LOCAL_AI_SELECTION_ERROR, style="red", markup=False)
+            raise typer.Exit(1) from None
+        if local_provider in AGENT_CONFIG:
+            selected_ai = local_provider
             console.print(
-                f"[cyan]Auto-detected AI assistant:[/cyan] {detected} "
-                f"({AGENT_CONFIG[detected]['name']})"
+                f"[cyan]Using existing user-local provider for integration:[/cyan] {selected_ai}"
             )
-            selected_ai = detected
         else:
-            ai_choices = {key: config["name"] for key, config in AGENT_CONFIG.items()}
-            selected_ai = select_with_arrows(
-                ai_choices, "Choose your AI assistant:", "copilot"
-            )
+            detected = _detect_ai_agent(project_path)
+            if detected in AGENT_CONFIG:
+                selected_ai = detected
+                console.print(
+                    f"[cyan]Auto-detected AI integration (not execution consent):[/cyan] {detected}"
+                )
+            elif not sys.stdin.isatty():
+                console.print(
+                    "Error: cannot determine AI integration in non-interactive update. "
+                    "Pass --ai copilot or --ai claude to explicitly select and save a local provider, "
+                    "or run interactively to choose an integration only.",
+                    style="red", markup=False,
+                )
+                raise typer.Exit(1)
+            else:
+                ai_choices = {key: config["name"] for key, config in AGENT_CONFIG.items()}
+                selected_ai = select_with_arrows(
+                    ai_choices, "Choose AI integration only (local provider unchanged):", "copilot"
+                )
 
     # Determine script type
     if script_type:
@@ -4362,7 +4536,14 @@ def update(
         else:
             selected_script = default_script
 
-    console.print(f"[cyan]Selected AI assistant:[/cyan] {selected_ai}")
+    console.print(f"[cyan]Selected AI integration:[/cyan] {selected_ai}")
+    if explicit_ai:
+        console.print("[dim]Explicit provider choice will be saved locally after hooks succeed.[/dim]")
+    else:
+        console.print(
+            "[dim]Integration only: user-local AI selection will not be changed. "
+            "Use --ai copilot or --ai claude to explicitly save a provider.[/dim]"
+        )
     console.print(f"[cyan]Selected script type:[/cyan] {selected_script}")
 
     # Pre-update CLI upgrade -------------------------------------------------
@@ -4382,8 +4563,8 @@ def update(
     # ``--no-upgrade`` skips this step (offline / pinned CI / freshly
     # re-installed manually).
     #
-    # After a successful upgrade we ``os.execvp`` the (now-upgraded)
-    # cmind binary so the rest of update runs against the freshly
+    # After a successful upgrade we re-enter the absolute installed CLI
+    # bootstrap so the rest of update runs against the freshly
     # installed code + assets.  Mixing old in-memory logic with new
     # on-disk core_pack/ used to cause logic vs assets drift bugs.
     #
@@ -4425,6 +4606,8 @@ def update(
             f"[cyan]Upgrading cmind-cli via {method} (source={source})...[/cyan]"
         )
         try:
+            if cmd[0] in ("uv", "pipx"):
+                cmd = [_resolve_tool(cmd[0], project_path), *cmd[1:]]
             rc = subprocess.call(cmd)  # type: ignore[arg-type]
         except FileNotFoundError:
             # Upgrade tool (uv, pipx, pip) not on PATH — surface, then
@@ -4451,16 +4634,16 @@ def update(
             # loop-guard env var so the re-exec'd process doesn't
             # immediately try to upgrade again.
             new_argv = list(sys.argv)
-            cmind_bin = shutil.which("cmind") or new_argv[0]
             console.print(
                 "[cyan]CLI upgrade complete; re-exec'ing to apply "
                 "new templates...[/cyan]"
             )
             try:
                 os.environ[_UPGRADE_DONE_ENV] = "1"
-                os.execvp(cmind_bin, [cmind_bin, *new_argv[1:]])
+                command = _cli_argv(*new_argv[1:])
+                os.execv(command[0], command)
             except OSError as exc:
-                # execvp failed — fall back to running the update
+                # execv failed — fall back to running the update
                 # in-process with the (now-on-disk) new code.  This
                 # mixes old in-memory logic with new assets, but
                 # that's strictly better than crashing here: the user
@@ -4487,7 +4670,7 @@ def update(
 
     sys._cmind_tracker_active = True
 
-    tracker.add("ai-select", "Select AI assistant")
+    tracker.add("ai-select", "Select AI integration")
     tracker.complete("ai-select", f"{selected_ai}")
     tracker.add("script-select", "Select script type")
     tracker.complete("script-select", selected_script)
@@ -4501,7 +4684,7 @@ def update(
         ("gitignore", "Configure .gitignore"),
         ("mcp", "Configure MCP server"),
         ("copilot-cli-mcp", "Register rpg-tools in ~/.copilot/mcp-config.json"),
-        ("hooks", "Install auto-update hooks"),
+        ("hooks", "Configure status integrations and opt-in Git sync hooks"),
         ("cleanup", "Cleanup"),
         ("final", "Finalize"),
     ]:
@@ -4522,11 +4705,11 @@ def update(
                 debug=debug,
             )
 
-            # .cmind/.source is written by whichever provisioning path
-            # actually ran (_install_from_bundle / _download_and_extract_release_zip).
+            # Provisioning records the channel in home-side .meta.toml,
+            # separately from user-local execution selection.
 
-            # Refresh .cmind/config.toml only when missing (preserves
-            # user customisations on re-update).
+            # Revalidate repository recommendations and create only when absent;
+            # preserve valid hints, including exact legacy built-in commands.
             _write_workspace_config(project_path, selected_ai)
 
             # Pre-create runtime directories so stage prompts that redirect
@@ -4563,11 +4746,18 @@ def update(
                 tracker.start("copilot-cli-mcp")
                 _register_copilot_cli_global_mcp(tracker=tracker)
 
-            # Reconcile hook files so existing workspaces receive the
-            # current post-commit/post-merge dispatcher contract.
-            _install_hooks(project_path, selected_ai, tracker=tracker)
+            # Remove cmind Git blocks by default, or install sync-only
+            # dispatchers when this invocation explicitly opts in.
+            _install_hooks(project_path, selected_ai, tracker=tracker, git_hooks=git_hooks)
 
+            # Detection and interactive update choices refresh templates only.
+            if explicit_ai:
+                _save_local_ai_selection(project_path, selected_ai)
             tracker.complete("final", "update complete")
+        except _ai_cli_policy().AICommandPolicyError:
+            tracker.error("final", _AI_POLICY_ERROR)
+            console.print(_AI_POLICY_ERROR, style="red", markup=False)
+            raise typer.Exit(1) from None
         except Exception as e:
             tracker.error("final", str(e))
             console.print(
@@ -4607,7 +4797,7 @@ def update(
     )
 
     # Backfill inner snapshot repo for workspaces created before
-    # this feature shipped.  Idempotent — does nothing if .cmind/.git
+    # this feature shipped. Idempotent — does nothing if the home-side snapshot repo
     # already exists, and silently noops if --no-cmind-git was passed.
     if not no_cmind_git:
         from . import _inner_git
@@ -4811,16 +5001,13 @@ def _resolve_script_path(relpath: str) -> Optional[Path]:
 # ---------------------------------------------------------------------------
 #
 # Python entry-point for git hooks.  The on-disk hook files in
-# ``.git/hooks/`` are short shell stubs that ``exec`` this command;
-# path resolution, logging, locking, and detach logic live here so they
+# ``.git/hooks/`` are opt-in shell stubs that call this command;
+# path resolution, logging, and deterministic sync live here so they
 # can be updated by upgrading the CLI rather than reinstalling hooks.
 
 _HOOK_ENV_NAME = "CMIND_HOOK"
 _HOOK_ENV_SHA = "CMIND_HOOK_SHA"
 _HOOK_LOG_FILENAME = "hooks.log"
-_HOOK_BACKGROUND_LOG = "update_rpg.log"
-_HOOK_LOCK_DIRNAME = ".update_rpg.lock"
-_HOOK_LOCK_STALE_SECONDS = 60 * 60  # 60 minutes -- matches the old shell impl
 
 
 def _hook_log_line(log_path: Path, msg: str) -> None:
@@ -4840,7 +5027,7 @@ def _short_head_sha(workspace: Path) -> str:
     """Return ``git rev-parse --short HEAD`` for ``workspace`` or ``"?"``."""
     try:
         r = subprocess.run(
-            ["git", "-C", str(workspace), "rev-parse", "--short", "HEAD"],
+            [_resolve_git(workspace), "-C", str(workspace), "rev-parse", "--short", "HEAD"],
             capture_output=True, text=True, timeout=5,
         )
         if r.returncode == 0:
@@ -4857,12 +5044,12 @@ def _hook_run_foreground(
     script_args: List[str],
     label: str,
 ) -> int:
-    """Run ``cmind script <script_args>`` and tee output into ``log_path``."""
+    """Run ``cmind script <script_args>`` and append output to ``log_path``."""
     _hook_log_line(log_path, f"{label}: start ({' '.join(script_args)})")
     try:
         with open(log_path, "a", encoding="utf-8") as fh:
             proc = subprocess.run(
-                ["cmind", "script", *script_args],
+                _cli_argv("script", *script_args),
                 cwd=str(workspace),
                 env=env,
                 stdout=fh, stderr=subprocess.STDOUT,
@@ -4875,82 +5062,6 @@ def _hook_run_foreground(
         return -1
 
 
-def _hook_spawn_background(
-    workspace: Path,
-    home_dir: Path,
-    hook_log: Path,
-    env: Dict[str, str],
-) -> None:
-    """Acquire a directory lock and detach ``update_graphs.py update-rpg``.
-
-    The lock is a *directory* (``mkdir`` is the only POSIX-atomic
-    exclusive-create primitive); a directory older than
-    :data:`_HOOK_LOCK_STALE_SECONDS` is treated as orphaned (worker
-    killed by OOM / reboot / SIGKILL) and removed before re-trying.
-    """
-    lock_dir = home_dir / "logs" / _HOOK_LOCK_DIRNAME
-    bg_log = home_dir / "logs" / _HOOK_BACKGROUND_LOG
-
-    # Stale-lock recovery -- match the 60-minute window the shell hook used.
-    try:
-        if lock_dir.is_dir():
-            age = time.time() - lock_dir.stat().st_mtime
-            if age > _HOOK_LOCK_STALE_SECONDS:
-                shutil.rmtree(lock_dir, ignore_errors=True)
-                _hook_log_line(hook_log, f"phase2: removed stale lock (age={age:.0f}s)")
-    except OSError:
-        pass
-
-    # Try to acquire.
-    try:
-        lock_dir.mkdir(parents=False, exist_ok=False)
-    except FileExistsError:
-        _hook_log_line(hook_log, "phase2: skipped (another worker holds the lock)")
-        return
-    except OSError as exc:
-        _hook_log_line(hook_log, f"phase2: lock acquire failed: {exc!r}")
-        return
-
-    # Background worker: run update-rpg, then release the lock.  We
-    # cannot use ``Popen`` alone because nothing would ``rmdir`` the
-    # lock after the worker completes; a tiny ``sh -c`` wrapper does
-    # the cleanup deterministically.
-    #
-    # ``start_new_session=True`` is the cross-platform equivalent of
-    # ``nohup``/``setsid`` -- the child survives the hook's exit.
-    bg_log.parent.mkdir(parents=True, exist_ok=True)
-    lock_q = shlex.quote(str(lock_dir))
-    log_q = shlex.quote(str(bg_log))
-    workspace_q = shlex.quote(str(workspace))
-    shell_cmd = (
-        f"cd {workspace_q}; sleep 2; "
-        f"cmind script update_graphs.py update-rpg --json >> {log_q} 2>&1; "
-        f"rmdir {lock_q}"
-    )
-    # Strip GIT_INDEX_FILE / GIT_DIR which git sets during hooks -
-    # if they leak into the worker, ``git worktree add`` fails with
-    # cryptic index errors.
-    worker_env = {k: v for k, v in env.items() if k not in ("GIT_INDEX_FILE", "GIT_DIR")}
-    try:
-        subprocess.Popen(
-            ["sh", "-c", shell_cmd],
-            cwd=str(workspace),
-            env=worker_env,
-            stdin=subprocess.DEVNULL,
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-            start_new_session=True,
-        )
-        _hook_log_line(hook_log, f"phase2: dispatched -> {bg_log}")
-    except OSError as exc:
-        _hook_log_line(hook_log, f"phase2: spawn failed: {exc!r}")
-        # Release the lock so the next commit can retry.
-        try:
-            lock_dir.rmdir()
-        except OSError:
-            pass
-
-
 @app.command(
     "hook",
     hidden=True,
@@ -4961,7 +5072,9 @@ def hook(name: str = typer.Argument(..., help="Hook name: post-commit | post-mer
 
     Resolves the current workspace via the standard cwd-walk, attaches
     a hook log under ``~/.cmind/workspaces/<workspace-id>/logs/hooks.log``,
-    and runs the per-hook orchestration.  Every failure path is
+    and runs deterministic sync only, never an AI update or background
+    worker. Explicit AI updates use ``cmind script update_graphs.py update-rpg``
+    outside hook context. Every failure path is
     swallowed (logged, never raised) so a misbehaving hook never blocks
     the user's git operation.
 
@@ -4973,8 +5086,8 @@ def hook(name: str = typer.Argument(..., help="Hook name: post-commit | post-mer
 
     All ``cmind script`` subprocess invocations inherit two env vars:
 
-      * ``CMIND_HOOK`` -- the hook name (``post-commit`` etc.)
-      * ``CMIND_HOOK_SHA`` -- short SHA of the user-facing commit
+        The ``CMIND_HOOK`` marker carries the hook name and blocks LLMClient
+        AI calls. ``CMIND_HOOK_SHA`` carries the short user-facing commit SHA.
 
     The inner-git snapshot's commit message picks these up
     (:func:`cmind_cli._inner_git._build_message`) so ``git log`` in the
@@ -4993,7 +5106,6 @@ def hook(name: str = typer.Argument(..., help="Hook name: post-commit | post-mer
             # then un-init'd, and we never want to block git.
             raise typer.Exit(0)
 
-        home_dir = _storage.home_workspace_dir(ws)
         log_path = _storage.workspace_logs_dir(ws) / _HOOK_LOG_FILENAME
         sha = _short_head_sha(ws)
 
@@ -5026,8 +5138,6 @@ def hook(name: str = typer.Argument(..., help="Hook name: post-commit | post-mer
                 ["update_graphs.py", "sync"],
                 "foreground-sync",
             )
-            # The LLM-driven RPG update runs detached from git commit.
-            _hook_spawn_background(ws, home_dir, log_path, env)
         else:
             _hook_log_line(log_path, f"unknown hook name: {name!r}")
             raise typer.Exit(0)

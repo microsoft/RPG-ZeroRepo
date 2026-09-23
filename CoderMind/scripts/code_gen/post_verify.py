@@ -31,6 +31,7 @@ from common.generated_artifacts import (
 )
 from common.git_utils import GitRunner
 from common.task_batch import PlannedTask
+from common.trusted_tools import resolve_git
 from code_gen.test_runner import (
     ensure_deps_installed,
     find_related_test_files,
@@ -86,7 +87,7 @@ def post_verify(
         try:
             main_branch = GitRunner(str(repo_path)).main_branch
             diff = subprocess.run(
-                ["git", "diff", f"{main_branch}..HEAD", "--name-only"],
+                [resolve_git(repo_path), "diff", f"{main_branch}..HEAD", "--name-only"],
                 cwd=repo_path, capture_output=True, text=True, timeout=10,
             )
             return [

@@ -25,6 +25,40 @@ _project_root = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(_project_root / "src"))
 
 import cmind_cli  # noqa: E402
+from cmind_cli import _assets  # noqa: E402
+
+
+@pytest.fixture(autouse=True)
+def isolated_home(tmp_path_factory, monkeypatch):
+    """Keep storage outside the workspace and away from the real user home."""
+    home = tmp_path_factory.mktemp("encode-home")
+    monkeypatch.setattr(Path, "home", classmethod(lambda cls: home))
+    # Real fake-encoder subprocesses must inherit the same isolation.
+    monkeypatch.setenv("HOME", str(home))
+    monkeypatch.setenv("USERPROFILE", str(home))
+    return home
+
+
+@pytest.fixture
+def trusted_scripts(tmp_path_factory, monkeypatch):
+    """Model installed assets in a temporary sibling of the workspace."""
+    scripts = tmp_path_factory.mktemp("encode-scripts")
+    monkeypatch.setattr(_assets, "scripts_dir", lambda: scripts)
+    return scripts
+
+
+@pytest.fixture
+def legacy_encoder(tmp_path):
+    """A workspace encoder that would only write a benign execution marker."""
+    script = tmp_path / ".cmind" / "scripts" / "rpg_encoder" / "run_encode.py"
+    script.parent.mkdir(parents=True)
+    script.write_text(
+        "from pathlib import Path\n"
+        "Path(__file__).with_suffix('.executed').write_text(\n"
+        "    'legacy workspace encoder ran\\n', encoding='utf-8')\n",
+        encoding="utf-8",
+    )
+    return script
 
 
 # ---------------------------------------------------------------------------
@@ -72,14 +106,21 @@ def test_workspace_has_python_code_empty(tmp_path):
 # _maybe_offer_initial_encode — short-circuits
 # ---------------------------------------------------------------------------
 
-def test_skip_when_rpg_already_exists(tmp_path):
-    """If rpg.json is already present, never prompt nor run."""
+@pytest.mark.parametrize("storage_location", ["home", "legacy"])
+def test_skip_when_rpg_already_exists(tmp_path, isolated_home, storage_location):
+    """Existing home-side or legacy rpg.json prevents both prompting and running."""
     (tmp_path / "main.py").write_text("\n")
-    rpg_file = tmp_path / ".cmind" / "data" / "rpg.json"
+    if storage_location == "home":
+        rpg_file = cmind_cli._storage.workspace_data_dir(tmp_path) / "rpg.json"
+        assert rpg_file.resolve().is_relative_to(isolated_home.resolve())
+        assert not (tmp_path / ".cmind" / "data" / "rpg.json").exists()
+    else:
+        rpg_file = tmp_path / ".cmind" / "data" / "rpg.json"
     rpg_file.parent.mkdir(parents=True)
     rpg_file.write_text("{}")
 
-    with patch.object(cmind_cli, "_run_initial_encode") as run, \
+    with patch("sys.stdin.isatty", return_value=True), \
+         patch.object(cmind_cli, "_run_initial_encode") as run, \
          patch("typer.confirm") as confirm:
         cmind_cli._maybe_offer_initial_encode(tmp_path, encode_choice=None)
         cmind_cli._maybe_offer_initial_encode(tmp_path, encode_choice=True)
@@ -175,10 +216,50 @@ def test_keyboard_interrupt_during_prompt_does_not_propagate(tmp_path):
 # _run_initial_encode — missing encoder script
 # ---------------------------------------------------------------------------
 
-def test_run_initial_encode_missing_script_returns_false(tmp_path):
-    """If .cmind/scripts/rpg_encoder/run_encode.py is absent, we warn
-    and return False without raising."""
-    assert cmind_cli._run_initial_encode(tmp_path) is False
+def test_run_initial_encode_missing_script_returns_false(
+    tmp_path, trusted_scripts, legacy_encoder,
+):
+    """Missing installed assets never fall back to an existing workspace encoder."""
+    assert list(trusted_scripts.iterdir()) == []
+    assert legacy_encoder.is_file()
+    with patch.object(
+        cmind_cli.subprocess, "Popen", side_effect=AssertionError("Unexpected encoder subprocess"),
+    ) as popen:
+        assert cmind_cli._run_initial_encode(tmp_path) is False
+
+    popen.assert_not_called()
+    assert not legacy_encoder.with_suffix(".executed").exists()
+
+
+@pytest.mark.parametrize("link_kind", ["file", "directory"])
+def test_run_initial_encode_refuses_asset_symlink_escape(
+    tmp_path, trusted_scripts, legacy_encoder, link_kind,
+):
+    """An asset symlink cannot authorize execution outside the installed root."""
+    encoder_dir = trusted_scripts / "rpg_encoder"
+    encoder = encoder_dir / "run_encode.py"
+    try:
+        if link_kind == "directory":
+            encoder_dir.symlink_to(legacy_encoder.parent, target_is_directory=True)
+        else:
+            encoder_dir.mkdir()
+            encoder.symlink_to(legacy_encoder)
+    except OSError as exc:
+        if isinstance(exc, PermissionError) or getattr(exc, "winerror", None) == 1314:
+            pytest.skip(f"Symlink creation is not permitted: {exc}")
+        raise
+
+    assert encoder.is_file()
+    assert encoder.resolve() == legacy_encoder.resolve()
+    assert not encoder.resolve().is_relative_to(trusted_scripts.resolve())
+    with patch.object(
+        cmind_cli.subprocess, "Popen", side_effect=AssertionError("Unexpected encoder subprocess"),
+    ) as popen:
+        assert cmind_cli._resolve_script_path("rpg_encoder/run_encode.py") is None
+        assert cmind_cli._run_initial_encode(tmp_path) is False
+
+    popen.assert_not_called()
+    assert not legacy_encoder.with_suffix(".executed").exists()
 
 
 # ---------------------------------------------------------------------------
@@ -271,16 +352,16 @@ def test_parse_line_unknown_is_ignored():
 
 
 # ---------------------------------------------------------------------------
-# _run_initial_encode — end-to-end with a mocked subprocess
+# _run_initial_encode — real subprocess tests; exclude from no-real-process runs
 # ---------------------------------------------------------------------------
 
-def _make_fake_encoder(tmp_path: Path, exit_code: int, stderr_lines: list, stdout_text: str = "") -> Path:
+def _make_fake_encoder(scripts_root: Path, exit_code: int, stderr_lines: list, stdout_text: str = "") -> Path:
     """Write a real Python script that mimics the encoder's IO.
 
     Using a real subprocess (rather than mocking Popen) keeps the test
     honest: it exercises the actual threaded reader + Progress loop.
     """
-    encoder_dir = tmp_path / ".cmind" / "scripts" / "rpg_encoder"
+    encoder_dir = scripts_root / "rpg_encoder"
     encoder_dir.mkdir(parents=True)
     script = encoder_dir / "run_encode.py"
     payload = {
@@ -298,15 +379,16 @@ def _make_fake_encoder(tmp_path: Path, exit_code: int, stderr_lines: list, stdou
         "if payload['stdout_text']:\n"
         "    sys.stdout.write(payload['stdout_text'])\n"
         "    sys.stdout.flush()\n"
-        "sys.exit(payload['exit_code'])\n"
+        "sys.exit(payload['exit_code'])\n",
+        encoding="utf-8",
     )
     return script
 
 
-def test_run_initial_encode_success_writes_log(tmp_path):
+def test_run_initial_encode_success_writes_log(tmp_path, trusted_scripts):
     """A 0-exit encoder is reported as success and its stderr lands in encode.log."""
     _make_fake_encoder(
-        tmp_path,
+        trusted_scripts,
         exit_code=0,
         stderr_lines=[
             "RPGParser - INFO - Generating repo info (max_iters=3)",
@@ -328,10 +410,36 @@ def test_run_initial_encode_success_writes_log(tmp_path):
     assert "process_class_batch" in contents
 
 
-def test_run_initial_encode_failure_returns_false(tmp_path):
+def test_run_initial_encode_success_ignores_legacy_workspace_encoder(
+    tmp_path, trusted_scripts, legacy_encoder, isolated_home,
+):
+    """Execute trusted assets, not the benign marker script in the workspace."""
+    trusted_output = "TRUSTED_ASSET_ENCODER_EXECUTED"
+    trusted_encoder = _make_fake_encoder(
+        trusted_scripts,
+        exit_code=0,
+        stderr_lines=[trusted_output],
+        stdout_text='{"status": "success", "source": "trusted-asset"}\n',
+    )
+    assert not trusted_encoder.resolve().is_relative_to(tmp_path.resolve())
+    assert cmind_cli._resolve_script_path("rpg_encoder/run_encode.py") == trusted_encoder.resolve()
+    assert legacy_encoder.is_file()
+    marker = legacy_encoder.with_suffix(".executed")
+    assert not marker.exists()
+
+    assert cmind_cli._run_initial_encode(tmp_path) is True
+
+    assert not marker.exists()
+    log = cmind_cli._storage.workspace_logs_dir(tmp_path) / "encode.log"
+    assert log.resolve().is_relative_to(isolated_home.resolve())
+    assert trusted_output in log.read_text(encoding="utf-8")
+    assert not (tmp_path / ".cmind" / "logs").exists()
+
+
+def test_run_initial_encode_failure_returns_false(tmp_path, trusted_scripts):
     """A non-zero exit is reported as failure and we still get a log file."""
     _make_fake_encoder(
-        tmp_path,
+        trusted_scripts,
         exit_code=1,
         stderr_lines=["RPGParser - ERROR - boom"],
         stdout_text='{"status": "failed", "error": "boom"}\n',

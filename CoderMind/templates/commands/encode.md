@@ -18,6 +18,14 @@ Encode the current repository into an RPG structure. The RPG captures the
 codebase's functional architecture as a graph of nodes (features, modules,
 code entities) and edges (dependencies, containment).
 
+**Execution prerequisites:** AI calls require a trusted constructor/process
+choice or valid user-local selection; tracked provider hints are not
+authority. Normal provider approvals apply. Configuration, authentication,
+access, or approval blocks override recovery guidance: show the exact error
+and any report path, preserve artifacts, and stop for the user. Do not retry,
+run init/update, rewrite configuration/local selection, or grant
+trust/permission overrides as recovery.
+
 ### Step 1: Pre-Check
 
 Run the check script to determine the current encode state:
@@ -30,8 +38,11 @@ Inspect the `type` field in the output:
 
 **If type is "error"**:
 
-* Display the error message and stop. The RPG file may be corrupted.
-* Suggest deleting the invalid file and re-running `/cmind.encode`.
+* Display the exact error and any diagnostic/report artifact path, and stop.
+  An error is not necessarily graph corruption.
+* Preserve the existing graph and reports. Ask the user how to proceed;
+  any backup, deletion, or full rebuild requires an explicit user decision.
+  Never delete the graph automatically to get past this check.
 
 **If type is "init"**:
 
@@ -85,10 +96,12 @@ Inspect the JSON `status` field to decide next steps.
 
 * Proceed to Step 3.
 
-**If status is "error"**:
+**If status is "error" or the process exits non-zero**:
 
-* Display the error message.
-* Suggest checking LLM API key configuration and repository structure.
+* Display the exact error / stderr and any reported diagnostic artifact path.
+* Preserve existing graph and report artifacts, and ask the user how to
+  proceed. Configuration, authentication, access, or approval failures are
+  stop conditions, not a reason to retry or alter settings automatically.
 
 ### Step 3: Next Steps
 
@@ -99,5 +112,6 @@ Next steps:
   - /cmind.update_rpg  — Incrementally update after code changes
   - The MCP server exposes search_rpg and explore_rpg tools
     for AI agents to query the RPG interactively.
-  - RPG data is saved at .cmind/data/rpg.json
+  - Use the reported output path or cmind version to locate RPG data
+    under ~/.cmind/workspaces/<workspace-id>/data/.
 ```
