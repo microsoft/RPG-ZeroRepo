@@ -6,8 +6,7 @@ Subcommands:
   enrich      Enrich feature graph from actual code (align paths + fill missing)
   sync        Full sync: dep + enrich + mappings
   update-rpg  Full RPG update (dep_graph + feature graph via LLM) against
-              the previous git commit. Designed to run in the background
-              from post-commit hooks.
+              the previous git commit. Run explicitly outside Git hooks.
   mapping     Rebuild dep_graph + dep↔rpg mappings (legacy)
   feature     Load existing dep_graph, rebuild mappings (legacy)
   full        AST scan + mappings + edges (legacy, use 'sync' instead)
@@ -34,19 +33,17 @@ if str(SCRIPTS_DIR) not in sys.path:
 
 from common.paths import REPO_RPG_FILE, DEP_GRAPH_FILE, RPG_HTML_FILE, HOOK_CALLS_LOG  # noqa: E402
 from common.rpg_io import atomic_write_rpg, safe_load_rpg  # noqa: E402
+from common.trusted_tools import resolve_git  # noqa: E402
 
 
 # Shared message used by every subcommand that requires an existing
-# ``rpg.json`` (sync, update-rpg, ...).  Surfaces in two places:
-#   * ``.cmind/logs/update_rpg.log`` for the asynchronous post-commit
-#     phase — where it's the user's only diagnostic.
-#   * stdout / JSON output for direct CLI invocations.
+# ``rpg.json`` (sync, update-rpg, ...).  Surfaces in stdout / JSON output
+# for explicit CLI invocations outside Git hooks.
 # Keep the message single-line so it survives JSON serialisation cleanly
 # and stays easy to grep.
 _RPG_MISSING_MSG = (
     "rpg.json not found at {rpg_path}. Run /cmind.encode in your AI agent "
-    "to generate it; the post-commit hook will resume keeping it in sync "
-    "on the next commit."
+    "to generate it, then run /cmind.update_rpg explicitly to keep it in sync."
 )
 
 
@@ -80,18 +77,17 @@ def _log_hook_call(hook_type: str, result: dict) -> None:
 
 
 def _refresh_rpg_html(rpg_path: Path) -> dict:
-    """Regenerate ``rpg.html`` next to ``rpg.json`` after a hook update.
+    """Regenerate ``rpg.html`` after an explicit graph update.
 
     The encoder's ``run_encode.py`` already produces ``rpg.html`` via
-    :mod:`rpg_visualize` during the initial full encode, but the
-    pre-/post-commit hooks only re-write ``rpg.json``.  Without this
-    refresh, the interactive visualisation drifts behind the graph
-    until the next full encode.
+    :mod:`rpg_visualize` during the initial full encode. Explicit graph
+    updates also refresh the interactive visualisation so it does not
+    drift behind the graph until the next full encode.
 
     Best-effort: any failure (missing rpg.json, parse error, write
-    permission) is swallowed so a slow / broken viz never blocks a
-    commit.  The returned dict surfaces ``viz_path`` on success or
-    ``viz_error`` on failure so callers can include it in the hook
+    permission) is swallowed so a broken viz does not fail a graph
+    update.  The returned dict surfaces ``viz_path`` on success or
+    ``viz_error`` on failure so callers can include it in the command
     output for debugging.
     """
     result: dict = {}
@@ -125,9 +121,8 @@ def update_dep_only(code_dir: str, workspace_root: str, dep_graph_path: Path,
     rebuilt dep_graph, and writes ``rpg.json`` back out.  When
     ``rpg_path`` is ``None`` (or the file is missing) we fall back to
     the legacy standalone ``dep_graph.json`` write so that environments
-    which haven't run the encoder yet still get a useful artefact —
-    this is the path the very-first pre-commit hook hits on a fresh
-    workspace before any RPG exists.
+    which haven't run the encoder yet still get a useful artefact from
+    an explicit update.
 
     ``dep_graph_path`` is preserved as a parameter for CLI back-compat
     but is now used only in the legacy fallback path.
@@ -164,8 +159,7 @@ def update_dep_only(code_dir: str, workspace_root: str, dep_graph_path: Path,
         }
 
     # Legacy fallback: write standalone dep_graph.json for environments
-    # without an rpg.json yet (rare in practice — the pre-commit hook
-    # exits early on workspaces that never ran the encoder).
+    # without an rpg.json yet.
     raw = dg.to_dict()
     raw["code_dir"] = code_dir_rel
     from datetime import datetime, timezone
@@ -336,11 +330,11 @@ def cmd_sync(
 ) -> dict:
     """Subcommand: sync — commit-aware incremental refresh.
 
-    Pre-commit hook path: pass ``staged_only=True`` so only ``git add``'d
-    files contribute to the diff (working-tree-but-not-staged changes
-    are out of scope for the imminent commit).
+    Run explicitly outside Git hooks. Pass ``staged_only=True`` so only
+    ``git add``'d files contribute to the diff; unstaged changes are
+    out of scope for that update.
 
-    Manual CLI path: omit ``staged_only`` (default ``False``) and the
+    Otherwise, omit ``staged_only`` (default ``False``) and the
     full working tree is considered dirty.
 
     Falls back to full rebuild whenever:
@@ -357,12 +351,9 @@ def cmd_sync(
 
     t0 = time.time()
 
-    # Fail-soft when the workspace hasn't run the encoder yet.  Without
-    # this guard, ``RPGService.load`` raises ``FileNotFoundError`` which
-    # the post-commit hook's ``|| true`` would swallow silently — making
-    # the failure invisible during debugging.  Emit a structured error
-    # instead so the hook log shows exactly what's wrong and how to fix
-    # it.
+    # Fail-soft when the workspace hasn't run the encoder yet. Emit a
+    # structured error instead of RPGService.load's FileNotFoundError
+    # so the command output explains what's wrong and how to fix it.
     if not rpg_path.is_file():
         return {
             "mode": "sync",
@@ -395,9 +386,9 @@ def cmd_sync(
 
     # Keep ``rpg.html`` aligned with the freshly-saved ``rpg.json``.
     # The encoder produces both files during the initial full encode,
-    # but earlier hook revisions only refreshed the JSON — leaving the
-    # visualisation silently stale.  Best-effort: ``_refresh_rpg_html``
-    # swallows its own errors so a broken viz can never block a commit.
+    # and explicit updates refresh both too. Best-effort:
+    # ``_refresh_rpg_html`` swallows its own errors so a broken viz
+    # does not fail the graph update.
     viz_result = _refresh_rpg_html(rpg_path)
 
     sync_out = {
@@ -442,10 +433,9 @@ def cmd_update_rpg(
     runs ``run_update_rpg`` (LLM-driven feature tree diff + dep_graph rebuild),
     and cleans up the worktree.
 
-    Designed for post-commit background invocation via ``setsid``::
+    Run explicitly outside Git hooks::
 
-        setsid env -u GIT_INDEX_FILE -u GIT_DIR sh -c \
-            "cd <workspace>; cmind script update_graphs.py update-rpg --json >> log 2>&1" &
+        cmind script update_graphs.py update-rpg --json
 
     Requires:
         - rpg.json exists (encode has been run)
@@ -466,8 +456,9 @@ def cmd_update_rpg(
 
     # Check git has enough history
     try:
+        git = resolve_git(workspace_root)
         prev_ref = subprocess.check_output(
-            ["git", "rev-parse", "--verify", "HEAD~1"],
+            [git, "rev-parse", "--verify", "HEAD~1"],
             cwd=workspace_root,
             stderr=subprocess.DEVNULL,
         ).decode().strip()
@@ -479,7 +470,7 @@ def cmd_update_rpg(
 
     # Prune orphaned worktrees from previous runs that were killed.
     subprocess.call(
-        ["git", "worktree", "prune"],
+        [git, "worktree", "prune"],
         cwd=workspace_root,
         stdout=subprocess.DEVNULL,
         stderr=subprocess.DEVNULL,
@@ -489,7 +480,7 @@ def cmd_update_rpg(
     worktree_dir = tempfile.mkdtemp(prefix="cmind_prev_")
     try:
         wt_proc = subprocess.run(
-            ["git", "worktree", "add", worktree_dir, prev_ref, "--detach", "-q"],
+            [git, "worktree", "add", worktree_dir, prev_ref, "--detach", "-q"],
             cwd=workspace_root,
             capture_output=True,
             text=True,
@@ -531,7 +522,7 @@ def cmd_update_rpg(
         # Clean up worktree
         try:
             subprocess.call(
-                ["git", "worktree", "remove", worktree_dir, "--force"],
+                [git, "worktree", "remove", worktree_dir, "--force"],
                 cwd=workspace_root,
                 stdout=subprocess.DEVNULL,
                 stderr=subprocess.DEVNULL,
@@ -731,9 +722,7 @@ def _format_status_for_agent(status: dict) -> str:
                     f"{_branch_suffix(last_branch)}; "
                     f"current HEAD is {cur_short}"
                     f"{_branch_suffix(cur_branch)}{branch_note}. "
-                    "Run /cmind.update_rpg "
-                    "(or commit to trigger the pre-commit sync hook) to "
-                    "refresh the graph."
+                    "Run /cmind.update_rpg explicitly to refresh the graph."
                 )
         elif last_short and not cur_short:
             lines.append(
@@ -832,7 +821,7 @@ def main():
         "--staged-only",
         action="store_true",
         help=(
-            "Only consider ``git add``'d files (pre-commit hook scope). "
+            "Only consider ``git add``'d files in this explicit update. "
             "Without this flag, the entire working tree is considered."
         ),
     )
@@ -858,7 +847,7 @@ def main():
     )
     _add_common(p_status)
 
-    # update-rpg (full RPG update via LLM; background post-commit)
+    # update-rpg (explicit full RPG update via LLM, outside Git hooks)
     p_update_rpg = sub.add_parser(
         "update-rpg",
         help="Full RPG update (dep_graph + feature graph via LLM). "
@@ -892,8 +881,8 @@ def main():
 
     workspace_root = os.getcwd()
 
-    # For background hook processes (setsid) or any caller whose cwd is
-    # not the workspace root, infer the workspace.  Earlier versions of
+    # For any caller whose cwd is not the workspace root, infer the
+    # workspace.  Earlier versions of
     # this fallback walked up from ``args.rpg`` assuming a layout of
     # ``<workspace>/.cmind/data/rpg.json``, which became wrong once the
     # default ``rpg.json`` moved into the home-side store
@@ -928,7 +917,7 @@ def main():
     if command == "dep":
         # ``rpg_path`` is preferred (embedded dep_graph); falls back to
         # writing a legacy standalone dep_graph when the workspace has no
-        # rpg.json yet (very first commit before /cmind.encode).
+        # rpg.json yet (before /cmind.encode).
         result = update_dep_only(
             code_dir, workspace_root, args.dep_graph,
             rpg_path=args.rpg,

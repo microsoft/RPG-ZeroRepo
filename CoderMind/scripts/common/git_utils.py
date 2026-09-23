@@ -16,6 +16,8 @@ from pathlib import Path
 from typing import Optional, Tuple, List, Dict
 from dataclasses import dataclass
 
+from .trusted_tools import resolve_git
+
 
 _INVALID_REF_CHARS = re.compile(r"[^A-Za-z0-9._-]+")
 
@@ -101,7 +103,7 @@ class GitRunner:
         check: bool = False,
         capture_output: bool = True
     ) -> GitResult:
-        """Run a git subcommand (automatically prepends 'git').
+        """Run a git subcommand using a trusted absolute executable path.
 
         Args:
             args: Git subcommand arguments (e.g., ["add", "-A"])
@@ -111,8 +113,8 @@ class GitRunner:
         Returns:
             GitResult with success status and output
         """
-        cmd = ["git"] + args
         try:
+            cmd = [resolve_git(self.repo_path)] + args
             result = subprocess.run(
                 cmd,
                 cwd=self.repo_path,
@@ -495,7 +497,7 @@ def _run_git_readonly(
     """
     try:
         result = subprocess.run(
-            ["git", *args],
+            [resolve_git(cwd), *args],
             cwd=str(cwd),
             capture_output=True,
             text=True,
@@ -514,7 +516,7 @@ def read_head(repo_dir: str | Path) -> Optional[dict]:
 
     Returns ``None`` if:
       * ``repo_dir`` does not exist
-      * ``git`` is not on PATH
+            * no trusted external Git executable is available
       * ``repo_dir`` is not a git working tree
       * The repository has no commits yet (unborn HEAD)
 

@@ -48,6 +48,7 @@ from common.paths import (  # noqa: E402
     cmd_for,
 )
 from common.logging_setup import setup_file_logging  # noqa: E402
+from common.trusted_tools import resolve_git  # noqa: E402
 
 logger = logging.getLogger(__name__)
 
@@ -399,8 +400,9 @@ def _commit_changes(
     """Stage all changes and create a single commit. Returns commit SHA."""
     # Check if there is anything to commit
     try:
+        git = resolve_git(repo_path)
         st = subprocess.run(
-            ["git", "-C", str(repo_path), "status", "--porcelain"],
+            [git, "-C", str(repo_path), "status", "--porcelain"],
             capture_output=True, text=True, timeout=10,
         )
     except Exception as exc:
@@ -415,15 +417,15 @@ def _commit_changes(
         msg += f" [{status}]"
     try:
         subprocess.run(
-            ["git", "-C", str(repo_path), "add", "-A"],
+            [git, "-C", str(repo_path), "add", "-A"],
             check=True, capture_output=True, timeout=30,
         )
         subprocess.run(
-            ["git", "-C", str(repo_path), "commit", "-m", msg],
+            [git, "-C", str(repo_path), "commit", "-m", msg],
             check=True, capture_output=True, timeout=30,
         )
         sha = subprocess.run(
-            ["git", "-C", str(repo_path), "rev-parse", "HEAD"],
+            [git, "-C", str(repo_path), "rev-parse", "HEAD"],
             capture_output=True, text=True, timeout=10,
         )
         return sha.stdout.strip() or None

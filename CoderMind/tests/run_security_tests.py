@@ -1,13 +1,15 @@
 """Run mocked security regressions without changing the developer's settings.
 
-Use an existing Python environment. No dependency installation or real child
-process is performed. All test writes go into a disposable directory under
+Use an existing Python environment. By default no real child process is used;
+--integration opts into inert local Git/encoder tests (never AI providers).
+No dependency installation is performed. Test writes use a disposable directory under
 CoderMind; home/config/temp variables are redirected only in this process.
 This audit guard prevents accidental test side effects, not hostile Python code.
 """
 
 import os
 from pathlib import Path
+import shlex
 import sys
 import tempfile
 
@@ -76,6 +78,29 @@ class SandboxAudit:
             self.check_path(args[1], args[2], follow_leaf=False)
 
 
+class IntegrationAudit(SandboxAudit):
+    """Allow explicit external executables for our opt-in inert integration tests.
+
+    Child processes are not Python-audit sandboxes. The selected tests use only
+    disposable workspaces/home and trusted local programs, never AI or payloads.
+    """
+
+    def __call__(self, event, args):
+        if event == "subprocess.Popen":
+            # On Windows CPython audits lpApplicationName=None and the quoted
+            # command line, not the original argv list supplied to Popen.
+            value = args[0]
+            if value is None:
+                command = args[1]
+                value = (shlex.split(command, posix=False)[0].strip('"')
+                         if isinstance(command, str) else command[0])
+            executable = Path(value)
+            if not executable.is_absolute() or executable.resolve().is_relative_to(self.sandbox):
+                raise PermissionError("Integration tests require an absolute external executable")
+            return
+        super().__call__(event, args)
+
+
 def main() -> int:
     sys.dont_write_bytecode = True
     root = Path(__file__).resolve().parents[1]
@@ -93,10 +118,15 @@ def main() -> int:
             os.environ[key] = str(home)
         os.environ["PYTEST_DISABLE_PLUGIN_AUTOLOAD"] = "1"
         os.environ["PYTHONDONTWRITEBYTECODE"] = "1"
+        # Installed mode preloads Rich before pytest captures output. Keep its
+        # formatting deterministic rather than asserting against ANSI escapes.
+        os.environ["TERM"] = "dumb"
+        os.environ["NO_COLOR"] = "1"
         tempfile.tempdir = str(home)
         os.chdir(sandbox)
 
-        sys.addaudithook(SandboxAudit(sandbox))
+        integration = "--integration" in sys.argv
+        sys.addaudithook(IntegrationAudit(sandbox) if integration else SandboxAudit(sandbox))
         try:
             if "--installed" in sys.argv:
                 # CI-only mode after installing the freshly built wheel. Preload
@@ -107,17 +137,20 @@ def main() -> int:
                 package = Path(cmind_cli.__file__).resolve().parent
                 if package.is_relative_to(root):
                     raise RuntimeError("Artifact tests require an external wheel installation")
-                for source, target in [
-                    (root / "src/cmind_cli/__init__.py", package / "__init__.py"),
-                    *[(root / "scripts/common" / name, _assets.scripts_dir() / "common" / name)
-                      for name in ("ai_cli_policy.py", "windows_ai_cli.py", "llm_client.py", "session_manager.py")],
-                ]:
-                    if source.read_bytes() != target.read_bytes():
-                        raise RuntimeError("Installed artifact does not match reviewed source")
+                for source_root, target_root in (
+                    (root / "src/cmind_cli", package),
+                    (root / "scripts", _assets.scripts_dir()),
+                ):
+                    for source in source_root.rglob("*.py"):
+                        if "__pycache__" in source.parts:
+                            continue
+                        target = target_root / source.relative_to(source_root)
+                        if source.read_bytes() != target.read_bytes():
+                            raise RuntimeError(f"Installed artifact does not match reviewed source: {source.name}")
                 sys.path.insert(0, str(_assets.scripts_dir()))
-                from common import ai_cli_policy, windows_ai_cli, llm_client, session_manager
+                from common import ai_cli_policy, windows_ai_cli, llm_client, session_manager, trusted_tools
 
-                for module in (ai_cli_policy, windows_ai_cli, llm_client, session_manager):
+                for module in (ai_cli_policy, windows_ai_cli, llm_client, session_manager, trusted_tools):
                     if not Path(module.__file__).resolve().is_relative_to(package):
                         raise RuntimeError("Artifact test imported source instead of wheel")
                 print("Verified installed wheel sources and imported module origins")
@@ -126,12 +159,14 @@ def main() -> int:
 
             import pytest
 
+            names = (
+                ("test_initial_encode_prompt.py", "test_product_execution_integration.py")
+                if integration else
+                ("test_ai_cli_policy.py", "test_llm_client_agent_detect.py", "test_windows_ai_cli.py",
+                 "test_hooks_install.py", "test_security_test_sandbox.py", "test_product_execution_security.py")
+            )
             return pytest.main([
-                str(root / "tests" / "test_ai_cli_policy.py"),
-                str(root / "tests" / "test_llm_client_agent_detect.py"),
-                str(root / "tests" / "test_windows_ai_cli.py"),
-                str(root / "tests" / "test_hooks_install.py"),
-                str(root / "tests" / "test_security_test_sandbox.py"),
+                *[str(root / "tests" / name) for name in names],
                 "-k", "not update_graphs_status",
                 "--basetemp", str(sandbox / "pytest"),
                 "--log-file", str(sandbox / "pytest.log"),

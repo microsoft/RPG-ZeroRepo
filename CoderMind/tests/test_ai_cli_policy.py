@@ -36,7 +36,13 @@ PROVIDER_ARGV = {
 }
 HINT_KEYS = ("recommended_provider", "ai_provider", "ai_cli_cmd")
 RELEASE_MODULES = (
-    "ai_cli_policy.py", "windows_ai_cli.py", "llm_client.py", "session_manager.py",
+    "common/ai_cli_policy.py", "common/windows_ai_cli.py",
+    "common/llm_client.py", "common/session_manager.py",
+    "common/trusted_tools.py", "common/git_utils.py",
+    "common/generated_artifacts.py", "common/rpg_io.py",
+    "code_gen/git_ops.py", "rpg_encoder/version_control.py",
+    "rpg_encoder/run_encode.py", "update_graphs.py", "feature_build.py",
+    "future/nested/security_helper.py",
 )
 
 
@@ -911,29 +917,197 @@ def test_unconfigured_client_is_lazy_but_hints_never_authorize_a_launch(
     assert not (Path.home() / ".cmind").exists()
 
 
-@pytest.mark.parametrize("corrupt", [None, "missing", *RELEASE_MODULES])
-def test_release_verifier_detects_stale_or_missing_assets(tmp_path, monkeypatch, policy, corrupt):
-    # Synthetic ZIP fixtures only: do not execute either production packager.
+@pytest.fixture
+def release_verifier():
     spec = importlib.util.spec_from_file_location("verify_release", ROOT / "tests/verify_release_security.py")
     assert spec is not None and spec.loader is not None
     verifier = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(verifier)
-    for provider, argv in policy.PROVIDER_ARGV.items():
-        if corrupt == "missing" and provider == "claude":
-            continue
-        archive = tmp_path / f"cmind-template-{provider}-sh-v0.0.0-test.zip"
-        with zipfile.ZipFile(archive, "w") as stream:
-            for name in RELEASE_MODULES:
-                text = (ROOT / "scripts/common" / name).read_text(encoding="utf-8")
-                text = text.replace("<AI_CLI_CMD>", " ".join(argv))
-                if provider == "claude" and name == corrupt:
-                    text += "\n# stale artifact\n"
-                # Also exercise BOM and CRLF normalization used for PS archives.
-                stream.writestr(f".cmind/scripts/common/{name}", "\ufeff" + text.replace("\n", "\r\n"))
-    monkeypatch.setattr(sys, "argv", ["verify_release_security.py", str(tmp_path)])
-    if corrupt is None:
-        verifier.main()
-    else:
-        with pytest.raises(RuntimeError):
-            verifier.main()
+    return verifier
 
+
+@pytest.fixture
+def release_packages(tmp_path, monkeypatch, release_verifier):
+    # Small synthetic scripts keep the full 22-ZIP matrix cheap. Do not execute
+    # production packagers or depend on the size of real pipeline modules.
+    sources = {
+        name: f'# {name}\nBAKED = "<AI_CLI_CMD>"\n'
+              'raise AssertionError("Packaged scripts must not be executed")\n'
+        for name in RELEASE_MODULES
+    }
+    monkeypatch.setattr(release_verifier, "expected_script_sources", lambda root: sources)
+    # Use the independently pinned provider catalog and literal script types;
+    # a verifier that silently narrows either catalog must fail these fixtures.
+    for provider, argv in PROVIDER_ARGV.items():
+        for script_type in ("sh", "ps"):
+            archive = tmp_path / f"cmind-template-{provider}-{script_type}-v0.0.0-test.zip"
+            with zipfile.ZipFile(archive, "w") as stream:
+                stream.writestr(".cmind/scripts/", b"")
+                stream.writestr(".cmind/config.toml", b"[cmind]\n")
+                for name, source in sources.items():
+                    text = source.replace("<AI_CLI_CMD>", " ".join(argv))
+                    if script_type == "ps":
+                        text = "\ufeff" + text.replace("\n", "\r\n")
+                    stream.writestr(f".cmind/scripts/{name}", text)
+    monkeypatch.setattr(sys, "argv", ["verify_release_security.py", str(tmp_path)])
+    return sources
+
+
+def _rewrite_release_fixture(path, *, omit=None, replacements=None, extra=()):
+    with zipfile.ZipFile(path) as archive:
+        members = [(info.filename, archive.read(info)) for info in archive.infolist()]
+    with zipfile.ZipFile(path, "w") as archive:
+        for name, data in members:
+            if name != omit:
+                archive.writestr(name, (replacements or {}).get(name, data))
+        for name, data in extra:
+            archive.writestr(name, data)
+
+
+def test_release_verifier_checks_all_22_variants_read_only(
+    tmp_path, monkeypatch, capsys, release_verifier, release_packages,
+):
+    before = {path: path.read_bytes() for path in tmp_path.glob("*.zip")}
+    assert len(before) == 22
+    parse = Mock(wraps=release_verifier.ast.parse)
+    monkeypatch.setattr(release_verifier.ast, "parse", parse)
+    release_verifier.main()
+    assert "all 22 release ZIPs" in capsys.readouterr().out
+    assert {path: path.read_bytes() for path in tmp_path.glob("*.zip")} == before
+    assert parse.call_count == 22 * len(release_packages)
+    assert {call.kwargs["filename"] for call in parse.call_args_list} == {
+        f"{path.name}:.cmind/scripts/{name}"
+        for path in before for name in release_packages
+    }
+
+
+@pytest.mark.parametrize("script_type", ["sh", "ps"])
+@pytest.mark.parametrize("corrupt", ["stale", "missing", "duplicate"])
+@pytest.mark.parametrize("module", RELEASE_MODULES)
+def test_release_verifier_detects_stale_missing_or_duplicate_assets(
+    tmp_path, release_verifier, release_packages, script_type, corrupt, module,
+):
+    path = tmp_path / f"cmind-template-claude-{script_type}-v0.0.0-test.zip"
+    name = f".cmind/scripts/{module}"
+    if corrupt == "stale":
+        # Still valid Python: AST validity alone is not source identity.
+        _rewrite_release_fixture(path, replacements={name: b"# stale artifact\n"})
+        message = "stale or altered"
+    elif corrupt == "missing":
+        _rewrite_release_fixture(path, omit=name)
+        message = "catalog mismatch"
+    else:
+        with zipfile.ZipFile(path) as archive:
+            duplicate = archive.read(name)
+        with pytest.warns(UserWarning, match="Duplicate name"):
+            _rewrite_release_fixture(path, extra=[(name, duplicate)])
+        message = "Duplicate ZIP members"
+    with pytest.raises(RuntimeError, match=message) as error:
+        release_verifier.main()
+    assert path.name in str(error.value)
+    assert name in str(error.value)
+
+
+@pytest.mark.parametrize("script_type", ["sh", "ps"])
+@pytest.mark.parametrize("corrupt", ["missing", "duplicate", "balanced"])
+def test_release_verifier_requires_exactly_one_zip_per_pair(
+    tmp_path, release_verifier, release_packages, script_type, corrupt,
+):
+    path = tmp_path / f"cmind-template-claude-{script_type}-v0.0.0-test.zip"
+    if corrupt == "missing":
+        path.unlink()
+    else:
+        shutil.copyfile(path, tmp_path / f"cmind-template-claude-{script_type}-v0.0.0-old.zip")
+        if corrupt == "balanced":
+            # Counting 22 archives alone must not hide a duplicate + missing pair.
+            (tmp_path / f"cmind-template-amp-{script_type}-v0.0.0-test.zip").unlink()
+            assert len(list(tmp_path.glob("*.zip"))) == 22
+    with pytest.raises(RuntimeError, match=f"exactly one {script_type} release ZIP for claude"):
+        release_verifier.main()
+
+
+@pytest.mark.parametrize("name", [
+    "cmind-template-unknown-sh-v0.0.0-test.zip",
+    "cmind-template-claude-other-v0.0.0-test.zip",
+    "unrelated.zip",
+    "unexpected.ZIP",
+])
+def test_release_verifier_rejects_extra_archives(tmp_path, release_verifier, release_packages, name):
+    with zipfile.ZipFile(tmp_path / name, "w"):
+        pass
+    with pytest.raises(RuntimeError, match="exactly 22 release ZIPs"):
+        release_verifier.main()
+
+
+@pytest.mark.parametrize("script_type", ["sh", "ps"])
+@pytest.mark.parametrize("name", [".cmind/scripts/", ".cmind/config.toml"])
+def test_release_verifier_rejects_duplicate_non_python_members(
+    tmp_path, release_verifier, release_packages, script_type, name,
+):
+    path = tmp_path / f"cmind-template-claude-{script_type}-v0.0.0-test.zip"
+    with pytest.warns(UserWarning, match="Duplicate name"):
+        _rewrite_release_fixture(path, extra=[(name, b"")])
+    with pytest.raises(RuntimeError, match="Duplicate ZIP members"):
+        release_verifier.main()
+
+
+@pytest.mark.parametrize("script_type", ["sh", "ps"])
+def test_release_verifier_rejects_obsolete_extra_modules(
+    tmp_path, release_verifier, release_packages, script_type,
+):
+    path = tmp_path / f"cmind-template-claude-{script_type}-v0.0.0-test.zip"
+    name = ".cmind/scripts/common/removed_module.py"
+    _rewrite_release_fixture(path, extra=[(name, b"# obsolete module\n")])
+    with pytest.raises(RuntimeError, match="catalog mismatch") as error:
+        release_verifier.main()
+    assert name in str(error.value)
+
+
+@pytest.mark.parametrize("script_type", ["sh", "ps"])
+@pytest.mark.parametrize("corrupt", ["syntax", "encoding", "substitution"])
+def test_release_verifier_validates_packaged_python(
+    tmp_path, release_verifier, release_packages, script_type, corrupt,
+):
+    path = tmp_path / f"cmind-template-claude-{script_type}-v0.0.0-test.zip"
+    module = "common/trusted_tools.py"
+    sources = dict(release_packages)
+    if corrupt == "syntax":
+        # Even byte-identical source must parse; checking only identity is insufficient.
+        sources[module] = "def invalid(:\n"
+        data = sources[module].encode("utf-8")
+        message = "Invalid Python script"
+    elif corrupt == "encoding":
+        data = b"\xff"
+        message = "Invalid Python script"
+    else:
+        data = sources[module].replace("<AI_CLI_CMD>", "copilot").encode("utf-8")
+        message = "stale or altered"
+    _rewrite_release_fixture(path, replacements={f".cmind/scripts/{module}": data})
+    with pytest.raises(RuntimeError, match=message):
+        release_verifier.verify_archive(path, sources, "claude")
+
+
+def test_release_source_catalog_is_recursive_and_excludes_only_caches(tmp_path, release_verifier):
+    scripts = tmp_path / "scripts"
+    expected = {
+        "__init__.py": "",
+        "common/trusted_tools.py": 'BAKED = "<AI_CLI_CMD>"\n',
+        "new/deep/pipeline.py": "# new pipeline helper\n",
+    }
+    ignored = {
+        "__pycache__/cached.py": "invalid cached Python",
+        "new/__pycache__/deep/cached.py": "invalid nested cached Python",
+        "common/readme.txt": "not Python",
+    }
+    for name, text in {**expected, **ignored}.items():
+        path = scripts / name
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(("\ufeff" + text.replace("\n", "\r\n")).encode("utf-8"))
+    (scripts / "directory.py").mkdir()
+    assert release_verifier.expected_script_sources(scripts) == expected
+
+
+def test_release_source_catalog_cannot_be_empty(tmp_path, release_verifier):
+    with pytest.raises(RuntimeError, match="No source Python scripts"):
+        release_verifier.expected_script_sources(tmp_path)
+# All release variants must retain the reviewed Python script catalog.

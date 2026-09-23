@@ -20,6 +20,7 @@ D. Opt-in Git hook setup installs sync-only post-commit/post-merge
 from __future__ import annotations
 
 import json
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -216,9 +217,9 @@ def _run_status_text(repo: Path, rpg_path: Path, dep_graph_path: Path) -> str:
     """Run ``update_graphs.py status`` in text mode and return stdout."""
     script = _project_root / "scripts" / "update_graphs.py"
     return subprocess.run(
-        [sys.executable, str(script), "status",
+        [sys.executable, "-X", "utf8", str(script), "status",
          "--rpg", str(rpg_path), "--dep-graph", str(dep_graph_path)],
-        cwd=repo, capture_output=True, text=True,
+        cwd=repo, capture_output=True, text=True, encoding="utf-8", check=True,
     ).stdout
 
 
@@ -352,10 +353,11 @@ def test_install_post_merge_hook_writes_script(tmp_path):
     assert post_merge.is_file()
     content = post_merge.read_text()
     assert "CoderMind: post-merge dispatcher" in content
-    assert "cmind hook post-merge" in content
+    assert cmind_cli._cli_shell_command("hook", "post-merge") in content
     assert "--staged-only" not in content
     import stat
-    assert post_merge.stat().st_mode & stat.S_IXUSR
+    if os.name != "nt":  # Windows stat does not expose POSIX executable bits.
+        assert post_merge.stat().st_mode & stat.S_IXUSR
 
 
 def test_install_post_merge_hook_is_idempotent(tmp_path):
@@ -383,7 +385,7 @@ def test_install_post_merge_hook_preserves_existing_user_hook(tmp_path):
     content = user_hook.read_text()
     assert "echo 'user custom hook'" in content
     assert "CoderMind: post-merge dispatcher" in content
-    assert "cmind hook post-merge" in content
+    assert cmind_cli._cli_shell_command("hook", "post-merge") in content
 
 
 def test_install_hooks_installs_post_hooks_and_removes_pre_commit(tmp_path):
@@ -418,7 +420,7 @@ def test_install_post_commit_hook_writes_script(tmp_path):
     assert post_commit.is_file()
     content = post_commit.read_text()
     assert "CoderMind: post-commit dispatcher" in content
-    assert "cmind hook post-commit" in content
+    assert cmind_cli._cli_shell_command("hook", "post-commit") in content
     assert "update_graphs.py" not in content
     assert "update-rpg" not in content
     assert "GIT_INDEX_FILE" not in content
@@ -429,7 +431,8 @@ def test_install_post_commit_hook_writes_script(tmp_path):
     assert "-mmin +60" not in content
     assert "--staged-only" not in content
     import stat
-    assert post_commit.stat().st_mode & stat.S_IXUSR
+    if os.name != "nt":
+        assert post_commit.stat().st_mode & stat.S_IXUSR
 
 
 def test_install_post_commit_hook_is_idempotent(tmp_path):

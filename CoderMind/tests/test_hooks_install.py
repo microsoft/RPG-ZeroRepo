@@ -20,6 +20,7 @@ Verifies:
 
 import json
 import os
+import shlex
 import subprocess
 import sys
 from pathlib import Path
@@ -72,6 +73,62 @@ def project(tmp_path, monkeypatch):
     return tmp_path
 
 
+@pytest.fixture(params=[
+    "Python with spaces",
+    "Python's $(echo unused); & `echo unused` %PATH%!",
+])
+def alternate_python(isolated_home, request):
+    """Absolute placeholder interpreter for serialization tests; never executed."""
+    executable = isolated_home / request.param / "python.exe"
+    executable.parent.mkdir()
+    executable.touch()
+    return executable.resolve()
+
+
+@pytest.fixture
+def trusted_git(isolated_home, tmp_path, monkeypatch):
+    """Pin a fake external Git without consulting the host's installed tools."""
+    executable = isolated_home / "tools" / "git.exe"
+    executable.parent.mkdir()
+    executable.touch()
+    executable = executable.resolve()
+    assert executable.is_absolute()
+    assert not executable.is_relative_to(tmp_path.resolve())
+    monkeypatch.setattr(cmind_cli, "_resolve_git", Mock(return_value=str(executable)))
+    return executable
+
+
+def _expected_cli_argv(*args):
+    """Independently pin the interpreter and this installation's bootstrap."""
+    entry = Path(cmind_cli.__file__).resolve().with_name("_cli_entry.py")
+    assert Path(sys.executable).is_absolute()
+    assert entry.is_absolute() and entry.is_file()
+    return [sys.executable, "-I", str(entry), *args]
+
+
+def _assert_pinned_shell_command(command, *args):
+    argv = _expected_cli_argv(*args)
+    # Git Bash/Claude need POSIX path spelling, not Windows backslashes.
+    argv[0] = Path(argv[0]).as_posix()
+    argv[2] = Path(argv[2]).as_posix()
+    assert command == shlex.join(argv)
+    assert shlex.split(command) == argv
+
+
+def _assert_pinned_git_hook(text, name):
+    begin = f"# CMIND-BEGIN {name}"
+    end = f"# CMIND-END {name}"
+    assert text.count(begin) == 1
+    assert text.count(end) == 1
+    body = text.split(begin + "\n", 1)[1].split(end, 1)[0].splitlines()
+    assert len(body) == 2
+    assert body[0] == f"# CoderMind: {name} dispatcher"
+    suffix = " 2>/dev/null || true"
+    assert body[1].endswith(suffix)
+    _assert_pinned_shell_command(body[1].removesuffix(suffix), "hook", name)
+    assert cmind_cli._HOOK_PATH_FALLBACK not in text
+
+
 # ---------------------------------------------------------------------------
 # Claude hook
 # ---------------------------------------------------------------------------
@@ -83,27 +140,32 @@ def test_install_claude_hooks_writes_session_start(project):
     session_start = data["hooks"]["SessionStart"]
     assert isinstance(session_start, list) and len(session_start) == 1
     cmd = session_start[0]["hooks"][0]["command"]
-    # Hook now invokes the global ``cmind`` CLI; no embedded sys.executable.
-    assert "cmind script update_graphs.py status" in cmd
-    # PATH fallback for GUI-launched session starts (VS Code / IDE git UI).
-    assert "command -v cmind" in cmd
-    assert cmd.endswith("status 2>/dev/null || echo '[CoderMind] RPG status unavailable'")
+    # Pin the interpreter/bootstrap rather than resolving cmind through PATH.
+    suffix = " 2>/dev/null || echo '[CoderMind] RPG status unavailable'"
+    assert cmd.endswith(suffix)
+    _assert_pinned_shell_command(
+        cmd.removesuffix(suffix), "script", "update_graphs.py", "status",
+    )
+    assert cmind_cli._HOOK_PATH_FALLBACK not in cmd
 
 
-def test_install_claude_hooks_is_idempotent_across_python_upgrades(project, monkeypatch):
-    """Re-installing must not stack duplicate SessionStart entries.
-
-    Hooks no longer embed ``sys.executable``; they delegate to the
-    globally-installed ``cmind`` CLI.  Re-running install therefore
-    yields the exact same command and must remain a single entry
-    (not a duplicate per invocation).
-    """
+def test_install_claude_hooks_is_idempotent_across_python_upgrades(
+    project, monkeypatch, alternate_python, no_subprocess,
+):
+    """Replace a stale interpreter pin once, without stacking SessionStart entries."""
     cmind_cli._install_claude_hooks(project)
-    # Simulate an environment change; the hook body is
-    # interpreter-independent so this should be a no-op.
-    monkeypatch.setattr(cmind_cli.sys, "executable", "/opt/new-python/bin/python")
+    settings = project / ".claude" / "settings.json"
+    original = settings.read_bytes()
     cmind_cli._install_claude_hooks(project)
-    data = json.loads((project / ".claude" / "settings.json").read_text())
+    assert settings.read_bytes() == original
+
+    monkeypatch.setattr(cmind_cli.sys, "executable", str(alternate_python))
+    cmind_cli._install_claude_hooks(project)
+    upgraded = settings.read_bytes()
+    assert upgraded != original
+    cmind_cli._install_claude_hooks(project)
+    assert settings.read_bytes() == upgraded
+    data = json.loads(upgraded)
     session_start = data["hooks"]["SessionStart"]
     cmind_entries = [
         e for e in session_start
@@ -111,28 +173,32 @@ def test_install_claude_hooks_is_idempotent_across_python_upgrades(project, monk
     ]
     assert len(cmind_entries) == 1
     cmd = cmind_entries[0]["hooks"][0]["command"]
-    # Always uses the cmind-script form regardless of interpreter path.
-    assert "cmind script update_graphs.py" in cmd
-    assert "/opt/new-python/bin/python" not in cmd
-
-
-def test_install_claude_hooks_shell_escapes_special_chars(project, monkeypatch):
-    """Interpreter / workspace paths must not appear in the hook command.
-
-    The hook body invokes the global ``cmind`` CLI directly, so paths
-    with special characters cannot end up inside the command string.
-    """
-    monkeypatch.setattr(
-        cmind_cli.sys, "executable", "/path with space/python"
+    suffix = " 2>/dev/null || echo '[CoderMind] RPG status unavailable'"
+    assert cmd.endswith(suffix)
+    _assert_pinned_shell_command(
+        cmd.removesuffix(suffix), "script", "update_graphs.py", "status",
     )
+    no_subprocess.assert_not_called()
+
+
+def test_install_claude_hooks_shell_escapes_special_chars(
+    project, monkeypatch, alternate_python, no_subprocess,
+):
+    """Spaces and shell metacharacters stay literal within the interpreter token."""
+    monkeypatch.setattr(cmind_cli.sys, "executable", str(alternate_python))
     cmind_cli._install_claude_hooks(project)
     cmd = (
         json.loads((project / ".claude" / "settings.json").read_text())
         ["hooks"]["SessionStart"][0]["hooks"][0]["command"]
     )
-    # No path leakage from the interpreter / workspace location.
-    assert "/path with space" not in cmd
-    assert "cmind script update_graphs.py" in cmd
+    suffix = " 2>/dev/null || echo '[CoderMind] RPG status unavailable'"
+    assert cmd.endswith(suffix)
+    _assert_pinned_shell_command(
+        cmd.removesuffix(suffix), "script", "update_graphs.py", "status",
+    )
+    assert shlex.split(cmd.removesuffix(suffix))[0] == alternate_python.as_posix()
+    assert cmind_cli._HOOK_PATH_FALLBACK not in cmd
+    no_subprocess.assert_not_called()
 
 
 def test_install_claude_hooks_merges_existing(project):
@@ -171,12 +237,12 @@ def test_install_copilot_hooks_writes_folder_open_task(project):
     t = tasks["tasks"][0]
     assert t["label"] == "CoderMind: load status"
     assert t["runOptions"] == {"runOn": "folderOpen"}
-    # Task now invokes the global ``cmind`` CLI; args carry the
-    # dispatcher subcommand + script relpath, with ``status`` last.
-    assert t["command"] == "cmind"
-    assert t["args"][0] == "script"
-    assert t["args"][1] == "update_graphs.py"
-    assert t["args"][-1] == "status"
+    # Process tasks preserve native paths as argv, with no shell parsing.
+    expected = cmind_cli._cli_argv("script", "update_graphs.py", "status")
+    assert expected == _expected_cli_argv("script", "update_graphs.py", "status")
+    assert t["type"] == "process"
+    assert t["command"] == expected[0]
+    assert t["args"] == expected[1:]
     # Status output should appear silently — we don't want it stealing focus.
     assert t["presentation"]["reveal"] == "silent"
     # NOTE: .gitignore management was moved to `_setup_gitignore` (called
@@ -184,12 +250,32 @@ def test_install_copilot_hooks_writes_folder_open_task(project):
     # .gitignore. See test_setup_gitignore_* for ignore-rule coverage.
 
 
-def test_install_copilot_hooks_is_idempotent(project):
+def test_install_copilot_hooks_is_idempotent(
+    project, monkeypatch, alternate_python, no_subprocess,
+):
+    """Repeated installs replace the interpreter pin, not the task's identity."""
     cmind_cli._install_copilot_hooks(project)
+    tasks_path = project / ".vscode" / "tasks.json"
+    original = tasks_path.read_bytes()
     cmind_cli._install_copilot_hooks(project)
-    tasks = json.loads((project / ".vscode" / "tasks.json").read_text())
+    assert tasks_path.read_bytes() == original
+
+    monkeypatch.setattr(cmind_cli.sys, "executable", str(alternate_python))
+    cmind_cli._install_copilot_hooks(project)
+    upgraded = tasks_path.read_bytes()
+    assert upgraded != original
+    cmind_cli._install_copilot_hooks(project)
+    assert tasks_path.read_bytes() == upgraded
+    tasks = json.loads(upgraded)
     labels = [t["label"] for t in tasks["tasks"]]
     assert labels.count("CoderMind: load status") == 1
+    task = next(t for t in tasks["tasks"] if t["label"] == "CoderMind: load status")
+    expected = cmind_cli._cli_argv("script", "update_graphs.py", "status")
+    assert expected == _expected_cli_argv("script", "update_graphs.py", "status")
+    assert task["type"] == "process"
+    assert task["command"] == str(alternate_python)
+    assert [task["command"], *task["args"]] == expected
+    no_subprocess.assert_not_called()
 
 
 def test_install_copilot_hooks_preserves_user_tasks(project):
@@ -224,9 +310,9 @@ def test_install_hooks_dispatches_to_copilot(project, monkeypatch):
     post_commit = (hooks_dir / "post-commit").read_text()
     post_merge = (hooks_dir / "post-merge").read_text()
     assert "CoderMind: post-commit dispatcher" in post_commit
-    assert "cmind hook post-commit" in post_commit
+    _assert_pinned_git_hook(post_commit, "post-commit")
     assert "CoderMind: post-merge dispatcher" in post_merge
-    assert "cmind hook post-merge" in post_merge
+    _assert_pinned_git_hook(post_merge, "post-merge")
     assert not (hooks_dir / "pre-commit").exists()
 
 
@@ -240,6 +326,8 @@ def test_install_hooks_dispatches_to_claude(project):
     hooks_dir = project / ".git" / "hooks"
     assert (hooks_dir / "post-commit").is_file()
     assert (hooks_dir / "post-merge").is_file()
+    for name in ("post-commit", "post-merge"):
+        _assert_pinned_git_hook((hooks_dir / name).read_text(), name)
     assert not (hooks_dir / "pre-commit").exists()
 
 
@@ -273,7 +361,8 @@ def no_subprocess(monkeypatch):
     blocked = Mock(side_effect=lambda *a, **kw: pytest.fail("Unexpected process or network call"))
     for name in ("run", "Popen", "call", "check_call", "check_output"):
         monkeypatch.setattr(cmind_cli.subprocess, name, blocked)
-    monkeypatch.setattr(cmind_cli.os, "execvp", blocked)
+    for name in ("execv", "execvp"):
+        monkeypatch.setattr(cmind_cli.os, name, blocked)
     monkeypatch.setattr(cmind_cli.client, "request", blocked)
     return blocked
 
@@ -356,7 +445,7 @@ def test_post_commit_v1_legacy_is_replaced_on_upgrade(project):
     assert text.count("# CMIND-BEGIN post-commit") == 1
     assert text.count("# CMIND-END post-commit") == 1
     assert "CoderMind: post-commit dispatcher" in text
-    assert "cmind hook post-commit" in text
+    _assert_pinned_git_hook(text, "post-commit")
 
 
 def test_post_commit_v3_legacy_is_replaced_on_upgrade(project):
@@ -382,21 +471,32 @@ def test_post_commit_v3_legacy_is_replaced_on_upgrade(project):
     assert text.count("# CMIND-BEGIN post-commit") == 1
     assert text.count("# CMIND-END post-commit") == 1
     assert text.count("# CoderMind: post-commit dispatcher") == 1
-    assert "cmind hook post-commit" in text
+    _assert_pinned_git_hook(text, "post-commit")
 
 
-def test_install_is_idempotent_under_sentinels(project):
-    """Repeated dispatcher installs must not stack sentinel blocks."""
+@pytest.mark.parametrize("name", ["post-commit", "post-merge"])
+def test_install_is_idempotent_under_sentinels(
+    project, monkeypatch, alternate_python, no_subprocess, name,
+):
+    """Interpreter upgrades replace one quoted dispatcher block per hook."""
     hd = _hooks_dir(project)
-    cmind_cli._install_git_post_commit_hook(project)
-    first = (hd / "post-commit").read_text()
-    cmind_cli._install_git_post_commit_hook(project)
-    cmind_cli._install_git_post_commit_hook(project)
-    third = (hd / "post-commit").read_text()
-
+    install = getattr(cmind_cli, f"_install_git_{name.replace('-', '_')}_hook")
+    install(project)
+    first = (hd / name).read_text()
+    install(project)
+    install(project)
+    third = (hd / name).read_text()
     assert first == third
-    assert third.count("# CMIND-BEGIN post-commit") == 1
-    assert third.count("# CMIND-END post-commit") == 1
+    _assert_pinned_git_hook(third, name)
+
+    monkeypatch.setattr(cmind_cli.sys, "executable", str(alternate_python))
+    install(project)
+    upgraded = (hd / name).read_text()
+    assert upgraded != first
+    install(project)
+    assert (hd / name).read_text() == upgraded
+    _assert_pinned_git_hook(upgraded, name)
+    no_subprocess.assert_not_called()
 
 
 def test_sentinel_block_is_atomically_replaceable(project):
@@ -418,7 +518,7 @@ def test_sentinel_block_is_atomically_replaceable(project):
     assert "--legacy-flag" not in text
     assert text.count("# CMIND-BEGIN post-commit") == 1
     assert text.count("# CMIND-END post-commit") == 1
-    assert "cmind hook post-commit" in text
+    _assert_pinned_git_hook(text, "post-commit")
 
 
 def test_user_authored_content_outside_block_is_preserved(project):
@@ -690,7 +790,7 @@ def test_opt_in_installer_error_is_fatal_and_stops_further_installation(
         assert not (legacy_hooks / "post-commit").exists()
     else:
         installers["post-merge"].assert_called_once_with(project)
-        assert "cmind hook post-commit" in (legacy_hooks / "post-commit").read_text()
+        _assert_pinned_git_hook((legacy_hooks / "post-commit").read_text(), "post-commit")
     assert not (legacy_hooks / "pre-commit").exists()
     assert not (legacy_hooks / "post-merge").exists()
     status.assert_not_called()
@@ -787,27 +887,55 @@ def test_cli_hook_reconciliation_failure_prevents_success_and_encode(
 # Dispatcher: all subprocesses mocked, all log writes under tmp_path
 # ---------------------------------------------------------------------------
 
+@pytest.mark.parametrize("helper,expected", [
+    ("is_git_repo", False),
+    ("_short_head_sha", "?"),
+    ("_read_core_hooks_path", None),
+])
+def test_git_queries_without_trusted_git_do_not_launch_processes(
+    tmp_path, monkeypatch, no_subprocess, helper, expected,
+):
+    """Unavailable trusted Git fails closed before any process is launched."""
+    # Do not use project: it stubs _read_core_hooks_path for installer isolation.
+    resolver = Mock(side_effect=FileNotFoundError("No trusted Git available"))
+    monkeypatch.setattr(cmind_cli, "_resolve_git", resolver)
+
+    assert getattr(cmind_cli, helper)(tmp_path) == expected
+
+    resolver.assert_called_once_with(tmp_path)
+    no_subprocess.assert_not_called()
+
+
 @pytest.mark.parametrize("name", ["post-commit", "post-merge"])
 @pytest.mark.parametrize("sync_result", [0, 1, "os-error"])
-def test_dispatcher_only_runs_deterministic_sync(tmp_path, monkeypatch, name, sync_result):
+@pytest.mark.parametrize("git_available", [False, True])
+def test_dispatcher_only_runs_deterministic_sync(
+    tmp_path, monkeypatch, trusted_git, no_subprocess, name, sync_result, git_available,
+):
+    """Use pinned sync argv even when no trusted Git can supply the HEAD SHA."""
     monkeypatch.chdir(tmp_path)
     monkeypatch.setenv("CMIND_AI_CLI_CMD", "UNTRUSTED_CUSTOM_COMMAND")
     monkeypatch.setattr(cmind_cli._storage, "find_workspace_root_from", lambda _: tmp_path)
     logs = tmp_path / "home-store" / "logs"
     monkeypatch.setattr(cmind_cli._storage, "workspace_logs_dir", lambda _: logs)
-    blocked = Mock(side_effect=AssertionError("No background or shell process allowed"))
-    for entry in ("Popen", "call", "check_call", "check_output"):
-        monkeypatch.setattr(cmind_cli.subprocess, entry, blocked)
+    if not git_available:
+        cmind_cli._resolve_git.side_effect = FileNotFoundError("No trusted Git available")
+    git_command = [str(trusted_git), "-C", str(tmp_path), "rev-parse", "--short", "HEAD"]
+    sync_command = cmind_cli._cli_argv("script", "update_graphs.py", "sync")
+    assert sync_command == _expected_cli_argv("script", "update_graphs.py", "sync")
+    expected_sha = "abc123" if git_available else "?"
 
     def run(args, **kwargs):
-        if args == ["git", "-C", str(tmp_path), "rev-parse", "--short", "HEAD"]:
-            return subprocess.CompletedProcess(args, 0, stdout="abc123\n")
-        assert args == ["cmind", "script", "update_graphs.py", "sync"]
-        assert kwargs["env"]["CMIND_HOOK"] == name
-        assert kwargs["env"]["CMIND_HOOK_SHA"] == "abc123"
         assert not kwargs.get("shell", False)
+        if args == git_command:
+            assert git_available
+            return subprocess.CompletedProcess(args, 0, stdout="abc123\n")
+        assert args == sync_command
+        assert kwargs["cwd"] == str(tmp_path)
+        assert kwargs["env"]["CMIND_HOOK"] == name
+        assert kwargs["env"]["CMIND_HOOK_SHA"] == expected_sha
         if sync_result == "os-error":
-            raise OSError("simulated unavailable cmind")
+            raise OSError("simulated unavailable pinned CLI")
         return subprocess.CompletedProcess(args, sync_result)
 
     runner = Mock(side_effect=run)
@@ -815,14 +943,13 @@ def test_dispatcher_only_runs_deterministic_sync(tmp_path, monkeypatch, name, sy
     with pytest.raises(cmind_cli.typer.Exit) as exc:
         cmind_cli.hook(name)
     assert exc.value.exit_code == 0
-    assert [call.args[0] for call in runner.call_args_list] == [
-        ["git", "-C", str(tmp_path), "rev-parse", "--short", "HEAD"],
-        ["cmind", "script", "update_graphs.py", "sync"],
-    ]
+    cmind_cli._resolve_git.assert_called_once_with(tmp_path)
+    expected_calls = ([git_command] if git_available else []) + [sync_command]
+    assert [call.args[0] for call in runner.call_args_list] == expected_calls
     assert runner.call_args.kwargs["env"]["CMIND_HOOK"] == name
-    assert runner.call_args.kwargs["env"]["CMIND_HOOK_SHA"] == "abc123"
+    assert runner.call_args.kwargs["env"]["CMIND_HOOK_SHA"] == expected_sha
     assert not runner.call_args.kwargs.get("shell", False)
-    blocked.assert_not_called()
+    no_subprocess.assert_not_called()
     assert (logs / "hooks.log").is_file()
     assert not (logs / "update_rpg.log").exists()
     assert not (logs / ".update_rpg.lock").exists()
@@ -937,7 +1064,8 @@ def test_invalid_config_preflight_precedes_any_provisioning_or_upgrade(tmp_path,
     ):
         monkeypatch.setattr(cmind_cli, name, blocked)
     monkeypatch.setattr(cmind_cli.typer, "confirm", blocked)
-    monkeypatch.setattr(cmind_cli.os, "execvp", blocked)
+    for name in ("execv", "execvp"):
+        monkeypatch.setattr(cmind_cli.os, name, blocked)
     policy = cmind_cli._ai_cli_policy()
     monkeypatch.setattr(policy, "write_local_provider", blocked)
     args = [command, "--ai", "copilot"]

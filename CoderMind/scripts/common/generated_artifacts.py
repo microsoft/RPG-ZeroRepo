@@ -6,6 +6,8 @@ from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 import subprocess
 
+from .trusted_tools import resolve_git
+
 
 _EXCLUDE_MARKER_BEGIN = "# BEGIN CoderMind generated artifact hygiene"
 _EXCLUDE_MARKER_END = "# END CoderMind generated artifact hygiene"
@@ -127,7 +129,7 @@ def _run_git(
 ) -> subprocess.CompletedProcess[str] | None:
     try:
         return subprocess.run(
-            ["git", *args],
+            [resolve_git(repo_path), *args],
             cwd=repo_path,
             capture_output=True,
             text=True,

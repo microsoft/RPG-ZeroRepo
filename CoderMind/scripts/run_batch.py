@@ -1054,11 +1054,7 @@ def main() -> int:
     if args.prune_failed:
         repo_path = REPO_DIR
         git = GitRunner(str(repo_path))
-        import subprocess as _sp
-        raw = _sp.run(
-            ["git", "branch", "--format=%(refname:short)"],
-            cwd=repo_path, capture_output=True, text=True,
-        )
+        raw = git.run_git(["branch", "--format=%(refname:short)"])
         all_branches = [b.strip() for b in raw.stdout.splitlines() if b.strip()]
         current = git.get_current_branch()
         deleted = []

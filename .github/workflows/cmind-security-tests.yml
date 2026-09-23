@@ -44,14 +44,16 @@ jobs:
         run: python -I -B CoderMind/tests/run_security_tests.py
       - name: Installed wheel regressions and source identity
         run: python -I -B CoderMind/tests/run_security_tests.py --installed
-      - name: Build release ZIPs with Bash packager
+      - name: Inert execution regressions against installed wheel
+        run: python -I -B CoderMind/tests/run_security_tests.py --installed --integration
+      - name: Build sh and ps release ZIPs with Bash packager
         if: runner.os == 'Linux'
         shell: bash
         env:
-          SCRIPTS: sh
+          SCRIPTS: "sh ps"
         run: bash .github/workflows/scripts/cmind/create-release-packages.sh v0.0.0-security-test
-      - name: Build release ZIPs with PowerShell packager
+      - name: Build sh and ps release ZIPs with PowerShell packager
         if: runner.os == 'Windows'
-        run: ./.github/workflows/scripts/cmind/create-release-packages.ps1 -Version v0.0.0-security-test -Scripts sh
-      - name: Verify each release variant carries the security policy
+        run: ./.github/workflows/scripts/cmind/create-release-packages.ps1 -Version v0.0.0-security-test -Scripts 'sh ps'
+      - name: Verify all 22 release variants carry the reviewed Python scripts
         run: python -I -B CoderMind/tests/verify_release_security.py CoderMind/.genreleases

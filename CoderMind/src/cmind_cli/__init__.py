@@ -58,6 +58,8 @@ from types import ModuleType
 import tomllib
 
 from . import _storage
+from ._trusted_tools import cli_argv as _cli_argv, resolve_git as _resolve_git, resolve_tool as _resolve_tool
+from ._trusted_tools import cli_shell_command as _cli_shell_command
 
 ssl_context = truststore.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
 client = httpx.Client(verify=ssl_context)
@@ -121,7 +123,7 @@ def _get_repo_info() -> Tuple[str, str]:
     for remote_name in ("upstream", "origin"):
         try:
             result = subprocess.run(
-                ["git", "remote", "get-url", remote_name],
+                [_resolve_git(Path.cwd()), "remote", "get-url", remote_name],
                 capture_output=True,
                 text=True,
                 timeout=5,
@@ -1267,7 +1269,7 @@ def is_git_repo(path: Path = None) -> bool:
     try:
         # Use git command to check if inside a work tree
         subprocess.run(
-            ["git", "rev-parse", "--is-inside-work-tree"],
+            [_resolve_git(path), "rev-parse", "--is-inside-work-tree"],
             check=True,
             capture_output=True,
             cwd=path,
@@ -1396,10 +1398,11 @@ def init_git_repo(
         os.chdir(project_path)
         if not quiet:
             console.print("[cyan]Initializing git repository...[/cyan]")
-        subprocess.run(["git", "init"], check=True, capture_output=True, text=True)
-        subprocess.run(["git", "add", "."], check=True, capture_output=True, text=True)
+        git = _resolve_git(project_path)
+        subprocess.run([git, "init"], check=True, capture_output=True, text=True)
+        subprocess.run([git, "add", "."], check=True, capture_output=True, text=True)
         subprocess.run(
-            ["git", "commit", "-m", "Initial commit from CoderMind template"],
+            [git, "commit", "-m", "Initial commit from CoderMind template"],
             check=True,
             capture_output=True,
             text=True,
@@ -2005,23 +2008,15 @@ def _run_initial_encode(project_path: Path) -> bool:
     get here and we don't want a flaky LLM call to make the whole
     command look like it failed.
     """
-    encoder = project_path / ".cmind" / "scripts" / "rpg_encoder" / "run_encode.py"
-    if not encoder.is_file():
-        # Scripts live inside the installed wheel under
-        # ``cmind_cli/core_pack/scripts/``.  Resolve the encoder
-        # from there so the optional initial-encode kickoff works after
-        # ``cmind init`` — which no longer copies scripts into the
-        # workspace.
-        from . import _assets
-        candidate = _assets.scripts_dir() / "rpg_encoder" / "run_encode.py"
-        if candidate.is_file():
-            encoder = candidate
-        else:
-            console.print(
-                f"[yellow]Encoder script not found at {candidate}; "
-                f"run [cyan]/cmind.encode[/] in your AI agent later.[/yellow]"
-            )
-            return False
+    # Use the same installed-asset boundary as `cmind script`. Legacy scripts
+    # delivered in a cloned workspace are data, never an execution fallback.
+    encoder = _resolve_script_path("rpg_encoder/run_encode.py")
+    if encoder is None:
+        console.print(
+            "[yellow]Installed encoder script not found; repair the CoderMind "
+            "installation before running [cyan]/cmind.encode[/].[/yellow]"
+        )
+        return False
 
     # Keep all generated artefacts (logs/data/inner-git) in the
     # per-workspace home dir under ~/.cmind/workspaces/<workspace-id>/.  The
@@ -2381,10 +2376,8 @@ def _install_claude_hooks(project_path: Path) -> None:
     if settings_path.exists():
         shutil.copy2(settings_path, settings_dir / "settings.json.bak")
 
-    # The command is executed by Claude Code via ``sh -c``, so we inline
-    # the same PATH-fallback used by git hooks (see _HOOK_PATH_FALLBACK).
-    # Use ``;`` rather than ``&&`` so the cmind call always runs after
-    # the (possibly no-op) PATH adjustment.
+    # Claude executes via sh: quote the current installation's absolute entry,
+    # never resolve a bare cmind in the repository or inherited shell PATH.
     marker = "update_graphs.py"  # used for idempotent dedupe across upgrades
 
     rpg_session_entry = {
@@ -2393,8 +2386,7 @@ def _install_claude_hooks(project_path: Path) -> None:
             {
                 "type": "command",
                 "command": (
-                    f"{_HOOK_PATH_FALLBACK}; "
-                    "cmind script update_graphs.py status 2>/dev/null"
+                    f"{_cli_shell_command('script', 'update_graphs.py', 'status')} 2>/dev/null"
                     " || echo '[CoderMind] RPG status unavailable'"
                 ),
                 "timeout": 10,
@@ -2473,7 +2465,7 @@ def _read_core_hooks_path(project_path: Path) -> Optional[Path]:
     """
     try:
         result = subprocess.run(
-            ["git", "config", "--get", "core.hooksPath"],
+            [_resolve_git(project_path), "config", "--get", "core.hooksPath"],
             cwd=project_path,
             capture_output=True,
             text=True,
@@ -2687,7 +2679,7 @@ def _strip_hook_block(
 
 
 # ---------------------------------------------------------------------------
-# PATH fallback for hook bodies
+# Historical PATH fallback, retained ONLY for recognizing legacy hook bodies
 # ---------------------------------------------------------------------------
 #
 # Hooks invoke ``cmind`` (the globally-installed CLI) rather than a
@@ -2696,11 +2688,8 @@ def _strip_hook_block(
 # the process environment may not include the user's shell PATH, so
 # ``cmind`` is unresolvable and the hook silently fails.
 #
-# This snippet is prepended to every hook body.  When ``cmind`` is
-# already on PATH (terminal invocations) the test short-circuits and
-# the ``export`` is skipped — zero overhead.  When it isn't, we
-# prepend ``$HOME/.local/bin`` which is ``uv tool install``'s default
-# bin directory.
+# New hooks pin the interpreter and installed bootstrap; they do not emit this
+# snippet. Keep the exact old text so reconciliation can remove known bodies.
 _HOOK_PATH_FALLBACK = (
     'command -v cmind >/dev/null 2>&1 || '
     'export PATH="$HOME/.local/bin:$PATH"'
@@ -2818,8 +2807,7 @@ def _install_git_post_merge_hook(project_path: Path) -> bool:
     marker = "# CoderMind: post-merge dispatcher"
     body = (
         f"{marker}\n"
-        f"{_HOOK_PATH_FALLBACK}\n"
-        f"cmind hook post-merge 2>/dev/null || true"
+        f"{_cli_shell_command('hook', 'post-merge')} 2>/dev/null || true"
     )
     return _install_hook_snippet(
         hooks_dir,
@@ -2852,8 +2840,7 @@ def _install_git_post_commit_hook(project_path: Path) -> bool:
     marker = "# CoderMind: post-commit dispatcher"
     body = (
         f"{marker}\n"
-        f"{_HOOK_PATH_FALLBACK}\n"
-        f"cmind hook post-commit 2>/dev/null || true"
+        f"{_cli_shell_command('hook', 'post-commit')} 2>/dev/null || true"
     )
     return _install_hook_snippet(
         hooks_dir,
@@ -2891,15 +2878,13 @@ def _install_copilot_hooks(project_path: Path) -> None:
             # Backup is best-effort; never block installation on it.
             pass
 
+    command = _cli_argv("script", "update_graphs.py", "status")
     rpg_status_task = {
         "label": "CoderMind: load status",
-        "type": "shell",
-        # Invoke the globally-installed CLI rather than a workspace
-        # script copy (which no longer exists).  Same
-        # rationale as the git-hook bodies: portable command name,
-        # auto-tracks the installed wheel's scripts.
-        "command": "cmind",
-        "args": ["script", "update_graphs.py", "status"],
+        "type": "process",
+        # Process tasks avoid shell parsing and use this installation directly.
+        "command": command[0],
+        "args": command[1:],
         "presentation": {
             "echo": False,
             "reveal": "silent",
@@ -4578,8 +4563,8 @@ def update(
     # ``--no-upgrade`` skips this step (offline / pinned CI / freshly
     # re-installed manually).
     #
-    # After a successful upgrade we ``os.execvp`` the (now-upgraded)
-    # cmind binary so the rest of update runs against the freshly
+    # After a successful upgrade we re-enter the absolute installed CLI
+    # bootstrap so the rest of update runs against the freshly
     # installed code + assets.  Mixing old in-memory logic with new
     # on-disk core_pack/ used to cause logic vs assets drift bugs.
     #
@@ -4621,6 +4606,8 @@ def update(
             f"[cyan]Upgrading cmind-cli via {method} (source={source})...[/cyan]"
         )
         try:
+            if cmd[0] in ("uv", "pipx"):
+                cmd = [_resolve_tool(cmd[0], project_path), *cmd[1:]]
             rc = subprocess.call(cmd)  # type: ignore[arg-type]
         except FileNotFoundError:
             # Upgrade tool (uv, pipx, pip) not on PATH — surface, then
@@ -4647,16 +4634,16 @@ def update(
             # loop-guard env var so the re-exec'd process doesn't
             # immediately try to upgrade again.
             new_argv = list(sys.argv)
-            cmind_bin = shutil.which("cmind") or new_argv[0]
             console.print(
                 "[cyan]CLI upgrade complete; re-exec'ing to apply "
                 "new templates...[/cyan]"
             )
             try:
                 os.environ[_UPGRADE_DONE_ENV] = "1"
-                os.execvp(cmind_bin, [cmind_bin, *new_argv[1:]])
+                command = _cli_argv(*new_argv[1:])
+                os.execv(command[0], command)
             except OSError as exc:
-                # execvp failed — fall back to running the update
+                # execv failed — fall back to running the update
                 # in-process with the (now-on-disk) new code.  This
                 # mixes old in-memory logic with new assets, but
                 # that's strictly better than crashing here: the user
@@ -5040,7 +5027,7 @@ def _short_head_sha(workspace: Path) -> str:
     """Return ``git rev-parse --short HEAD`` for ``workspace`` or ``"?"``."""
     try:
         r = subprocess.run(
-            ["git", "-C", str(workspace), "rev-parse", "--short", "HEAD"],
+            [_resolve_git(workspace), "-C", str(workspace), "rev-parse", "--short", "HEAD"],
             capture_output=True, text=True, timeout=5,
         )
         if r.returncode == 0:
@@ -5062,7 +5049,7 @@ def _hook_run_foreground(
     try:
         with open(log_path, "a", encoding="utf-8") as fh:
             proc = subprocess.run(
-                ["cmind", "script", *script_args],
+                _cli_argv("script", *script_args),
                 cwd=str(workspace),
                 env=env,
                 stdout=fh, stderr=subprocess.STDOUT,

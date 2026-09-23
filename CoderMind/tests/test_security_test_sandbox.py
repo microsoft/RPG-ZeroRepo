@@ -19,6 +19,33 @@ _SPEC.loader.exec_module(_RUNNER)
 SandboxAudit = _RUNNER.SandboxAudit
 
 
+@pytest.mark.parametrize("form", ["explicit", "argv", "windows-command-line"])
+def test_integration_guard_accepts_external_absolute_executable(tmp_path, form):
+    sandbox = tmp_path / "sandbox"
+    sandbox.mkdir()
+    executable = tmp_path / "external tools" / "python.exe"
+    guard = _RUNNER.IntegrationAudit(sandbox)
+    if form == "explicit":
+        args = (str(executable), [], str(sandbox), {})
+    elif form == "argv":
+        args = (None, [str(executable), "--version"], str(sandbox), {})
+    else:
+        args = (None, f'"{executable}" --version', str(sandbox), {})
+    guard("subprocess.Popen", args)
+
+
+@pytest.mark.parametrize("form", ["relative", "inside-sandbox"])
+def test_integration_guard_still_rejects_unsafe_executable(tmp_path, form):
+    sandbox = tmp_path / "sandbox"
+    sandbox.mkdir()
+    guard = _RUNNER.IntegrationAudit(sandbox)
+    executable = "git" if form == "relative" else str(sandbox / "git.exe")
+    with pytest.raises(PermissionError):
+        guard("subprocess.Popen", (None, [executable], str(sandbox), {}))
+    with pytest.raises(PermissionError):
+        guard("socket.connect", ())
+
+
 @pytest.fixture
 def layout(tmp_path):
     sandbox = tmp_path / "sandbox"

@@ -53,6 +53,8 @@ import subprocess
 from pathlib import Path
 from typing import Any, Optional
 
+from .trusted_tools import resolve_git
+
 logger = logging.getLogger(__name__)
 
 
@@ -212,8 +214,9 @@ def _try_restore_from_inner_git(
     relpath = _git_relpath_for(path)
     if relpath is None:
         return None
-    from shutil import which
-    if which("git") is None:
+    try:
+        git = resolve_git(git_dir)
+    except OSError:
         return None
 
     # Force English git messages (consistent with _inner_git.py).
@@ -231,7 +234,7 @@ def _try_restore_from_inner_git(
     # working when a script ever renames data files in the future.
     try:
         log = subprocess.run(
-            ["git", "-C", str(git_dir), "log", "--follow",
+            [git, "-C", str(git_dir), "log", "--follow",
              "--format=%H", "--", relpath],
             capture_output=True, text=True, env=env, timeout=10,
         )
@@ -244,7 +247,7 @@ def _try_restore_from_inner_git(
     for commit in commits:
         try:
             show = subprocess.run(
-                ["git", "-C", str(git_dir), "show", f"{commit}:{relpath}"],
+                [git, "-C", str(git_dir), "show", f"{commit}:{relpath}"],
                 capture_output=True, text=True, env=env, timeout=10,
             )
         except (subprocess.SubprocessError, OSError):
