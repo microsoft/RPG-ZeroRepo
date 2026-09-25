@@ -110,6 +110,10 @@ def test_cpp_codegen_prompt_injects_cpp_context(monkeypatch, tmp_path: Path) -> 
 
 def test_cpp_codegen_prompt_aligns_cmake_command_with_post_verify(monkeypatch, tmp_path: Path) -> None:
     _set_language(monkeypatch, tmp_path, "cpp")
+    monkeypatch.setattr(
+        "decoder_lang.cpp_backend.shutil.which",
+        lambda name: f"/usr/bin/{name}",
+    )
     (tmp_path / "CMakeLists.txt").write_text("cmake_minimum_required(VERSION 3.16)\n")
     task = _task("src/tasklite_cli/task.cpp")
 

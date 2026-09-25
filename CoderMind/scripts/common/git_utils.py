@@ -9,6 +9,7 @@ during the code generation phase:
 - Task branch lifecycle (create / merge / abandon)
 """
 
+import hashlib
 import logging
 import re
 import subprocess
@@ -53,7 +54,13 @@ def sanitize_branch_component(
     if not safe:
         return fallback
 
-    safe = safe[:max_len].rstrip("._-")
+    if len(safe) > max_len:
+        digest = hashlib.sha256(safe.encode("utf-8")).hexdigest()[:8]
+        if max_len > len(digest) + 1:
+            prefix = safe[: max_len - len(digest) - 1].rstrip("._-")
+            safe = f"{prefix}-{digest}" if prefix else digest[:max_len]
+        else:
+            safe = digest[:max_len]
     if safe.endswith(".lock"):
         safe = safe[: -len(".lock")].rstrip("._-")
 

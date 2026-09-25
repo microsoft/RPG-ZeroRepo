@@ -354,6 +354,8 @@ def _build_args_for(stage: Stage, args: argparse.Namespace) -> list[str]:
         extra.append("--verbose")
     if args.no_trajectory:
         extra.append("--no-trajectory")
+    if args.force and stage.name == "interfaces":
+        extra.append("--force")
     return extra
 
 

@@ -30,6 +30,7 @@ if str(_SCRIPTS) not in sys.path:
 from decoder_lang import get_backend  # noqa: E402
 from func_design.interface_review import (  # noqa: E402
     _is_non_production_feature,
+    build_call_graph,
     check_call_graph_connectivity,
     check_feature_dependency_coverage,
 )
@@ -93,6 +94,50 @@ class TestIsNonProductionFeature:
 
 
 class TestFeatureCoverageExcludesTestBuild:
+    def test_qualified_method_caller_resolves_to_prefixed_unit(self):
+        data = {
+            "subtrees": {
+                "CLI": {
+                    "interfaces": {
+                        "src/cli/dispatcher.py": {
+                            "units": ["method dispatch_list"],
+                            "units_to_features": {"method dispatch_list": ["CLI/list"]},
+                        },
+                        "src/cli/presentation.py": {
+                            "units": ["function build_task_views"],
+                            "units_to_features": {
+                                "function build_task_views": ["CLI/presentation"]
+                            },
+                        },
+                    },
+                },
+            },
+        }
+        flow = {
+            "invocation_edges": [{
+                "caller": "CLIDispatcher.dispatch_list",
+                "caller_file": "src/cli/dispatcher.py",
+                "callee": "build_task_views",
+                "callee_file": "src/cli/presentation.py",
+            }],
+            "inheritance_edges": [],
+            "reference_edges": [],
+        }
+
+        outgoing, incoming, _ = build_call_graph(data, flow)
+        connectivity = check_call_graph_connectivity(
+            data,
+            flow,
+            entry_points=[],
+            is_callable=get_backend("python").is_callable_unit,
+        )
+
+        caller = "src/cli/dispatcher.py::method dispatch_list"
+        callee = "src/cli/presentation.py::function build_task_views"
+        assert outgoing[caller] == {callee}
+        assert incoming[callee] == {caller}
+        assert connectivity["orphan_units"] == []
+
     def test_test_function_not_flagged_by_category(self):
         # A callable test function with no incoming edge: previously an
         # orphan, now excluded by the Testing category (no backend needed).

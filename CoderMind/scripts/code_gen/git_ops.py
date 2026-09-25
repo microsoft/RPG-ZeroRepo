@@ -59,6 +59,7 @@ def setup_batch_branch(
     batch_id: str,
     repo_path: Path,
     reuse_existing: bool = False,
+    preserve_existing: bool = False,
 ) -> Tuple[bool, str, str]:
     """Create (or reuse) a batch branch from latest main HEAD.
 
@@ -68,6 +69,8 @@ def setup_batch_branch(
         repo_path: Repo root path.
         reuse_existing: If True and branch exists, switch to it instead of
                         deleting and recreating.
+        preserve_existing: If True and branch exists, keep it and create a
+                   uniquely suffixed recovery branch from latest main.
 
     Returns:
         (success, branch_name, initial_commit)
@@ -84,6 +87,17 @@ def setup_batch_branch(
                 return False, branch_name, ""
             initial_commit = git.get_head_commit()
             return True, branch_name, initial_commit
+        elif preserve_existing:
+            recovery_index = 1
+            recovery_name = f"{branch_name}-retry-{recovery_index}"
+            while git.branch_exists(recovery_name):
+                recovery_index += 1
+                recovery_name = f"{branch_name}-retry-{recovery_index}"
+            branch_name = recovery_name
+            logger.info(
+                "Preserving failed branch and creating recovery branch '%s'",
+                branch_name,
+            )
         else:
             logger.info("Deleting stale branch '%s' (will recreate from main)", branch_name)
             git.delete_branch(branch_name, force=True)

@@ -619,10 +619,14 @@ def run_batch(
 
     # ── Step 3: Setup git branch ─────────────────────────────────────
 
-    reuse_branch = bool(retry) or resume
+    reuse_branch = resume
     try:
         branch_ok, branch_name, initial_commit = setup_batch_branch(
-            git, batch_id, repo_path, reuse_existing=reuse_branch,
+            git,
+            batch_id,
+            repo_path,
+            reuse_existing=reuse_branch,
+            preserve_existing=bool(retry),
         )
     except RuntimeError as exc:
         return _error(f"Git setup failed: {exc}", scripts)

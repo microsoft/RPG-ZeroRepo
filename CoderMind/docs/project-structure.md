@@ -4,7 +4,7 @@
 
 CoderMind installs alongside your project code: the directory you run `cmind init` in, also called the workspace root, **is** the project repository root. There is no separate `repo/` subdirectory. This means:
 
-- `cmind init my-project` creates `my-project/` containing both your source code (`src/`, `tests/`, `docs/`) and CoderMind's in-workspace configuration files (`.cmind/config.toml`, `.claude/`, `.github/`, `.vscode/`, depending on the selected agent).
+- `cmind init my-project` creates `my-project/` containing both your source code and all Claude, Copilot, and Codex integrations. The selected `--ai` value controls the encoder/decoder backend only.
 - `cmind init --here` inside an existing git repository adds CoderMind on top of the existing code without moving the repository.
 - A single `.git` repository tracks user-owned code and any CoderMind files the user chooses to commit. **Runtime data, logs, and the inner-git snapshot repo all live outside the workspace** under `~/.cmind/workspaces/<workspace-id>/`, so generated artefacts don't pollute your repo or accidentally get committed. Only a small set of user-facing files (`.cmind/config.toml`, `.cmind/reports/*.html`) stay inside the workspace.
 
@@ -17,7 +17,7 @@ my-project/
 ├── docs/                               # Optional requirement docs for /cmind.feature_spec
 │   ├── project_charter.md              # Auto-detected when no description is provided
 │   └── ...
-├── .claude/                            # Claude Code configuration when --ai claude
+├── .claude/                            # Claude Code commands and settings
 │   ├── commands/                       # /cmind.* command definitions
 │   │   ├── cmind.feature_spec.md
 │   │   ├── cmind.feature_build.md
@@ -33,12 +33,17 @@ my-project/
 │   │   ├── cmind.encode.md
 │   │   └── cmind.update_rpg.md
 │   └── settings.json                   # Permissions and MCP auto-approval
-├── .github/                            # Copilot configuration when --ai copilot
+├── .github/                            # Copilot agents and prompts
 │   ├── agents/                         # cmind.* agent definitions
 │   └── prompts/                        # companion prompts
 ├── .vscode/                            # Copilot/VS Code configuration when applicable
 │   ├── mcp.json                        # MCP server registration
 │   └── tasks.json                      # Optional workspace tasks
+├── .agents/skills/                     # Codex project skills
+│   ├── cmind-encode/SKILL.md
+│   ├── cmind-plan/SKILL.md
+│   └── ...
+├── .codex/config.toml                  # Codex project MCP registration
 └── .cmind/
 │   ├── config.toml                     # Workspace AI / config (committed). See docs/configuration.md
 │   ├── .source                         # Provisioning channel marker: "bundle" or "legacy"
@@ -68,7 +73,8 @@ Reports (`rpg.html`, review HTML, …) stay **inside** the workspace at `<worksp
 
 > Pipeline scripts (formerly materialised into `.cmind/scripts/`) now live inside the installed `cmind-cli` wheel under `cmind_cli/core_pack/scripts/` and are invoked via the global [`cmind script <name>`](cli-reference.md) command. They are no longer copied into each workspace, so `cmind init` produces a much smaller footprint and a single source of truth per CLI install.
 
-The agent configuration directory varies by the selected AI assistant and release package. For the verified CLI path, `--ai claude` installs `.claude/commands/`, while `--ai copilot` installs `.github/agents/`, `.github/prompts/`, and `.vscode/mcp.json`.
+CoderMind always installs all verified agent integrations. `--ai` only selects
+which CLI executes encoder/decoder LLM requests.
 
 Command definitions are installed into the AI-agent-specific folder. Normal users should not need to inspect `~/.cmind/workspaces/<workspace-id>/data/` directly—run `cmind version` from the workspace to see all relevant paths.
 
@@ -79,8 +85,8 @@ Command definitions are installed into the AI-agent-specific folder. Normal user
 | Your source code | `<workspace>/` |
 | Workspace AI config | `<workspace>/.cmind/config.toml` |
 | User-facing HTML reports (`rpg.html`, …) | `<workspace>/.cmind/reports/` |
-| Agent command definitions | `<workspace>/.claude/` or `<workspace>/.github/` |
-| MCP / VS Code config | `<workspace>/.vscode/` |
+| Agent command definitions | `<workspace>/.claude/`, `.github/`, and `.agents/skills/` |
+| MCP config | `<workspace>/.mcp.json`, `.vscode/mcp.json`, and `.codex/config.toml` |
 | Git hooks (`post-commit`, `post-merge`) | `<workspace>/.git/hooks/` |
 | Generated data (`rpg.json`, `dep_graph.json`, …) | `~/.cmind/workspaces/<workspace-id>/data/` |
 | Per-stage logs | `~/.cmind/workspaces/<workspace-id>/logs/` |

@@ -283,6 +283,27 @@ def build_call_graph(
             bare_name = name_parts[1] if len(name_parts) == 2 else unit_name
             name_to_keys[bare_name].append(unit_key)
             name_to_keys[unit_name].append(unit_key)
+
+    def resolve_unit_key(name: str, file_path: str = "") -> Optional[str]:
+        exact_key = f"{file_path}::{name}" if file_path else ""
+        if exact_key in unit_to_file:
+            return exact_key
+
+        aliases = [name]
+        qualified_tail = name.rsplit(".", 1)[-1]
+        if qualified_tail != name:
+            aliases.append(qualified_tail)
+
+        candidates = []
+        for alias in aliases:
+            for key in name_to_keys.get(alias, []):
+                if key not in candidates:
+                    candidates.append(key)
+        if file_path:
+            for key in candidates:
+                if unit_to_file.get(key) == file_path:
+                    return key
+        return candidates[0] if candidates else None
     
     # Process invocation edges from enhanced_data_flow
     for edge in enhanced_data_flow.get("invocation_edges", []):
@@ -291,32 +312,8 @@ def build_call_graph(
         caller_file = edge.get("caller_file", "")
         callee_file = edge.get("callee_file", "")
         
-        # Resolve caller key
-        caller_key = f"{caller_file}::{caller}" if caller_file else None
-        if caller_key and caller_key not in unit_to_file:
-            # Try to find by name
-            candidates = name_to_keys.get(caller, [])
-            if candidates:
-                caller_key = candidates[0]
-            else:
-                caller_key = None
-        
-        # Resolve callee key
-        callee_key = None
-        if callee_file:
-            callee_key = f"{callee_file}::{callee}"
-            if callee_key not in unit_to_file:
-                # Try matching just by callee name
-                for key in name_to_keys.get(callee, []):
-                    if unit_to_file.get(key) == callee_file:
-                        callee_key = key
-                        break
-                else:
-                    candidates = name_to_keys.get(callee, [])
-                    callee_key = candidates[0] if candidates else None
-        else:
-            candidates = name_to_keys.get(callee, [])
-            callee_key = candidates[0] if candidates else None
+        caller_key = resolve_unit_key(caller, caller_file)
+        callee_key = resolve_unit_key(callee, callee_file)
         
         if caller_key and callee_key:
             outgoing[caller_key].add(callee_key)

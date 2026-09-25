@@ -14,6 +14,7 @@ Currently verified assistants:
 | ----- | ------------ | ----------------------- | ----------- |
 | GitHub Copilot | `copilot` | `.github/`, `.vscode/` | Copilot CLI available and authenticated |
 | Claude Code | `claude` | `.claude/` | Claude Code CLI available and authenticated |
+| Codex | `codex` | `.agents/skills/`, `.codex/` | Codex CLI available and authenticated |
 
 Use `cmind check` to verify required local tools.
 
@@ -21,7 +22,7 @@ Use `cmind check` to verify required local tools.
 cmind check
 ```
 
-If the selected AI assistant is not found, install and authenticate it, then rerun `cmind init` or `cmind update`.
+If the selected LLM backend is not found, install and authenticate it, then rerun `cmind init` or `cmind update`.
 
 ## Workspace Configuration (`.cmind/config.toml`)
 
@@ -66,7 +67,8 @@ The values written to `ai_cli_cmd` mirror the per-AI substitutions performed by 
 | `opencode` | `opencode run` |
 | `amp` | `amp --execute` |
 
-Only `copilot` and `claude` are currently verified end-to-end; the others are scaffolded but may need integration adjustments.
+`copilot`, `claude`, and `codex` are verified end-to-end. The remaining mappings
+are scaffolded but are not exposed as supported backends.
 
 ### Other config keys
 
@@ -79,9 +81,14 @@ The `[cmind]` table currently holds only `ai_cli_cmd`. Future releases will add 
 ```bash
 cmind init my-project --ai claude
 cmind init my-project --ai copilot
+cmind init my-project --ai codex
 ```
 
-If `--ai` is omitted in an interactive terminal, CoderMind prompts for a supported assistant.
+All three agent integrations are generated together. `--ai` chooses the default
+encoder/decoder backend. If omitted, CoderMind prompts in an interactive terminal
+and defaults to Copilot in non-interactive environments.
+
+Switch later with `cmind config set-agent <agent>`.
 
 ### Script type
 
@@ -108,6 +115,10 @@ cmind update --no-mcp
 ```
 
 Skipping MCP means the slash-command pipeline still works, but the AI assistant will not get the `rpg-tools` graph-query tools automatically.
+
+CoderMind writes project-scoped MCP entries for Claude (`.mcp.json`), Copilot
+(`.vscode/mcp.json`), and Codex (`.codex/config.toml`). Codex user configuration
+under `~/.codex/` and `CODEX_HOME` is never modified.
 
 ### Initial encode
 
@@ -172,6 +183,27 @@ For Copilot, CoderMind writes agent instructions under `.github/` and VS Code MC
 ```
 
 Open the project in VS Code after initialization so the workspace MCP configuration is available to Copilot.
+
+### Codex
+
+CoderMind renders the shared workflows as repository-scoped skills:
+
+```text
+.agents/skills/
+├── cmind-encode/SKILL.md
+├── cmind-plan/SKILL.md
+└── cmind-code-gen/SKILL.md
+.codex/config.toml              # project-scoped rpg-tools MCP registration
+```
+
+CoderMind skills are explicit-only so they do not compete with ordinary coding
+requests. In Codex CLI, type `$` to select `$cmind-encode`, `$cmind-plan`, and
+the other CoderMind skills, or use `/skills` to browse them. Explicit-only skills
+are intentionally omitted from Codex's model-visible implicit skill list until
+the user invokes one.
+
+Use `$cmind-encode`, `$cmind-plan`, and the other `$cmind-*` skills. Codex also
+discovers them through `/skills`.
 
 ## Auto-approval and Scope
 

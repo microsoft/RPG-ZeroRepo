@@ -504,6 +504,10 @@ class TestGetName:
         name = parsed_graph.get_name("src/main.py")
         assert "main" in name
 
+    def test_file_name_removes_suffix_without_truncating_stem(self, parsed_graph):
+        parsed_graph.G.add_node("src/repository.py", type=NodeType.FILE)
+        assert parsed_graph.get_name("src/repository.py") == "repository"
+
     def test_class_name(self, parsed_graph):
         name = parsed_graph.get_name("src/models.py:User")
         assert name == "User"

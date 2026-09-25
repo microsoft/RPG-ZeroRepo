@@ -1689,7 +1689,7 @@ class DependencyGraph:
             name += f" {badge_map[ntype]}"
 
         if ntype == NodeType.FILE and not for_print:
-            name = name.rstrip(".py")
+            name = name.removesuffix(".py")
 
         return name
 
