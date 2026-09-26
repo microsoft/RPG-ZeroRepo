@@ -13,6 +13,7 @@ _GRAMMAR_CANDIDATES: dict[str, tuple[tuple[str, str], ...]] = {
     "c": (("tree_sitter_c", "language"),),
     "cpp": (("tree_sitter_cpp", "language"),),
     "rust": (("tree_sitter_rust", "language"),),
+    "kotlin": (("tree_sitter_kotlin", "language"),),
 }
 
 

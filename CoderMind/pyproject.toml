@@ -24,6 +24,10 @@ dependencies = [
     "tree-sitter-c>=0.24.2",
     "tree-sitter-cpp>=0.23.4",
     "tree-sitter-rust>=0.24.2",
+    # Kotlin: the fwcd grammar is required because lang_parser/queries/kotlin
+    # is written against its node types (import_header, companion_object).
+    # Pinned until fwcd publishes PyPI wheels.
+    "tree-sitter-kotlin @ git+https://github.com/fwcd/tree-sitter-kotlin.git@1852ea17b7f60fb3f9d84e0b1555d56b46b39fb1",
     "networkx",
     "rank_bm25",
     "rapidfuzz",
