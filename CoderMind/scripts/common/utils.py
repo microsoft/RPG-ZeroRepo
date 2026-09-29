@@ -857,9 +857,6 @@ def get_skeleton(
     class _CompressTransformer(cst.CSTTransformer):
         """Replace function bodies with ``...`` while preserving structure."""
 
-        def __init__(self):
-            pass
-
         def _is_import_stmt(self, stmt: cst.CSTNode) -> bool:
             if not m.matches(stmt, m.SimpleStatementLine()):
                 return False

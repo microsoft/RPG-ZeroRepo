@@ -239,3 +239,5 @@ plans/
 .mcp.json
 .github/agents/
 .github/prompts/
+
+.claude/commands/

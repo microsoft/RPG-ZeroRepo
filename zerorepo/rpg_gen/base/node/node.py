@@ -1,11 +1,11 @@
 
 from typing import List, Optional, Dict
-from abc import abstractmethod
+from abc import ABC, abstractmethod
 import logging
 from ..unit import CodeUnit, ParsedFile
 from zerorepo.utils.file import normalize_path
 
-class RepoNode:
+class RepoNode(ABC):
     def __init__(self, name: str, path: str):
         self.name = name
         self.path = normalize_path(path)  # 相对路径

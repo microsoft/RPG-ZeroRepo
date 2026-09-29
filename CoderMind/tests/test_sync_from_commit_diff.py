@@ -129,6 +129,49 @@ def _node_edge_snapshot(g: DependencyGraph) -> Tuple[Dict[str, dict], Set[Tuple[
     return nodes, edges
 
 
+def test_git_diff_helpers_return_workspace_relative_paths_in_subdir(tmp_path):
+    from common.git_utils import (
+        changed_files_between,
+        staged_changes,
+        working_tree_changes,
+    )
+
+    git_root = tmp_path / "gitroot"
+    workspace = git_root / "subproject"
+    src = workspace / "src"
+    src.mkdir(parents=True)
+    (src / "a.py").write_text("def a():\n    return 1\n")
+
+    _sh(git_root, "init", "-q", "-b", "main")
+    _sh(git_root, "config", "user.email", "test@example.com")
+    _sh(git_root, "config", "user.name", "Test")
+    _sh(git_root, "add", ".")
+    _sh(git_root, "commit", "-q", "-m", "initial")
+    first = _head_sha(git_root)
+
+    (src / "a.py").write_text("def a():\n    return 2\n")
+    _sh(git_root, "add", ".")
+    _sh(git_root, "commit", "-q", "-m", "update a")
+    second = _head_sha(git_root)
+
+    changed, renames = changed_files_between(workspace, first, second)
+    assert changed == ["src/a.py"]
+    assert renames == {}
+
+    (src / "a.py").write_text("def a():\n    return 3\n")
+    _sh(git_root, "add", "subproject/src/a.py")
+    changed, renames = staged_changes(workspace)
+    assert changed == ["src/a.py"]
+    assert renames == {}
+
+    (src / "new.py").write_text("def new():\n    return 1\n")
+    changed, renames = working_tree_changes(workspace)
+    assert "src/a.py" in changed
+    assert "src/new.py" in changed
+    assert all(not path.startswith("subproject/") for path in changed)
+    assert renames == {}
+
+
 # ---------------------------------------------------------------------------
 # Decision tree
 # ---------------------------------------------------------------------------

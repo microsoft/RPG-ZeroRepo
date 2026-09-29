@@ -241,9 +241,16 @@ replies above before proceeding. Treat any other free-form reply as
 ### Step 5: Apply Changes (RPG-First, on a dedicated branch)
 
 All work in this step happens on a fresh `rpg-edit/<short-id>` branch
-in the project repo (workspace root), never directly on `main`.  The
-branch is merged into `main` only after Step 5e tests pass, so a
-failed run leaves `main` clean and the branch preserved for inspection.
+in the project repo (workspace root), never directly on the user's
+working branch.  The branch is merged back into `<base-branch>` — the
+branch the user was on when the command started — only after Step 5d
+tests pass, so a failed run leaves `<base-branch>` clean and the branch
+preserved for inspection.
+
+The user may be developing on any branch (a feature branch, not
+necessarily `main`).  Never assume `main`: capture the base branch in
+Step 5a and restore it on both the success and failure paths so the
+user's git environment is left exactly where they started.
 
 `<short-id>` should be derived from the plan filename or the first
 affected node id (e.g. last 8 chars of `feature_changes[0].node_id`).
@@ -259,8 +266,18 @@ test -z "$(git status --porcelain)" || {
   echo "Error: working tree has uncommitted changes. Commit or stash first."; exit 1;
 }
 
+# Capture the branch the user is currently on so we can merge back into
+# it (and restore it on failure).  Do NOT assume `main` — the user may
+# be developing on a feature branch.
+BASE_BRANCH="$(git rev-parse --abbrev-ref HEAD)"
+echo "base branch: $BASE_BRANCH"
+
 git checkout -b rpg-edit/<short-id>
 ```
+
+Remember `<base-branch>` = the captured `$BASE_BRANCH` value — every
+later step that references `<base-branch>` means this branch, not
+`main`.
 
 If the precondition fails, surface the error to the user and stop —
 do **not** silently `git stash`, as that would hide their work.
@@ -268,7 +285,7 @@ do **not** silently `git stash`, as that would hide their work.
 **Step 5b — Update RPG feature graph:**
 
 ```bash
-cmind script rpg_edit/apply.py --phase rpg-only --json
+cmind script rpg_edit/apply.py --phase rpg-only --confirmed --json
 ```
 
 This applies `feature_changes` to the RPG and saves it (reading the plan
@@ -300,7 +317,7 @@ code + dep_graph land together:
 
 ```bash
 cmind script rpg_edit/apply.py --phase dep-refresh \
-    --backup-ts <timestamp_from_5b> --json
+    --backup-ts <timestamp_from_5b> --confirmed --json
 
 git add -A && git commit --amend --no-edit
 ```
@@ -313,11 +330,20 @@ git add -A && git commit --amend --no-edit
 cmind script smoke_test.py --json
 ```
 
-1. **Impact review** — run targeted tests and verify affected functionality:
+1. **Impact review + final Explain View** — run targeted tests, verify affected functionality, and publish the final `rpg_edit` report:
 
 ```bash
-cmind script rpg_edit/review.py --json
+cmind script rpg_edit/review.py --report-scope final --json
 ```
+
+Use `--report-scope final` exactly once for the outer `rpg_edit` flow.
+It publishes the sole user-visible `CoderMind rpg_edit Explain View`;
+intermediate or nested review runs should use `--report-scope internal`
+or `--no-report` so their artifacts can be linked without publishing a
+second final report. Record `report_path` from stdout for Step 6; if it
+is absent, use `published_to`. If `report_error` is present, keep
+reviewing the JSON result but mention the report generation failure in
+Step 6.
 
 The review script reads the plan and impact JSON from their default
 home-dir locations and automatically:
@@ -325,6 +351,19 @@ home-dir locations and automatically:
 - Derives test patterns from `code_changes` in the plan
 - Runs pytest on matching test files
 - Dispatches a sub-agent to verify affected callers (if impact is large enough)
+
+The final Explain View is the canonical audit surface for `rpg_edit` and
+the reference shape for other CoderMind command reports. When polishing
+reports for other commands, preserve the shared report surfaces from this
+stage — artifact links, summary cards, workflow timeline, verification,
+retrievals, and code/graph deltas — and only replace or extend the
+command-specific evidence sections. For `rpg_edit`, it links the
+`validate`, `locate`, `plan`, `impact`, `code_result`, `apply_result`,
+and `review_result` artifacts (plus any `internal_report_*` artifacts)
+and renders a **Focused graph** from `focused_view` showing selected RPG
+feature groups, mapped dep_graph/code nodes, missing mappings, warnings,
+hidden context, and the default focus. Do NOT create or link a separate
+`focused_graph` artifact — it is now embedded in the final Explain View.
 
 Check the output `type` field:
 
@@ -339,22 +378,24 @@ If any test step fails: fix the code on the branch, re-run dep-refresh
 (Step 5c command), `git commit --amend --no-edit` to fold the
 fix into the same branch commit, then re-test.
 
-**Step 5e — Merge into `main` (only after Step 5d is green):**
+**Step 5e — Merge into `<base-branch>` (only after Step 5d is green):**
 
 ```bash
-git checkout main
+git checkout "$BASE_BRANCH"
 git merge --no-ff rpg-edit/<short-id> -m "rpg_edit: merge <short-id>"
 git branch -d rpg-edit/<short-id>
 ```
 
 `--no-ff` preserves the merge commit so the rpg_edit boundary is
-visible in `git log --graph`.
+visible in `git log --graph`.  The user is returned to `<base-branch>`
+— the same branch they started on.
 
 ### Step 6: Report Results
 
 - **Success path** (Step 5e completed):
 
-  > Merged `rpg-edit/<short-id>` into `main` (commit `<merge-SHA>`).
+  > Merged `rpg-edit/<short-id>` into `<base-branch>` (commit `<merge-SHA>`).
+  > Report: `<report_path_or_published_to>`
   > To revert later:
   > - Code:  `git revert -m 1 <merge-SHA>`
   > - Graphs: `cmind script rpg_edit/apply.py --rollback <timestamp> --json`
@@ -369,17 +410,18 @@ visible in `git log --graph`.
 
 - **Failure path** (Step 5d failed, Step 5e skipped):
 
-  Restore `main` and preserve the branch for the user to inspect:
+  Restore `<base-branch>` and preserve the branch for the user to inspect:
 
   ```bash
-  git checkout main
+  git checkout "$BASE_BRANCH"
   ```
 
   Report to the user:
 
   > Tests failed.  Branch `rpg-edit/<short-id>` preserved for inspection.
-  > `main` is clean.  Choose one of:
-  > - Inspect:  `git diff main rpg-edit/<short-id>`
+  > Report: `<report_path_or_published_to>` (if generated)
+  > `<base-branch>` is clean.  Choose one of:
+  > - Inspect:  `git diff <base-branch> rpg-edit/<short-id>`
   > - Discard code + graphs together:
   >     `cmind script rpg_edit/apply.py --rollback <timestamp> --rollback-branch rpg-edit/<short-id> --json`
   > - Discard code only:  `git branch -D rpg-edit/<short-id>`
@@ -390,6 +432,6 @@ visible in `git log --graph`.
 1. **RPG is the anchor** — all modifications start from RPG feature graph nodes, not from files.
 2. **Three-way sync** — code, RPG, and dep_graph must stay consistent after every edit.
 3. **User confirmation** — always confirm the plan before applying changes. Never auto-apply.
-4. **Branch isolation** — `main` is touched only after tests pass. Failed runs leave the work on a `rpg-edit/<id>` branch for inspection.
+4. **Branch isolation** — `<base-branch>` (the branch the user started on) is touched only after tests pass, and the user is always returned to it. Never assume `main`. Failed runs leave the work on a `rpg-edit/<id>` branch for inspection.
 5. **Coordinated rollback** — `--rollback <ts> --rollback-branch <name>` reverts RPG, dep_graph, and the dedicated branch in one step.
 6. **Independent command** — does not depend on or invoke any other `/cmind.*` command.

@@ -8,6 +8,7 @@ tests, and outputs a result JSON. Supports rollback on test failure.
 
 import argparse
 import json
+import shlex
 import shutil
 import subprocess
 import sys
@@ -21,7 +22,15 @@ SCRIPTS_DIR = Path(__file__).resolve().parent.parent
 if str(SCRIPTS_DIR) not in sys.path:
     sys.path.insert(0, str(SCRIPTS_DIR))
 
-from common.paths import REPO_RPG_FILE, DEP_GRAPH_FILE, REPO_DIR, RPG_EDIT_PLAN_FILE  # noqa: E402
+from common.paths import (  # noqa: E402
+    REPO_RPG_FILE,
+    DEP_GRAPH_FILE,
+    REPO_DIR,
+    RPG_EDIT_PLAN_FILE,
+    RPG_EDIT_APPLY_RESULT_FILE,
+    cmd_for,
+)
+from common.git_utils import read_head  # noqa: E402
 
 
 def _backup(rpg_path: Path, dep_graph_path: Path, ts: str) -> Dict[str, str]:
@@ -48,6 +57,77 @@ def _rollback(backups: Dict[str, str], rpg_path: Path, dep_graph_path: Path) -> 
         shutil.copy2(backups["rpg"], rpg_path)
     if "dep_graph" in backups:
         shutil.copy2(backups["dep_graph"], dep_graph_path)
+
+
+def _is_rpg_edit_branch(branch: Any) -> bool:
+    return isinstance(branch, str) and branch.startswith("rpg-edit/")
+
+
+def _rollback_command(timestamp: str | None, before_state: dict | None) -> str | None:
+    if not timestamp:
+        return None
+    command = f"{cmd_for('rpg_edit/apply.py')} --rollback {shlex.quote(str(timestamp))}"
+    branch = before_state.get("head_branch") if isinstance(before_state, dict) else None
+    if _is_rpg_edit_branch(branch):
+        command += f" --rollback-branch {shlex.quote(str(branch))}"
+    return command
+
+
+def _rollback_path(backups: Dict[str, str]) -> str | None:
+    return backups.get("rpg") or backups.get("dep_graph")
+
+
+def _persist_apply_result(result: Dict[str, Any]) -> None:
+    RPG_EDIT_APPLY_RESULT_FILE.parent.mkdir(parents=True, exist_ok=True)
+    RPG_EDIT_APPLY_RESULT_FILE.write_text(
+        json.dumps(result, indent=2, ensure_ascii=False),
+        encoding="utf-8",
+    )
+
+
+def _record_apply_result(
+    result: Dict[str, Any],
+    *,
+    backup_timestamp: str | None = None,
+    backups: Dict[str, str] | None = None,
+    applied_features: list | None = None,
+    dep_graph_refreshed: bool | None = None,
+    before_state: dict | None = None,
+    confirmed: bool | None = None,
+) -> Dict[str, Any]:
+    backups = backups or {}
+    preserved: Dict[str, Any] = {}
+    if backup_timestamp is not None and RPG_EDIT_APPLY_RESULT_FILE.exists():
+        try:
+            previous = json.loads(RPG_EDIT_APPLY_RESULT_FILE.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            previous = {}
+        if isinstance(previous, dict) and str(previous.get("backup_timestamp")) == str(backup_timestamp):
+            preserved = previous
+    for key in ("applied_features", "backups", "confirmed", "before_state", "rollback_command", "rollback_path"):
+        previous_value = preserved.get(key)
+        if previous_value in (None, "", [], {}):
+            continue
+        if result.get(key) in (None, "", [], {}):
+            result[key] = previous_value
+    if not backups and isinstance(result.get("backups"), dict):
+        backups = result["backups"]
+    if backup_timestamp is not None:
+        result.setdefault("backup_timestamp", backup_timestamp)
+        result.setdefault("rollback_command", _rollback_command(backup_timestamp, before_state))
+    result.setdefault("backups", backups)
+    result.setdefault("applied_features", applied_features or [])
+    if dep_graph_refreshed is not None:
+        result.setdefault("dep_graph_refreshed", dep_graph_refreshed)
+    rollback_path = _rollback_path(backups)
+    if rollback_path:
+        result.setdefault("rollback_path", rollback_path)
+    if before_state is not None:
+        result.setdefault("before_state", before_state)
+    if confirmed is not None:
+        result.setdefault("confirmed", confirmed)
+    _persist_apply_result(result)
+    return result
 
 
 def apply_feature_changes(svc, changes: list) -> list:
@@ -128,6 +208,8 @@ def main():
     parser.add_argument("--backup-ts", type=str, default=None,
                         help="Reuse existing backup timestamp (skip new backup)")
     parser.add_argument("--skip-tests", action="store_true")
+    parser.add_argument("--confirmed", action="store_const", const=True, default=None,
+                        help="Record that the apply boundary was explicitly confirmed")
     parser.add_argument("--rollback", type=str, default=None,
                         help="Rollback to a previous timestamp backup")
     parser.add_argument("--rollback-branch", type=str, default=None,
@@ -144,6 +226,8 @@ def main():
     # Capture log records for post-mortem inspection of rpg_edit issues.
     from common.logging_setup import setup_file_logging
     setup_file_logging("rpg_edit")
+
+    before_state = read_head(REPO_DIR)
 
     # Handle rollback
     if args.rollback:
@@ -180,10 +264,23 @@ def main():
                     "message": f"git invocation failed: {exc}",
                 }
 
+        rollback_backups = {}
+        if rpg_backup.exists():
+            rollback_backups["rpg"] = str(rpg_backup)
+        if dg_backup.exists():
+            rollback_backups["dep_graph"] = str(dg_backup)
         result = {"type": "rollback", "restored": restored,
                   "timestamp": args.rollback}
         if branch_result:
             result["branch"] = branch_result
+        _record_apply_result(
+            result,
+            backup_timestamp=args.rollback,
+            backups=rollback_backups,
+            dep_graph_refreshed=False,
+            before_state=before_state,
+            confirmed=args.confirmed,
+        )
         print(json.dumps(result, indent=2) if args.json else
               f"Rolled back: {restored}" +
               (f"; branch={branch_result}" if branch_result else ""))
@@ -192,6 +289,12 @@ def main():
     # Load plan
     if not args.plan.exists():
         result = {"type": "error", "message": f"Plan not found: {args.plan}"}
+        _record_apply_result(
+            result,
+            dep_graph_refreshed=False,
+            before_state=before_state,
+            confirmed=args.confirmed,
+        )
         print(json.dumps(result) if args.json else f"Error: {result['message']}")
         return 1
 
@@ -214,6 +317,7 @@ def main():
 
     # --- Phase: rpg-only or all → apply feature_changes ---
     applied_features = []
+    dep_graph_refreshed = False
     if args.phase in ("rpg-only", "all"):
         feature_changes = plan.get("feature_changes", [])
         applied_features = apply_feature_changes(svc, feature_changes) if feature_changes else []
@@ -226,12 +330,20 @@ def main():
                 "backup_timestamp": ts,
                 "backups": backups,
             }
+            _record_apply_result(
+                result,
+                backup_timestamp=ts,
+                backups=backups,
+                applied_features=applied_features,
+                dep_graph_refreshed=dep_graph_refreshed,
+                before_state=before_state,
+                confirmed=args.confirmed,
+            )
             print(json.dumps(result, indent=2) if args.json else
                   f"RPG updated ({len(applied_features)} features). Backup: {ts}")
             return 0
 
     # --- Phase: dep-refresh or all → refresh dep_graph ---
-    dep_graph_refreshed = False
     if args.phase in ("dep-refresh", "all"):
         # Workspace root is the project repo root.  Explicit ``--repo``
         # still wins for tests / brownfield setups where the code lives
@@ -252,6 +364,15 @@ def main():
                     "message": f"dep_graph refresh failed: {exc}",
                     "backup_timestamp": ts,
                 }
+                _record_apply_result(
+                    result,
+                    backup_timestamp=ts,
+                    backups=backups,
+                    applied_features=applied_features,
+                    dep_graph_refreshed=dep_graph_refreshed,
+                    before_state=before_state,
+                    confirmed=args.confirmed,
+                )
                 print(json.dumps(result, indent=2) if args.json else
                       f"Error: {result['message']}")
                 return 1
@@ -264,6 +385,15 @@ def main():
                 "dep_graph_refreshed": dep_graph_refreshed,
                 "backup_timestamp": ts,
             }
+            _record_apply_result(
+                result,
+                backup_timestamp=ts,
+                backups=backups,
+                applied_features=applied_features,
+                dep_graph_refreshed=dep_graph_refreshed,
+                before_state=before_state,
+                confirmed=args.confirmed,
+            )
             print(json.dumps(result, indent=2) if args.json else
                   f"dep_graph refreshed: {dep_graph_refreshed}. Backup: {ts}")
             return 0
@@ -293,9 +423,19 @@ def main():
                     "type": "test_failed",
                     "applied_features": applied_features,
                     "test_output": test_result["output"],
+                    "test_result": test_result,
                     "rolled_back": True,
                     "backup_timestamp": ts,
                 }
+                _record_apply_result(
+                    result,
+                    backup_timestamp=ts,
+                    backups=backups,
+                    applied_features=applied_features,
+                    dep_graph_refreshed=dep_graph_refreshed,
+                    before_state=before_state,
+                    confirmed=args.confirmed,
+                )
                 print(json.dumps(result, indent=2) if args.json else
                       f"Tests failed. Rolled back to {ts}.")
                 return 1
@@ -309,6 +449,15 @@ def main():
         "backup_timestamp": ts,
         "backups": backups,
     }
+    _record_apply_result(
+        result,
+        backup_timestamp=ts,
+        backups=backups,
+        applied_features=applied_features,
+        dep_graph_refreshed=dep_graph_refreshed,
+        before_state=before_state,
+        confirmed=args.confirmed,
+    )
     print(json.dumps(result, indent=2) if args.json else "EditPlan applied successfully.")
     return 0
 

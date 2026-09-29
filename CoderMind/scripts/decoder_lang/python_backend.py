@@ -14,6 +14,7 @@ from __future__ import annotations
 import ast
 import keyword
 import logging
+import sys
 from pathlib import Path
 from typing import Any
 
@@ -22,7 +23,7 @@ from .file_deps import FileDependencyEdge, resolved_python_edges
 from .prompt_hints import PromptHints
 from .project_tasks import ProjectTaskContext, ProjectTaskTemplates
 from .unit_kind import classify_unit_kind
-from .test_result import EnvHandle, TestRunResult
+from .test_result import EnvHandle, TestFailure, TestRunResult, ran_no_tests
 
 logger = logging.getLogger(__name__)
 
@@ -419,23 +420,34 @@ class PythonBackend:
             return ""
 
     # ------------------------------------------------------------------
-    # 3. Build / test environment — not wired into the decoder yet
+    # 3. Build / test environment
     # ------------------------------------------------------------------
 
     def detect_env(self, repo_root: Path) -> EnvHandle | None:
-        """Return an existing Python test environment when supported."""
-        raise NotImplementedError(
-            "PythonBackend.detect_env is not wired into the decoder; "
-            "callers should keep using code_gen.test_runner.get_dev_python "
-            "for now.",
+        """Return the existing managed Python test environment, if present."""
+        from code_gen.test_runner import get_dev_python, get_dev_venv_path
+
+        root = repo_root.resolve()
+        py = get_dev_python(root)
+        if py is None:
+            return None
+        return EnvHandle(
+            project_root=root,
+            runtime_executable=py,
+            extra={"venv": str(get_dev_venv_path(root))},
         )
 
     def ensure_env(self, repo_root: Path) -> EnvHandle:
-        """Always available on a host that's already running Python
-        (the decoder itself), so this never raises
-        :class:`ToolchainUnavailable` once implemented."""
-        raise NotImplementedError(
-            "PythonBackend.ensure_env is not wired into the decoder.",
+        """Create or reuse the managed Python test environment."""
+        from code_gen.test_runner import ensure_dev_venv, get_dev_python, get_dev_venv_path
+
+        root = repo_root.resolve()
+        ensure_dev_venv(root)
+        py = get_dev_python(root) or sys.executable
+        return EnvHandle(
+            project_root=root,
+            runtime_executable=py,
+            extra={"venv": str(get_dev_venv_path(root))},
         )
 
     def test_command(
@@ -443,33 +455,77 @@ class PythonBackend:
         env: EnvHandle,
         selectors: list[str] | None = None,
     ) -> list[str]:
-        """Return the command used to run Python tests when supported."""
-        raise NotImplementedError(
-            "PythonBackend.test_command is not wired into the decoder; "
-            "callers should keep using code_gen.batch_prompts."
-            "build_batch_pytest_cmd for now.",
-        )
+        """Return the pytest command for a Python environment."""
+        python = env.runtime_executable or sys.executable
+        cmd = [python, "-m", "pytest"]
+        if selectors:
+            cmd.extend(["-k", " or ".join(selectors)])
+        return cmd
 
     def install_deps_command(
         self,
         env: EnvHandle,
         deps: list[str],
     ) -> list[str] | None:
-        """Return a dependency-install command when supported."""
-        raise NotImplementedError(
-            "PythonBackend.install_deps_command is not wired into the decoder.",
-        )
+        """Return a pip/uv install command for missing Python deps."""
+        if not deps:
+            return None
+        from code_gen.test_runner import _build_pip_cmd
+
+        return _build_pip_cmd(deps, env.project_root)
 
     # ------------------------------------------------------------------
-    # 4. Test-output parsing — not wired into the decoder yet
+    # 4. Test-output parsing
     # ------------------------------------------------------------------
 
     def parse_test_output(self, raw: str, exit_code: int) -> TestRunResult:
-        """Parse native Python test output when backend-driven tests run."""
-        raise NotImplementedError(
-            "PythonBackend.parse_test_output is not wired into the decoder; "
-            "callers should keep using code_gen.test_output_parser."
-            "analyze_test_output for now.",
+        """Parse pytest output into the backend-neutral result shape."""
+        from code_gen.test_output_parser import analyze_test_output
+
+        analysis = analyze_test_output(raw)
+        observed = analysis.passed + analysis.failed + analysis.errors
+        failures: list[TestFailure] = []
+        if (analysis.failed or analysis.errors) and analysis.failure_lines:
+            test_id = analysis.failing_test_files[0] if analysis.failing_test_files else "pytest"
+            failures.append(TestFailure(
+                test_id=test_id,
+                short_message=analysis.failure_lines.splitlines()[0],
+                long_message=analysis.failure_lines,
+                file_path=analysis.failing_test_files[0] if analysis.failing_test_files else None,
+            ))
+
+        if ran_no_tests(exit_code, raw, observed_tests=observed or None):
+            status = "errored"
+            error_count = analysis.errors or 1
+        elif exit_code == 0:
+            status = "passed"
+            error_count = analysis.errors
+        else:
+            status = "failed"
+            error_count = analysis.errors
+
+        return TestRunResult(
+            status=status,
+            exit_code=exit_code,
+            passed_count=analysis.passed,
+            failed_count=analysis.failed,
+            error_count=error_count,
+            skipped_count=analysis.skipped,
+            duration_sec=analysis.duration,
+            failures=failures,
+            raw_output=raw,
+            extra={
+                "tool": "pytest",
+                "failure_type": analysis.failure_type,
+                "env_sub_type": analysis.env_sub_type,
+                "env_fix_target": analysis.env_fix_target,
+                "env_instruction": analysis.env_instruction,
+                "env_details": analysis.env_details,
+                "missing_names": analysis.missing_names,
+                "missing_modules": analysis.missing_modules,
+                "failing_test_files": analysis.failing_test_files,
+                "has_tests_run": analysis.has_tests_run,
+            },
         )
 
     # ------------------------------------------------------------------

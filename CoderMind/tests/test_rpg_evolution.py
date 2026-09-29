@@ -745,7 +745,7 @@ class TestRPGEvolutionProcessDiff:
                      return_value=diff_result,
                  ):
 
-                RPGEvolution.process_diff(
+                updated_rpg = RPGEvolution.process_diff(
                     repo_name="test",
                     repo_info="Test repo",
                     save_path=save_path,
@@ -756,6 +756,13 @@ class TestRPGEvolutionProcessDiff:
                     update_dep_graph=False,
                 )
 
+                assert updated_rpg._last_diff_summary == {
+                    "added": 0,
+                    "deleted": 1,
+                    "modified": 0,
+                    "renamed": 0,
+                }
+                assert updated_rpg._last_diff_files["deleted"] == ["src/module_a.py"]
                 assert os.path.isfile(save_path)
                 with open(save_path, "r") as f:
                     data = json.load(f)

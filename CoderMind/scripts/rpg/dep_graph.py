@@ -214,6 +214,7 @@ class DependencyGraph:
     _DERIVED_FIELDS = frozenset({
         "imports_from", "calls", "called_by",
         "inherits", "inherited_by",
+        "rpg_nodes",
     })
 
     # ------------------------------------------------------------------

@@ -30,8 +30,24 @@ Inspect the `type` field in the output:
 
 **If type is "error"**:
 
-* Display the error message and stop. The RPG file may be corrupted.
-* Suggest deleting the invalid file and re-running `/cmind.encode`.
+* Display the error message and the `rpg_file` path. Explain that the
+  existing RPG file appears corrupted and blocks encoding.
+* Ask the user whether to delete the damaged RPG file and run a full encode now:
+
+  ```text
+  The RPG file appears to be corrupted:
+    <rpg_file>
+
+  Delete this file and run a full /cmind.encode now?
+  - Y: Delete <rpg_file> and run full encode
+  - N: Quit without deleting anything
+  ```
+
+* If user chooses **Y**: delete exactly the returned `rpg_file` path with
+  `rm -- "<rpg_file>"`, then proceed to Step 2 in this same command run.
+  Do not delete directories, globs, or any other candidate RPG paths.
+* If user chooses **N**: terminate without deleting anything.
+* If deletion fails: display the deletion error and stop.
 
 **If type is "init"**:
 

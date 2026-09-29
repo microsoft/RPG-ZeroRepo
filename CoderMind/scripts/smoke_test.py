@@ -160,7 +160,13 @@ def _find_source_files(repo_path: Path) -> List[Path]:
 def _run_in_repo(repo_path: Path, cmd: List[str], timeout: int = 30) -> subprocess.CompletedProcess:
     """Run a command in the repo directory with the dev venv."""
     env = os.environ.copy()
-    env["PYTHONPATH"] = str(repo_path)
+    python_path = [str(repo_path)]
+    scripts_dir = repo_path / "scripts"
+    if scripts_dir.is_dir():
+        python_path.append(str(scripts_dir))
+    if env.get("PYTHONPATH"):
+        python_path.append(env["PYTHONPATH"])
+    env["PYTHONPATH"] = os.pathsep.join(python_path)
     # Suppress interactive prompts
     env["PYTHONDONTWRITEBYTECODE"] = "1"
     return subprocess.run(

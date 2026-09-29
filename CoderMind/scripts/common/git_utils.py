@@ -85,12 +85,12 @@ class GitRunner:
     def __init__(
         self,
         repo_path: str,
-        main_branch: str = "main",
+        main_branch: str = MAIN_BRANCH,
         logger: Optional[logging.Logger] = None
     ):
         self.repo_path = Path(repo_path)
         self.logger = logger or logging.getLogger(__name__)
-        self.main_branch = self.MAIN_BRANCH
+        self.main_branch = main_branch
 
         # Ensure repo exists and is a git repo
         self._ensure_git_repository()
@@ -149,7 +149,7 @@ class GitRunner:
         if not git_dir.exists():
             self.logger.info("Initializing git repository...")
             self.repo_path.mkdir(parents=True, exist_ok=True)
-            self.run_git(["init", "-b", self.MAIN_BRANCH])
+            self.run_git(["init", "-b", self.main_branch])
 
         # Configure safe directory
         self.run_git([
@@ -391,11 +391,11 @@ class GitRunner:
         to_commit: str = "HEAD"
     ) -> str:
         """Get diff between commits.
-        
+
         Args:
             from_commit: Start commit (default: parent of to_commit)
             to_commit: End commit (default: HEAD)
-            
+
         Returns:
             Diff content as string
         """
@@ -403,9 +403,24 @@ class GitRunner:
             result = self.run_git(["diff", from_commit, to_commit])
         else:
             result = self.run_git(["diff", f"{to_commit}^", to_commit])
-        
+
         return result.stdout if result.success else ""
-    
+
+    def get_file_diffs(
+        self,
+        from_commit: Optional[str] = None,
+        to_commit: str = "HEAD",
+        files: Optional[List[str]] = None,
+    ) -> List[Dict[str, str]]:
+        """Get per-file diff rows between commits."""
+        return file_diffs_between(
+            self.repo_path,
+            from_commit,
+            to_commit,
+            files=files,
+            py_only=False,
+        )
+
     def get_changed_files(
         self,
         from_commit: Optional[str] = None,
@@ -565,6 +580,34 @@ def read_head(repo_dir: str | Path) -> Optional[dict]:
     }
 
 
+def git_workspace_prefix(workspace_dir: str | Path) -> str:
+    """Return the path from the git root to ``workspace_dir``.
+
+    Returns ``""`` when ``workspace_dir`` is the git root or when git metadata
+    cannot be read. This keeps callers safe outside git repositories.
+    """
+    if not workspace_dir:
+        return ""
+    workspace_path = Path(workspace_dir)
+    if not workspace_path.is_dir():
+        return ""
+
+    git_root = _run_git_readonly(
+        ["rev-parse", "--show-toplevel"],
+        workspace_path,
+    )
+    if not git_root:
+        return ""
+
+    try:
+        rel = workspace_path.resolve().relative_to(Path(git_root).resolve())
+    except ValueError:
+        return ""
+
+    rel_str = rel.as_posix()
+    return "" if rel_str == "." else rel_str
+
+
 # ---------------------------------------------------------------------------
 # Diff helpers — produce ``(modified, renames)`` from various git scopes.
 # ---------------------------------------------------------------------------
@@ -587,6 +630,52 @@ _GIT_STATUS_DELETED = "D"
 _GIT_STATUS_MODIFIED = "M"
 _GIT_STATUS_RENAME_PREFIX = "R"  # may be followed by similarity score: "R98"
 _GIT_STATUS_COPY_PREFIX = "C"
+
+
+def _parse_name_status_rows(
+    raw: Optional[str],
+    *,
+    py_only: bool = True,
+) -> List[Dict[str, str]]:
+    rows: List[Dict[str, str]] = []
+    if not raw:
+        return rows
+
+    def _keep(p: str) -> bool:
+        return (not py_only) or p.endswith(".py")
+
+    for line in raw.splitlines():
+        parts = line.split("\t")
+        if len(parts) < 2:
+            continue
+        status = parts[0]
+        if status.startswith(_GIT_STATUS_RENAME_PREFIX) or status.startswith(
+            _GIT_STATUS_COPY_PREFIX
+        ):
+            if len(parts) < 3:
+                continue
+            old_path, new_path = parts[1], parts[2]
+            if _keep(new_path) or _keep(old_path):
+                rows.append({
+                    "file": new_path,
+                    "change_type": "rename" if status.startswith(_GIT_STATUS_RENAME_PREFIX) else "copy",
+                    "old_file": old_path,
+                    "status": status,
+                })
+            continue
+        path = parts[1]
+        if not _keep(path):
+            continue
+        if status == _GIT_STATUS_ADDED:
+            change_type = "add"
+        elif status == _GIT_STATUS_DELETED:
+            change_type = "delete"
+        elif status == _GIT_STATUS_MODIFIED:
+            change_type = "modify"
+        else:
+            continue
+        rows.append({"file": path, "change_type": change_type, "status": status})
+    return rows
 
 
 def _parse_name_status(
@@ -616,38 +705,74 @@ def _parse_name_status(
     if not raw:
         return modified, renames
 
-    def _keep(p: str) -> bool:
-        return (not py_only) or p.endswith(".py")
-
-    for line in raw.splitlines():
-        parts = line.split("\t")
-        if len(parts) < 2:
-            continue
-        status = parts[0]
-        if status.startswith(_GIT_STATUS_RENAME_PREFIX) or status.startswith(
-            _GIT_STATUS_COPY_PREFIX
-        ):
-            if len(parts) < 3:
+    for row in _parse_name_status_rows(raw, py_only=py_only):
+        path = row.get("file", "")
+        if row.get("change_type") in ("rename", "copy"):
+            old_path = row.get("old_file", "")
+            if old_path and path:
+                renames[old_path] = path
+            if py_only and not path.endswith(".py"):
                 continue
-            old_path, new_path = parts[1], parts[2]
-            if _keep(new_path) or _keep(old_path):
-                renames[old_path] = new_path
-                # update_files() treats the OLD path as a deletion (via
-                # ``renames``) and the NEW path as something it must
-                # reparse — so we surface the new path through the
-                # modified list as well.
-                if _keep(new_path):
-                    modified.append(new_path)
-            continue
-        path = parts[1]
-        if not _keep(path):
-            continue
-        if status in (_GIT_STATUS_ADDED, _GIT_STATUS_DELETED, _GIT_STATUS_MODIFIED):
+        if path:
             modified.append(path)
-        # Type / unmerged / other status letters → ignore (caller will
-        # fall back to full sync via the safety threshold if there are
-        # many of them).
     return modified, renames
+
+
+def _diff_range_args(
+    from_commit: Optional[str] = None,
+    to_commit: str = "HEAD",
+) -> List[str]:
+    if from_commit:
+        return [from_commit, to_commit]
+    return [f"{to_commit}^", to_commit]
+
+
+def file_diffs_between(
+    repo_dir: str | Path,
+    from_commit: Optional[str] = None,
+    to_commit: str = "HEAD",
+    *,
+    files: Optional[List[str]] = None,
+    py_only: bool = False,
+) -> List[Dict[str, str]]:
+    """Return per-file diff rows without mutating git state."""
+    if not repo_dir:
+        return []
+    repo_path = Path(repo_dir)
+    if not repo_path.is_dir():
+        return []
+
+    range_args = _diff_range_args(from_commit, to_commit)
+    raw_status = _run_git_readonly(
+        ["diff", "--relative", "--name-status", "-M", *range_args],
+        repo_path,
+    )
+    rows = _parse_name_status_rows(raw_status, py_only=py_only)
+    if not rows:
+        return []
+
+    selected = {str(path) for path in files or [] if path}
+    diff_rows: List[Dict[str, str]] = []
+    for row in rows:
+        file_path = row.get("file", "")
+        old_file = row.get("old_file", "")
+        if selected and file_path not in selected and old_file not in selected:
+            continue
+        pathspecs = [path for path in [old_file, file_path] if path]
+        raw_diff = _run_git_readonly(
+            ["diff", *range_args, "--", *pathspecs],
+            repo_path,
+            timeout=10.0,
+        )
+        diff_row = {
+            "file": file_path,
+            "change_type": row.get("change_type", "modify"),
+            "diff": raw_diff or "",
+        }
+        if old_file:
+            diff_row["old_file"] = old_file
+        diff_rows.append(diff_row)
+    return diff_rows
 
 
 def staged_changes(
@@ -669,14 +794,14 @@ def staged_changes(
     if not repo_path.is_dir():
         return [], {}
     raw = _run_git_readonly(
-        ["diff", "--cached", "--name-status", "-M", "HEAD"],
+        ["diff", "--cached", "--relative", "--name-status", "-M", "HEAD"],
         repo_path,
     )
     if raw is None:
         # ``HEAD`` may not exist yet (unborn branch); try without it so
         # the very first commit's staged files still get picked up.
         raw = _run_git_readonly(
-            ["diff", "--cached", "--name-status", "-M"],
+            ["diff", "--cached", "--relative", "--name-status", "-M"],
             repo_path,
         )
     return _parse_name_status(raw)
@@ -706,7 +831,7 @@ def working_tree_changes(
         return [], {}
 
     raw = _run_git_readonly(
-        ["diff", "--name-status", "-M", "HEAD"],
+        ["diff", "--relative", "--name-status", "-M", "HEAD"],
         repo_path,
     )
     modified, renames = _parse_name_status(raw)
@@ -749,7 +874,7 @@ def changed_files_between(
     if not repo_path.is_dir():
         return [], {}
     raw = _run_git_readonly(
-        ["diff", "--name-status", "-M", f"{old_ref}..{new_ref}"],
+        ["diff", "--relative", "--name-status", "-M", f"{old_ref}..{new_ref}"],
         repo_path,
     )
     return _parse_name_status(raw)

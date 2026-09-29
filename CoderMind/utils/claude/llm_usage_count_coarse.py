@@ -22,11 +22,21 @@ from pathlib import Path
 from typing import Dict, List, Optional
 
 # Import from the detailed counter
-from llm_usage_count import (
-    parse_file,
-    FileSummary,
-    _match_pricing,
-)
+if __package__:
+    from .llm_usage_count import (
+        parse_file,
+        FileSummary,
+        _match_pricing,
+    )
+else:
+    module_dir = str(Path(__file__).resolve().parent)
+    if module_dir not in sys.path:
+        sys.path.insert(0, module_dir)
+    from llm_usage_count import (
+        parse_file,
+        FileSummary,
+        _match_pricing,
+    )
 
 
 # ── Stage definitions ─────────────────────────────────────────────────────────

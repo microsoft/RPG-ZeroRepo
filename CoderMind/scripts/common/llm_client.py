@@ -479,8 +479,8 @@ class LLMClient:
                         self.logger.warning(error)
                         
                 except subprocess.TimeoutExpired:
-                    error = f"LLM call timed out after {timeout}s"
-                    self.logger.warning(f"LLM call timed out (attempt {attempt + 1})")
+                    error = f"AI CLI subprocess timed out after {timeout}s"
+                    self.logger.warning(f"AI CLI subprocess timed out (attempt {attempt + 1})")
                 except Exception as e:
                     error = str(e)
                     self.logger.warning(f"LLM call error: {e}")
@@ -525,8 +525,8 @@ class LLMClient:
                 self.logger.warning(f"Failed to record LLM interaction completion: {e}")
         
         if not response:
-            raise RuntimeError(f"Failed to get response from LLM after {max_retries} retries: {error}")
-        
+            raise RuntimeError(f"AI CLI did not return a response after {max_retries} attempts: {error}")
+
         return response
     
     def generate_with_record(

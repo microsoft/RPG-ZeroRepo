@@ -758,6 +758,18 @@ class RPGEvolution:
                     save_path=dep_graph_save_path,
                 )
 
+            last_rpg._last_diff_summary = {
+                "added": 0,
+                "deleted": 0,
+                "modified": 0,
+                "renamed": 0,
+            }
+            last_rpg._last_diff_files = {
+                "added": [],
+                "deleted": [],
+                "modified": [],
+                "renamed": [],
+            }
             total_time = time.time() - global_start
             logger.info(
                 "\nNo changes detected for [%s]. RPG remains unchanged.\n"
@@ -795,6 +807,20 @@ class RPGEvolution:
                 save_path=dep_graph_save_path,
             )
 
+        diff_summary = {
+            "added": len(add_files),
+            "deleted": len(deleted_files),
+            "modified": len(modified_result),
+            "renamed": 0,
+        }
+        ctx["last_rpg"]._last_diff_summary = diff_summary
+        ctx["last_rpg"]._last_diff_files = {
+            "added": add_files,
+            "deleted": deleted_files,
+            "modified": list(modified_result.keys()),
+            "renamed": [],
+        }
+
         # Save results
         result = {
             "repo_name": repo_name,
@@ -804,11 +830,7 @@ class RPGEvolution:
                 "structure": ctx["last_rpg"].to_dict(),
                 "feature_tree": ctx["last_rpg"].get_functionality_graph(),
             },
-            "diff_summary": {
-                "added": len(add_files),
-                "deleted": len(deleted_files),
-                "modified": len(modified_result),
-            },
+            "diff_summary": diff_summary,
         }
 
         if save_path:
