@@ -178,3 +178,9 @@ Runtime logs are written under `~/.cmind/workspaces/<workspace-id>/logs/`, for e
 Execution traces are written under `~/.cmind/workspaces/<workspace-id>/data/trajectory/`. Review or diagnostic artifacts may be written under `<workspace>/.cmind/reports/` when a command generates them.
 
 To discover the home-side paths (data / logs / inner-git) for the current workspace, run `cmind version` from anywhere inside it—the relevant lines are labelled **Workspace**, **Data**, **Logs**, and **Inner git**.
+
+## Repository CI Configuration
+
+In the CoderMind source repository, remote actions in [GitHub workflows](../../.github/workflows/) are pinned to full-length commit SHAs with version comments, rather than mutable tags. When updating an action manually, verify the upstream release commit and update both the SHA and its version comment. Local reusable workflow references stay relative to the repository.
+
+[Dependabot](../../.github/dependabot.yml) checks GitHub Actions weekly, groups their updates, and applies a seven-day cooldown before proposing newly released versions. The pins and cooldown reduce supply-chain risk; they do not replace reviewing action updates.
