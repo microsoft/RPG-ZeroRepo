@@ -19,7 +19,7 @@ import json
 import logging
 from collections import defaultdict
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple, Union
 
 from common.rpg_io import safe_load_rpg
 
@@ -135,14 +135,17 @@ class GraphQueryEngine:
     # Helpers
     # ------------------------------------------------------------------
 
-    def _normalize_path(self, meta_path: str) -> str:
+    def _normalize_path(self, meta_path: Union[str, List[str]]) -> Union[str, List[str]]:
         """Strip redundant code_dir prefix from RPG meta.path.
 
         For legacy data where ``_dep_graph_code_dir`` was ``"repo"``,
         this converts e.g. ``repo/routes/auth.py`` to ``routes/auth.py``
         so it aligns with dep_graph node IDs.  In the unified
         workspace==repo layout the prefix is empty and this is a no-op.
+        A list path, as stored for a multi-file group, is normalised per entry.
         """
+        if isinstance(meta_path, list):
+            return [self._normalize_path(entry) for entry in meta_path]
         if self._code_dir_prefix and meta_path.startswith(self._code_dir_prefix):
             return meta_path[len(self._code_dir_prefix):]
         return meta_path
@@ -306,8 +309,8 @@ class GraphQueryEngine:
             elif query in name.lower():
                 score = 75
             else:
-                file_part = meta_path.split(":")[0] if ":" in meta_path else meta_path
-                if query in file_part.lower():
+                paths = meta_path if isinstance(meta_path, list) else [meta_path]
+                if any(query in path.split(":")[0].lower() for path in paths):
                     score = 60
                 elif query in nid.lower():
                     score = 55
