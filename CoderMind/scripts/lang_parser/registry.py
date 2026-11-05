@@ -4,7 +4,16 @@ import fnmatch
 from pathlib import PurePosixPath
 
 from .base import BaseLanguageParser
-from .config import C_CONFIG, CPP_CONFIG, GO_CONFIG, JAVASCRIPT_CONFIG, PYTHON_CONFIG, RUST_CONFIG, TYPESCRIPT_CONFIG
+from .config import (
+    C_CONFIG,
+    CPP_CONFIG,
+    GO_CONFIG,
+    JAVASCRIPT_CONFIG,
+    KOTLIN_CONFIG,
+    PYTHON_CONFIG,
+    RUST_CONFIG,
+    TYPESCRIPT_CONFIG,
+)
 from .models import LanguageConfig, LPFileResult, NotSupported
 
 _CONFIGS: dict[str, LanguageConfig] = {
@@ -15,6 +24,7 @@ _CONFIGS: dict[str, LanguageConfig] = {
     C_CONFIG.name: C_CONFIG,
     CPP_CONFIG.name: CPP_CONFIG,
     RUST_CONFIG.name: RUST_CONFIG,
+    KOTLIN_CONFIG.name: KOTLIN_CONFIG,
 }
 _PARSERS: dict[str, BaseLanguageParser] = {}
 
@@ -98,6 +108,10 @@ def get_parser(language: str) -> BaseLanguageParser:
             from .rust_parser import RustParser
 
             _PARSERS[key] = RustParser()
+        elif key == "kotlin":
+            from .kotlin_parser import KotlinParser
+
+            _PARSERS[key] = KotlinParser()
         else:
             raise NotSupported(f"Unsupported language: {language}")
     return _PARSERS[key]
