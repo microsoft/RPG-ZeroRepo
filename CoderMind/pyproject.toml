@@ -37,6 +37,11 @@ dependencies = [
     "pyyaml>=6.0"
 ]
 
+[project.optional-dependencies]
+# Maintained Claude prices for utils/claude/llm_usage_count.py; the script
+# falls back to its built-in table without it.
+pricing = ["llm-prices>=1.7.2,<2"]
+
 [project.scripts]
 cmind = "cmind_cli:main"
 cmind-mcp = "cmind_cli.entries:mcp_main"
