@@ -29,15 +29,23 @@ Cost multipliers (vs base input price):
 """
 
 import json
+import re
 import sys
 import argparse
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import List, Optional, Dict
 
+try:
+    # Optional: maintained, dated Anthropic price table (pip install llm-prices).
+    import llm_prices
+except ImportError:
+    llm_prices = None
+
 
 # ── Pricing tables ($ per million tokens) ────────────────────────────────────
 
+# Fallback used when llm-prices is not installed or does not know the model.
 PRICING = {
     # model_prefix: (base_input, cache_write_5m, cache_write_1h, cache_read, output)
     "claude-opus-4-6":   (5.0,   6.25,  10.0,  0.50,  25.0),
@@ -59,17 +67,40 @@ PRICING = {
 }
 
 
+def _library_pricing(model: str):
+    """Pricing tuple from llm-prices, or None if it is not installed or has no row."""
+    if llm_prices is None:
+        return None
+    row = llm_prices.lookup_provider("anthropic", model)
+    if row is None:
+        return None
+    base_in = row.input
+    cache_write = row.cache_write or {}
+    return (
+        base_in,
+        cache_write.get("5m", base_in * 1.25),
+        cache_write.get("1h", base_in * 2.0),
+        row.cache_read if row.cache_read is not None else base_in * 0.10,
+        row.output,
+    )
+
+
 def _match_pricing(model: str):
     """Find the best matching pricing entry for a model string."""
     if not model:
         return None
+    library = _library_pricing(model)
+    if library:
+        return library
     m = model.lower()
     # Try exact match first
     if m in PRICING:
         return PRICING[m]
-    # Try prefix match (handles dated variants like claude-opus-4-5-20251101)
+    # Try prefix match for dated variants like claude-opus-4-5-20251101.
+    # Only a date may follow the key, so claude-opus-4-7 does not fall
+    # through to the claude-opus-4 price.
     for key in sorted(PRICING.keys(), key=len, reverse=True):
-        if m.startswith(key):
+        if m.startswith(key) and re.fullmatch(r"-\d{8}", m[len(key):]):
             return PRICING[key]
     return None
 
